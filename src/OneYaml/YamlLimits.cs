@@ -1,0 +1,89 @@
+using System;
+namespace OneYaml;
+
+/// <summary>
+/// Resource limits for reading YAML. Exceeding one throws a <see cref="YamlException"/> with
+/// category <see cref="YamlErrorCategory.Limit"/>.
+/// </summary>
+public sealed record YamlLimits
+{
+    /// <summary>The limits used when none are given. Generous enough for real-world files.</summary>
+    public static YamlLimits Default { get; } = new();
+
+    /// <summary>Tighter limits for input from an untrusted source.</summary>
+    public static YamlLimits Untrusted { get; } = new()
+    {
+        MaxDepth = 128,
+        MaxInputBytes = 64L * 1024 * 1024,
+        MaxScalarBytes = 16 * 1024 * 1024,
+        MaxDocuments = 10_000,
+        AliasNodeFactor = 2,
+        AliasNodeFloor = 100_000,
+        AliasByteFactor = 2,
+        AliasByteFloor = 8L * 1024 * 1024,
+    };
+
+    /// <summary>No limits at all. Only for input that is fully trusted.</summary>
+    public static YamlLimits None { get; } = new()
+    {
+        MaxDepth = int.MaxValue,
+        MaxInputBytes = long.MaxValue,
+        MaxScalarBytes = int.MaxValue,
+        MaxDocuments = int.MaxValue,
+        AliasNodeFactor = long.MaxValue,
+        AliasNodeFloor = long.MaxValue,
+        AliasByteFactor = long.MaxValue,
+        AliasByteFloor = long.MaxValue,
+    };
+
+    /// <summary>The deepest nesting of collections allowed.</summary>
+    public int MaxDepth { get; init; } = 1_000;
+
+    /// <summary>The largest input, in bytes of UTF-8 text.</summary>
+    public long MaxInputBytes { get; init; } = long.MaxValue;
+
+    /// <summary>The largest scalar, in bytes of its source text.</summary>
+    public int MaxScalarBytes { get; init; } = int.MaxValue;
+
+    /// <summary>The most documents one stream may hold.</summary>
+    public int MaxDocuments { get; init; } = int.MaxValue;
+
+    /// <summary>
+    /// Alias expansion budget in nodes: this many times the document's own node count, but at least
+    /// <see cref="AliasNodeFloor"/>. Applied by the code that follows aliases.
+    /// </summary>
+    public long AliasNodeFactor { get; init; } = 10;
+
+    /// <summary>The smallest alias expansion budget in nodes.</summary>
+    public long AliasNodeFloor { get; init; } = 1_000_000;
+
+    /// <summary>
+    /// Alias expansion budget in bytes: this many times the input size, but at least
+    /// <see cref="AliasByteFloor"/>. Applied by the code that follows aliases.
+    /// </summary>
+    public long AliasByteFactor { get; init; } = 10;
+
+    /// <summary>The smallest alias expansion budget in bytes.</summary>
+    public long AliasByteFloor { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>The number of nodes alias expansion may produce for a document with the given node count.</summary>
+    /// <param name="ownNodes">The number of nodes in the document itself.</param>
+    /// <returns>The budget, never less than <see cref="AliasNodeFloor"/>.</returns>
+    public long AliasNodeBudget(long ownNodes) => Budget(ownNodes, AliasNodeFactor, AliasNodeFloor);
+
+    /// <summary>The number of bytes alias expansion may produce for an input of the given size.</summary>
+    /// <param name="inputBytes">The size of the input in bytes.</param>
+    /// <returns>The budget, never less than <see cref="AliasByteFloor"/>.</returns>
+    public long AliasByteBudget(long inputBytes) => Budget(inputBytes, AliasByteFactor, AliasByteFloor);
+
+    private static long Budget(long own, long factor, long floor)
+    {
+        if (factor == long.MaxValue || floor == long.MaxValue)
+        {
+            return long.MaxValue;
+        }
+
+        long scaled = own > long.MaxValue / Math.Max(factor, 1) ? long.MaxValue : own * factor;
+        return Math.Max(scaled, floor);
+    }
+}

@@ -20,6 +20,27 @@
           "System.Management": "9.0.5"
         }
       },
+      "SharpYaml": {
+        "type": "Direct",
+        "requested": "[3.14.0, )",
+        "resolved": "3.14.0",
+        "contentHash": "eN001LFxNI1nLHZTVhoLyA5iWDYkxSln56ACGvCWT9yBbPaWBo/YuKxTVkHqogbs15xiQb+AF8ICIrDvWEpWuA=="
+      },
+      "VYaml": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "v4ctHU8cBZ8ypZae9TsFvcpoB4+ZE99aNmrcZjQDYGXO0POv8GlRPv9LQjYd5X4/8dBcvVKoQpipKNyoGL6qbg==",
+        "dependencies": {
+          "VYaml.Annotations": "1.4.0"
+        }
+      },
+      "YamlDotNet": {
+        "type": "Direct",
+        "requested": "[18.1.0, )",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
+      },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
         "resolved": "0.15.8",
@@ -166,6 +187,11 @@
         "resolved": "4.7.0",
         "contentHash": "VybpaOQQhqE6siHppMktjfGBw1GCwvCqiufqmP8F1nj7fTUNtW35LOEt3UZTEsECfo+ELAl/9o9nJx3U91i7vA=="
       },
+      "VYaml.Annotations": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "WZVmlXih0wYPGIb8HS+01nQLlkFZw9syPzTfKYFUQj6/63AZ1IvHAie/myDO7MHVtALBh135j3u/B2j8izOv4Q=="
+      },
       "oneyaml": {
         "type": "Project"
       }
@@ -188,6 +214,30 @@
           "Perfolizer": "[0.6.1]",
           "System.Management": "9.0.5"
         }
+      },
+      "SharpYaml": {
+        "type": "Direct",
+        "requested": "[3.14.0, )",
+        "resolved": "3.14.0",
+        "contentHash": "eN001LFxNI1nLHZTVhoLyA5iWDYkxSln56ACGvCWT9yBbPaWBo/YuKxTVkHqogbs15xiQb+AF8ICIrDvWEpWuA==",
+        "dependencies": {
+          "System.Collections.Immutable": "9.0.0"
+        }
+      },
+      "VYaml": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "v4ctHU8cBZ8ypZae9TsFvcpoB4+ZE99aNmrcZjQDYGXO0POv8GlRPv9LQjYd5X4/8dBcvVKoQpipKNyoGL6qbg==",
+        "dependencies": {
+          "VYaml.Annotations": "1.4.0"
+        }
+      },
+      "YamlDotNet": {
+        "type": "Direct",
+        "requested": "[18.1.0, )",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
       },
       "BenchmarkDotNet.Annotations": {
         "type": "Transitive",
@@ -345,6 +395,11 @@
         "dependencies": {
           "System.Collections.Immutable": "9.0.0"
         }
+      },
+      "VYaml.Annotations": {
+        "type": "Transitive",
+        "resolved": "1.4.0",
+        "contentHash": "WZVmlXih0wYPGIb8HS+01nQLlkFZw9syPzTfKYFUQj6/63AZ1IvHAie/myDO7MHVtALBh135j3u/B2j8izOv4Q=="
       },
       "oneyaml": {
         "type": "Project"

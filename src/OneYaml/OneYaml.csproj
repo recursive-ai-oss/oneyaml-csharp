@@ -31,6 +31,7 @@
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
     <InternalsVisibleTo Include="OneYaml.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />
+    <InternalsVisibleTo Include="OneYaml.Fuzz" />
   </ItemGroup>
 
 </Project>

@@ -6,4 +6,10 @@
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
+  <!-- Competitor parsers, used by the benchmarks only. -->
+  <ItemGroup>
+    <PackageVersion Include="VYaml" Version="1.4.0" />
+    <PackageVersion Include="SharpYaml" Version="3.14.0" />
+    <PackageVersion Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
 </Project>

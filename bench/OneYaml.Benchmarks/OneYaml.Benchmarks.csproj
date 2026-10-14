@@ -11,6 +11,12 @@
     <PackageReference Include="BenchmarkDotNet" />
   </ItemGroup>
 
+  <ItemGroup Label="Competitors">
+    <PackageReference Include="VYaml" />
+    <PackageReference Include="SharpYaml" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
   </ItemGroup>
