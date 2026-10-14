@@ -1,0 +1,1058 @@
+using System;
+using System.Buffers;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace OneYaml.Parsing;
+
+/// <summary>
+/// A pull reader over validated UTF-8 YAML text. It produces events without building a tree,
+/// allocates nothing per event, and keeps every position as a byte offset into the source.
+/// Scalar text stays in the source until a consumer asks for its value.
+/// </summary>
+[StructLayout(LayoutKind.Auto)]
+internal ref partial struct YamlReader
+{
+    private enum State : byte
+    {
+        StreamStart,
+        DocumentStart,
+        DocumentContent,
+        DocumentEnd,
+        BlockNode,
+        BlockSequenceFirstEntry,
+        BlockSequenceEntry,
+        IndentlessSequenceEntry,
+        BlockMappingFirstKey,
+        BlockMappingKey,
+        BlockMappingValue,
+        FlowSequenceFirstEntry,
+        FlowSequenceEntry,
+        FlowSequenceEntryMappingKey,
+        FlowSequenceEntryMappingValue,
+        FlowSequenceEntryMappingEnd,
+        FlowMappingFirstKey,
+        FlowMappingKey,
+        FlowMappingValue,
+        FlowMappingEmptyValue,
+        End,
+    }
+
+    private const int MaxTagDirectives = 64;
+
+    private readonly ReadOnlySpan<byte> _src;
+    private readonly YamlLimits _limits;
+    private readonly bool _recordComments;
+
+    // Parser state.
+    private State _state;
+    private State[] _states;
+    private int _stateCount;
+    private int _depth;
+    private int _documents;
+    private bool _afterExplicitEnd;
+    private int[]? _tagDirectives;
+    private int _tagDirectiveCount;
+
+    // Pending node properties while a node event is being built.
+    private int _anchorStart;
+    private int _anchorLength;
+    private int _tagStart;
+    private int _tagLength;
+    private int _tagHandleLength;
+    private bool _tagVerbatim;
+    private int _tagSuffixStart;
+    private int _tagSuffixEnd;
+    private int _tagPrefix;
+
+    // Scalar details of the current event.
+    private int _contentStart;
+    private int _contentEnd;
+    private bool _escapedOrFolded;
+    private int _blockIndent;
+    private Chomping _chomping;
+
+    /// <summary>Creates a reader over validated UTF-8 text with the default options.</summary>
+    /// <param name="utf8">The text, without a byte order mark. It must already be validated UTF-8.</param>
+    public YamlReader(ReadOnlySpan<byte> utf8)
+        : this(utf8, default)
+    {
+    }
+
+    /// <summary>Creates a reader over validated UTF-8 text.</summary>
+    /// <param name="utf8">The text, without a byte order mark. It must already be validated UTF-8.</param>
+    /// <param name="options">Reader options.</param>
+    public YamlReader(ReadOnlySpan<byte> utf8, YamlReaderOptions options)
+    {
+        _src = utf8;
+        _limits = options.Limits ?? YamlLimits.Default;
+        _recordComments = options.RecordComments;
+        _states = ArrayPool<State>.Shared.Rent(32);
+        _indents = ArrayPool<int>.Shared.Rent(32);
+        _keys = ArrayPool<SimpleKey>.Shared.Rent(16);
+        _queue = ArrayPool<Token>.Shared.Rent(64);
+        _flowKinds = ArrayPool<byte>.Shared.Rent(32);
+        _comments = null;
+        _afterExplicitEnd = true;
+        _indent = -1;
+        if (utf8.Length > _limits.MaxInputBytes)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+    }
+
+    /// <summary>The kind of the current event.</summary>
+    public YamlTokenType TokenType { get; private set; }
+
+    /// <summary>The style of the current scalar.</summary>
+    public ScalarStyle ScalarStyle { get; private set; }
+
+    /// <summary>The style of the current collection.</summary>
+    public CollectionStyle CollectionStyle { get; private set; }
+
+    /// <summary>For a document start or end: whether the marker (<c>---</c> or <c>...</c>) is absent.</summary>
+    public bool IsImplicit { get; private set; }
+
+    /// <summary>The major number of the document's <c>%YAML</c> directive, or 0 when it has none.</summary>
+    public int VersionMajor { get; private set; }
+
+    /// <summary>The minor number of the document's <c>%YAML</c> directive.</summary>
+    public int VersionMinor { get; private set; }
+
+    /// <summary>The byte offset where the current event's own text starts.</summary>
+    public int Start { get; private set; }
+
+    /// <summary>The byte offset just after the current event's own text.</summary>
+    public int End { get; private set; }
+
+    /// <summary>
+    /// The nesting level of the current node: 0 for a document's root, and one more inside each
+    /// open collection. Start and end events of one collection report the same level.
+    /// </summary>
+    public int Depth { get; private set; }
+
+    /// <summary>The anchor name of the current node (or the target name of an alias), without the indicator.</summary>
+    public readonly ReadOnlySpan<byte> Anchor => _src.Slice(_anchorStart, _anchorLength);
+
+    /// <summary>Whether the current node has an anchor, or the event is an alias.</summary>
+    public readonly bool HasAnchor => _anchorLength != 0;
+
+    /// <summary>The offset of the anchor or alias name, just after its <c>&amp;</c> or <c>*</c> indicator.</summary>
+    public readonly int AnchorStart => _anchorStart;
+
+    /// <summary>The tag exactly as written, for example <c>!!str</c>, <c>!local</c> or <c>!&lt;verbatim&gt;</c>.</summary>
+    public readonly ReadOnlySpan<byte> RawTag => _src.Slice(_tagStart, _tagLength);
+
+    /// <summary>Whether the current node has a tag.</summary>
+    public readonly bool HasTag => _tagLength != 0;
+
+    /// <summary>The offset where the raw tag starts.</summary>
+    public readonly int TagStart => _tagStart;
+
+    /// <summary>The scalar's source text without quotes or block header, before any unescaping or folding.</summary>
+    public readonly ReadOnlySpan<byte> RawScalar => _src.Slice(_contentStart, _contentEnd - _contentStart);
+
+    /// <summary>
+    /// Whether the scalar's value differs from <see cref="RawScalar"/>: it has escapes, folded line
+    /// breaks or doubled quotes. When false the raw span is the value.
+    /// </summary>
+    public readonly bool ValueIsEscapedOrFolded => _escapedOrFolded;
+
+    /// <summary>The number of comments recorded so far (zero unless comments are recorded).</summary>
+    public readonly int CommentCount => _commentCount / 2;
+
+    /// <summary>The offsets of a recorded comment, from its <c>#</c> to the end of the line.</summary>
+    /// <param name="index">The comment index, in source order.</param>
+    /// <returns>The start and end offsets.</returns>
+    public readonly (int Start, int End) GetComment(int index) => (_comments![index * 2], _comments[(index * 2) + 1]);
+
+    /// <summary>Returns pooled buffers. Call it when the reader is no longer used.</summary>
+    public void Dispose()
+    {
+        Return(ref _states);
+        Return(ref _indents);
+        Return(ref _keys);
+        Return(ref _queue);
+        Return(ref _flowKinds);
+        if (_comments is not null)
+        {
+            ArrayPool<int>.Shared.Return(_comments);
+            _comments = null;
+        }
+
+        if (_tagDirectives is not null)
+        {
+            ArrayPool<int>.Shared.Return(_tagDirectives);
+            _tagDirectives = null;
+        }
+
+        _state = State.End;
+    }
+
+    private static void Return<T>(ref T[] array)
+    {
+        T[] a = array;
+        array = [];
+        if (a.Length != 0)
+        {
+            ArrayPool<T>.Shared.Return(a);
+        }
+    }
+
+    /// <summary>Moves to the next event.</summary>
+    /// <returns><see langword="false"/> after the last event.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML or exceeds a limit.</exception>
+    public bool Read()
+    {
+        if (_state == State.End)
+        {
+            TokenType = YamlTokenType.None;
+            return false;
+        }
+
+        _anchorLength = 0;
+        _tagLength = 0;
+        _escapedOrFolded = false;
+        _contentStart = _contentEnd = 0;
+        IsImplicit = false;
+        VersionMajor = VersionMinor = 0;
+        try
+        {
+            ParseEvent();
+        }
+        catch (YamlException ex) when (_deferred is not null && !ReferenceEquals(ex, _deferred) && ex.Offset >= _deferredFrom)
+        {
+            // The scanner read ahead and found the real problem; the parser tripped over its effect.
+            throw _deferred;
+        }
+
+        return true;
+    }
+
+    /// <summary>The tag resolved against the document's <c>%TAG</c> directives, or null when there is no tag.</summary>
+    /// <returns>The full tag, or <c>!</c> for the non-specific tag.</returns>
+    public readonly string? GetResolvedTag()
+    {
+        if (_tagLength == 0)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<byte> suffix = _src[_tagSuffixStart.._tagSuffixEnd];
+        if (_tagVerbatim)
+        {
+            return DecodePercent(default, suffix);
+        }
+
+        ReadOnlySpan<byte> prefix;
+        if (_tagPrefix == -2)
+        {
+            prefix = "tag:yaml.org,2002:"u8;
+        }
+        else if (_tagPrefix == -1)
+        {
+            prefix = "!"u8;
+        }
+        else
+        {
+            int ps = _tagDirectives![(_tagPrefix * 4) + 2];
+            int pe = _tagDirectives[(_tagPrefix * 4) + 3];
+            prefix = _src[ps..pe];
+        }
+
+        return DecodePercent(prefix, suffix);
+    }
+
+    private static string DecodePercent(ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
+    {
+        byte[] buffer = new byte[prefix.Length + suffix.Length];
+        prefix.CopyTo(buffer);
+        int n = prefix.Length;
+        for (int i = 0; i < suffix.Length; i++)
+        {
+            byte b = suffix[i];
+            if (b == (byte)'%' && i + 2 < suffix.Length && ((HexValue(suffix[i + 1]) << 4) | HexValue(suffix[i + 2])) < 0x80)
+            {
+                // Only an escaped ASCII character is expanded; a UTF-8 sequence stays as written.
+                buffer[n++] = (byte)((HexValue(suffix[i + 1]) << 4) | HexValue(suffix[i + 2]));
+                i += 2;
+            }
+            else
+            {
+                buffer[n++] = b;
+            }
+        }
+
+        return Encoding.UTF8.GetString(buffer, 0, n);
+    }
+
+    private static int HexValue(byte b) => b <= '9' ? b - '0' : (b | 0x20) - 'a' + 10;
+
+    private readonly YamlException Error(string message, int offset)
+        => YamlException.At(YamlErrorCategory.Syntax, message, _src, offset);
+
+    private readonly YamlException LimitError(string message, int offset)
+        => YamlException.At(YamlErrorCategory.Limit, message, _src, offset);
+
+    private void PushState(State s)
+    {
+        if (_stateCount == _states.Length)
+        {
+            Grow(ref _states, _stateCount);
+        }
+
+        _states[_stateCount++] = s;
+    }
+
+    private State PopState() => _states[--_stateCount];
+
+    private static void Grow<T>(ref T[] array, int count)
+    {
+        T[] bigger = ArrayPool<T>.Shared.Rent(Math.Max(array.Length * 2, 16));
+        Array.Copy(array, bigger, count);
+        ArrayPool<T>.Shared.Return(array);
+        array = bigger;
+    }
+
+    // ---- Events ----
+
+    private void ParseEvent()
+    {
+        switch (_state)
+        {
+            case State.StreamStart:
+                PeekKind();
+                SkipToken();
+                TokenType = YamlTokenType.StreamStart;
+                Start = End = 0;
+                Depth = 0;
+                _state = State.DocumentStart;
+                break;
+            case State.DocumentStart:
+                ParseDocumentStart();
+                break;
+            case State.DocumentContent:
+                ParseDocumentContent();
+                break;
+            case State.DocumentEnd:
+                ParseDocumentEnd();
+                break;
+            case State.BlockNode:
+                ParseNode(block: true, indentless: false);
+                break;
+            case State.BlockSequenceFirstEntry:
+                ParseBlockSequenceEntry(first: true);
+                break;
+            case State.BlockSequenceEntry:
+                ParseBlockSequenceEntry(first: false);
+                break;
+            case State.IndentlessSequenceEntry:
+                ParseIndentlessSequenceEntry();
+                break;
+            case State.BlockMappingFirstKey:
+                ParseBlockMappingKey(first: true);
+                break;
+            case State.BlockMappingKey:
+                ParseBlockMappingKey(first: false);
+                break;
+            case State.BlockMappingValue:
+                ParseBlockMappingValue();
+                break;
+            case State.FlowSequenceFirstEntry:
+                ParseFlowSequenceEntry(first: true);
+                break;
+            case State.FlowSequenceEntry:
+                ParseFlowSequenceEntry(first: false);
+                break;
+            case State.FlowSequenceEntryMappingKey:
+                ParseFlowSequenceEntryMappingKey();
+                break;
+            case State.FlowSequenceEntryMappingValue:
+                ParseFlowSequenceEntryMappingValue();
+                break;
+            case State.FlowSequenceEntryMappingEnd:
+                _state = State.FlowSequenceEntry;
+                PeekKind();
+                EmitCollectionEnd(YamlTokenType.MappingEnd, _tok.Start, _tok.Start, CollectionStyle.Flow);
+                break;
+            case State.FlowMappingFirstKey:
+                ParseFlowMappingKey(first: true);
+                break;
+            case State.FlowMappingKey:
+                ParseFlowMappingKey(first: false);
+                break;
+            case State.FlowMappingValue:
+                ParseFlowMappingValue(empty: false);
+                break;
+            case State.FlowMappingEmptyValue:
+                ParseFlowMappingValue(empty: true);
+                break;
+            default:
+                throw new InvalidOperationException("The reader is in an invalid state.");
+        }
+    }
+
+    private void ParseDocumentStart()
+    {
+        TokenKind kind = PeekKind();
+        while (kind == TokenKind.DocumentEnd)
+        {
+            SkipToken();
+            _afterExplicitEnd = true;
+            kind = PeekKind();
+        }
+
+        if (kind == TokenKind.StreamEnd)
+        {
+            TokenType = YamlTokenType.StreamEnd;
+            Start = End = _tok.Start;
+            Depth = 0;
+            SkipToken();
+            _state = State.End;
+            return;
+        }
+
+        if (++_documents > _limits.MaxDocuments)
+        {
+            throw LimitError("The stream has more documents than the configured limit.", _tok.Start);
+        }
+
+        if (kind is TokenKind.VersionDirective or TokenKind.TagDirective or TokenKind.ReservedDirective)
+        {
+            if (!_afterExplicitEnd)
+            {
+                throw Error("A directive needs a document end marker before it.", _tok.Start);
+            }
+
+            ProcessDirectives(out int major, out int minor);
+            if (PeekKind() != TokenKind.DocumentStart)
+            {
+                throw Error("A directive must be followed by a document start marker.", _tok.Start);
+            }
+
+            TokenType = YamlTokenType.DocumentStart;
+            Start = _tok.Start;
+            End = _tok.End;
+            VersionMajor = major;
+            VersionMinor = minor;
+            SkipToken();
+            EnterDocument(implicitStart: false);
+            return;
+        }
+
+        _tagDirectiveCount = 0;
+        if (kind == TokenKind.DocumentStart)
+        {
+            TokenType = YamlTokenType.DocumentStart;
+            Start = _tok.Start;
+            End = _tok.End;
+            SkipToken();
+            EnterDocument(implicitStart: false);
+            return;
+        }
+
+        if (!_afterExplicitEnd)
+        {
+            throw Error("Expected a document start marker.", _tok.Start);
+        }
+
+        TokenType = YamlTokenType.DocumentStart;
+        Start = End = _tok.Start;
+        IsImplicit = true;
+        PushState(State.DocumentEnd);
+        _state = State.BlockNode;
+        _afterExplicitEnd = false;
+        Depth = 0;
+    }
+
+    private void EnterDocument(bool implicitStart)
+    {
+        IsImplicit = implicitStart;
+        PushState(State.DocumentEnd);
+        _state = State.DocumentContent;
+        _afterExplicitEnd = false;
+        Depth = 0;
+    }
+
+    private void ParseDocumentContent()
+    {
+        TokenKind kind = PeekKind();
+        if (kind is TokenKind.VersionDirective or TokenKind.TagDirective or TokenKind.ReservedDirective)
+        {
+            throw Error("A directive must come before the document start marker.", _tok.Start);
+        }
+
+        if (kind is TokenKind.DocumentStart or TokenKind.DocumentEnd or TokenKind.StreamEnd)
+        {
+            _state = PopState();
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        ParseNode(block: true, indentless: false);
+    }
+
+    private void ParseDocumentEnd()
+    {
+        TokenKind kind = PeekKind();
+        TokenType = YamlTokenType.DocumentEnd;
+        Depth = 0;
+        if (kind == TokenKind.DocumentEnd)
+        {
+            Start = _tok.Start;
+            End = _tok.End;
+            SkipToken();
+            _afterExplicitEnd = true;
+        }
+        else if (kind is TokenKind.DocumentStart or TokenKind.StreamEnd)
+        {
+            Start = End = _tok.Start;
+            IsImplicit = true;
+        }
+        else
+        {
+            // The document is still open: only a marker or the end of the stream can end it.
+            throw Error("Expected the end of the document.", _tok.Start);
+        }
+
+        _state = State.DocumentStart;
+    }
+
+    private void ProcessDirectives(out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+        _tagDirectiveCount = 0;
+        bool haveVersion = false;
+        while (true)
+        {
+            TokenKind kind = PeekKind();
+            if (kind == TokenKind.VersionDirective)
+            {
+                if (haveVersion)
+                {
+                    throw Error("A document has more than one %YAML directive.", _tok.Start);
+                }
+
+                if (_tok.X != 1)
+                {
+                    throw Error("Only YAML version 1 is supported.", _tok.Start);
+                }
+
+                haveVersion = true;
+                major = _tok.X;
+                minor = _tok.Y;
+                SkipToken();
+            }
+            else if (kind == TokenKind.TagDirective)
+            {
+                AddTagDirective();
+                SkipToken();
+            }
+            else if (kind == TokenKind.ReservedDirective)
+            {
+                SkipToken();
+            }
+            else
+            {
+                return;
+            }
+        }
+    }
+
+    private void AddTagDirective()
+    {
+        ReadOnlySpan<byte> handle = _src[_tok.ContentStart.._tok.ContentEnd];
+        _tagDirectives ??= ArrayPool<int>.Shared.Rent(MaxTagDirectives * 4);
+        for (int i = 0; i < _tagDirectiveCount; i++)
+        {
+            ReadOnlySpan<byte> other = _src[_tagDirectives[i * 4]..(_tagDirectives[i * 4] + _tagDirectives[(i * 4) + 1])];
+            if (other.SequenceEqual(handle))
+            {
+                throw Error("A tag handle is declared twice.", _tok.Start);
+            }
+        }
+
+        if (_tagDirectiveCount == MaxTagDirectives)
+        {
+            throw LimitError("A document declares too many tag handles.", _tok.Start);
+        }
+
+        int at = _tagDirectiveCount++ * 4;
+        _tagDirectives[at] = _tok.ContentStart;
+        _tagDirectives[at + 1] = _tok.ContentEnd - _tok.ContentStart;
+        _tagDirectives[at + 2] = _tok.X;
+        _tagDirectives[at + 3] = _tok.Y;
+    }
+
+    private void ParseNode(bool block, bool indentless)
+    {
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.Alias)
+        {
+            TokenType = YamlTokenType.Alias;
+            Start = _tok.Start;
+            End = _tok.End;
+            _anchorStart = _tok.Start;
+            _anchorLength = _tok.ContentEnd - _tok.ContentStart;
+            _anchorStart = _tok.ContentStart;
+            Depth = _depth;
+            SkipToken();
+            _state = PopState();
+            return;
+        }
+
+        int propsStart = -1;
+        if (kind == TokenKind.Anchor)
+        {
+            propsStart = _tok.Start;
+            TakeAnchor();
+            kind = PeekKind();
+            if (kind == TokenKind.Tag)
+            {
+                TakeTag();
+                kind = PeekKind();
+            }
+        }
+        else if (kind == TokenKind.Tag)
+        {
+            propsStart = _tok.Start;
+            TakeTag();
+            kind = PeekKind();
+            if (kind == TokenKind.Anchor)
+            {
+                TakeAnchor();
+                kind = PeekKind();
+            }
+        }
+
+        if (indentless && kind == TokenKind.BlockEntry)
+        {
+            EmitCollectionStart(YamlTokenType.SequenceStart, _tok.Start, _tok.Start, CollectionStyle.Block);
+            _state = State.IndentlessSequenceEntry;
+            return;
+        }
+
+        switch (kind)
+        {
+            case TokenKind.Scalar:
+                EmitScalar(in _tok);
+                SkipToken();
+                _state = PopState();
+                return;
+            case TokenKind.FlowSequenceStart:
+                EmitCollectionStart(YamlTokenType.SequenceStart, _tok.Start, _tok.End, CollectionStyle.Flow);
+                _state = State.FlowSequenceFirstEntry;
+                return;
+            case TokenKind.FlowMappingStart:
+                EmitCollectionStart(YamlTokenType.MappingStart, _tok.Start, _tok.End, CollectionStyle.Flow);
+                _state = State.FlowMappingFirstKey;
+                return;
+            case TokenKind.BlockSequenceStart when block:
+                EmitCollectionStart(YamlTokenType.SequenceStart, _tok.Start, _tok.Start, CollectionStyle.Block);
+                _state = State.BlockSequenceFirstEntry;
+                return;
+            case TokenKind.BlockMappingStart when block:
+                EmitCollectionStart(YamlTokenType.MappingStart, _tok.Start, _tok.Start, CollectionStyle.Block);
+                _state = State.BlockMappingFirstKey;
+                return;
+        }
+
+        if (propsStart >= 0)
+        {
+            _state = PopState();
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        throw Error("Expected a node but found something else.", _tok.Start);
+    }
+
+    private void TakeAnchor()
+    {
+        _anchorStart = _tok.ContentStart;
+        _anchorLength = _tok.ContentEnd - _tok.ContentStart;
+        SkipToken();
+        PeekKind();
+    }
+
+    private void TakeTag()
+    {
+        _tagStart = _tok.Start;
+        _tagLength = _tok.End - _tok.Start;
+        _tagHandleLength = _tok.X;
+        _tagVerbatim = (_tok.Flags & 1) != 0;
+        _tagSuffixStart = _tok.ContentStart;
+        _tagSuffixEnd = _tok.ContentEnd;
+        if (!_tagVerbatim)
+        {
+            ReadOnlySpan<byte> handle = _src.Slice(_tagStart, _tagHandleLength);
+            int found = -3;
+            for (int i = 0; i < _tagDirectiveCount; i++)
+            {
+                int hs = _tagDirectives![i * 4];
+                if (_src.Slice(hs, _tagDirectives[(i * 4) + 1]).SequenceEqual(handle))
+                {
+                    found = i;
+                    break;
+                }
+            }
+
+            if (found == -3)
+            {
+                if (handle.Length == 1)
+                {
+                    found = -1;
+                }
+                else if (handle.Length == 2 && handle[1] == (byte)'!')
+                {
+                    found = -2;
+                }
+                else
+                {
+                    throw Error("The tag handle is not declared.", _tok.Start);
+                }
+            }
+
+            _tagPrefix = found;
+        }
+
+        SkipToken();
+        PeekKind();
+    }
+
+    private void EmitScalar(in Token t)
+    {
+        TokenType = YamlTokenType.Scalar;
+        Start = t.Start;
+        End = t.End;
+        ScalarStyle = (ScalarStyle)t.Style;
+        _contentStart = t.ContentStart;
+        _contentEnd = t.ContentEnd;
+        _escapedOrFolded = (t.Flags & 1) != 0;
+        _blockIndent = t.X;
+        _chomping = (Chomping)t.Y;
+        Depth = _depth;
+    }
+
+    private void EmitEmptyScalar(int at)
+    {
+        TokenType = YamlTokenType.Scalar;
+        Start = End = at;
+        ScalarStyle = ScalarStyle.Plain;
+        _contentStart = _contentEnd = at;
+        _escapedOrFolded = false;
+        Depth = _depth;
+    }
+
+    private void EmitCollectionStart(YamlTokenType type, int start, int end, CollectionStyle style)
+    {
+        if (_depth >= _limits.MaxDepth)
+        {
+            throw LimitError("The nesting depth is larger than the configured limit.", start);
+        }
+
+        TokenType = type;
+        Start = start;
+        End = end;
+        CollectionStyle = style;
+        Depth = _depth++;
+        if (end > start)
+        {
+            // A flow indicator belongs to the event; the parser state skips the token itself later.
+        }
+    }
+
+    private void EmitCollectionEnd(YamlTokenType type, int start, int end, CollectionStyle style)
+    {
+        TokenType = type;
+        Start = start;
+        End = end;
+        CollectionStyle = style;
+        Depth = --_depth;
+    }
+
+    private void ParseBlockSequenceEntry(bool first)
+    {
+        if (first)
+        {
+            PeekKind();
+            SkipToken();
+        }
+
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.BlockEntry)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.BlockEntry or TokenKind.BlockEnd))
+            {
+                PushState(State.BlockSequenceEntry);
+                ParseNode(block: true, indentless: false);
+                return;
+            }
+
+            _state = State.BlockSequenceEntry;
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        if (kind == TokenKind.BlockEnd)
+        {
+            _state = PopState();
+            EmitCollectionEnd(YamlTokenType.SequenceEnd, _tok.Start, _tok.Start, CollectionStyle.Block);
+            SkipToken();
+            return;
+        }
+
+        throw Error("Expected '-' to continue the block sequence.", _tok.Start);
+    }
+
+    private void ParseIndentlessSequenceEntry()
+    {
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.BlockEntry)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.BlockEntry or TokenKind.Key or TokenKind.Value or TokenKind.BlockEnd))
+            {
+                PushState(State.IndentlessSequenceEntry);
+                ParseNode(block: true, indentless: false);
+                return;
+            }
+
+            _state = State.IndentlessSequenceEntry;
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        _state = PopState();
+        EmitCollectionEnd(YamlTokenType.SequenceEnd, _tok.Start, _tok.Start, CollectionStyle.Block);
+    }
+
+    private void ParseBlockMappingKey(bool first)
+    {
+        if (first)
+        {
+            PeekKind();
+            SkipToken();
+        }
+
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.Key)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.Key or TokenKind.Value or TokenKind.BlockEnd))
+            {
+                PushState(State.BlockMappingValue);
+                ParseNode(block: true, indentless: true);
+                return;
+            }
+
+            _state = State.BlockMappingValue;
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        if (kind == TokenKind.BlockEntry)
+        {
+            throw Error("A sequence entry cannot follow a mapping at the same indentation.", _tok.Start + 1);
+        }
+
+        if (kind == TokenKind.Value)
+        {
+            // A value with no key: the key is empty.
+            _state = State.BlockMappingValue;
+            EmitEmptyScalar(_tok.Start);
+            return;
+        }
+
+        if (kind == TokenKind.BlockEnd)
+        {
+            _state = PopState();
+            EmitCollectionEnd(YamlTokenType.MappingEnd, _tok.Start, _tok.Start, CollectionStyle.Block);
+            SkipToken();
+            return;
+        }
+
+        throw Error("Expected a mapping key.", _tok.Start);
+    }
+
+    private void ParseBlockMappingValue()
+    {
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.Value)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.Key or TokenKind.Value or TokenKind.BlockEnd))
+            {
+                PushState(State.BlockMappingKey);
+                ParseNode(block: true, indentless: true);
+                return;
+            }
+        }
+
+        _state = State.BlockMappingKey;
+        EmitEmptyScalar(_tok.Start);
+    }
+
+    private void ParseFlowSequenceEntry(bool first)
+    {
+        if (first)
+        {
+            PeekKind();
+            SkipToken();
+        }
+
+        TokenKind kind = PeekKind();
+        if (kind != TokenKind.FlowSequenceEnd)
+        {
+            if (!first)
+            {
+                if (kind != TokenKind.FlowEntry)
+                {
+                    throw Error("Expected ',' or ']' in the flow sequence.", _tok.Start);
+                }
+
+                SkipToken();
+                kind = PeekKind();
+            }
+
+            if (kind is TokenKind.Key or TokenKind.Value)
+            {
+                _state = State.FlowSequenceEntryMappingKey;
+                EmitCollectionStart(YamlTokenType.MappingStart, _tok.Start, _tok.Start, CollectionStyle.Flow);
+                if (kind == TokenKind.Key)
+                {
+                    SkipToken();
+                }
+
+                return;
+            }
+
+            if (kind != TokenKind.FlowSequenceEnd)
+            {
+                PushState(State.FlowSequenceEntry);
+                ParseNode(block: false, indentless: false);
+                return;
+            }
+        }
+
+        _state = PopState();
+        EmitCollectionEnd(YamlTokenType.SequenceEnd, _tok.Start, _tok.End, CollectionStyle.Flow);
+        SkipToken();
+    }
+
+    private void ParseFlowSequenceEntryMappingKey()
+    {
+        TokenKind kind = PeekKind();
+        if (kind is not (TokenKind.Value or TokenKind.FlowEntry or TokenKind.FlowSequenceEnd))
+        {
+            PushState(State.FlowSequenceEntryMappingValue);
+            ParseNode(block: false, indentless: false);
+            return;
+        }
+
+        _state = State.FlowSequenceEntryMappingValue;
+        EmitEmptyScalar(_tok.Start);
+    }
+
+    private void ParseFlowSequenceEntryMappingValue()
+    {
+        TokenKind kind = PeekKind();
+        if (kind == TokenKind.Value)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.FlowEntry or TokenKind.FlowSequenceEnd))
+            {
+                PushState(State.FlowSequenceEntryMappingEnd);
+                ParseNode(block: false, indentless: false);
+                return;
+            }
+        }
+
+        _state = State.FlowSequenceEntryMappingEnd;
+        EmitEmptyScalar(_tok.Start);
+    }
+
+    private void ParseFlowMappingKey(bool first)
+    {
+        if (first)
+        {
+            PeekKind();
+            SkipToken();
+        }
+
+        TokenKind kind = PeekKind();
+        if (kind != TokenKind.FlowMappingEnd)
+        {
+            if (!first)
+            {
+                if (kind != TokenKind.FlowEntry)
+                {
+                    throw Error("Expected ',' or '}' in the flow mapping.", _tok.Start);
+                }
+
+                SkipToken();
+                kind = PeekKind();
+            }
+
+            if (kind == TokenKind.Key)
+            {
+                SkipToken();
+                TokenKind next = PeekKind();
+                if (next is not (TokenKind.Value or TokenKind.FlowEntry or TokenKind.FlowMappingEnd))
+                {
+                    PushState(State.FlowMappingValue);
+                    ParseNode(block: false, indentless: false);
+                    return;
+                }
+
+                _state = State.FlowMappingValue;
+                EmitEmptyScalar(_tok.Start);
+                return;
+            }
+
+            if (kind == TokenKind.Value)
+            {
+                _state = State.FlowMappingValue;
+                EmitEmptyScalar(_tok.Start);
+                return;
+            }
+
+            if (kind != TokenKind.FlowMappingEnd)
+            {
+                PushState(State.FlowMappingEmptyValue);
+                ParseNode(block: false, indentless: false);
+                return;
+            }
+        }
+
+        _state = PopState();
+        EmitCollectionEnd(YamlTokenType.MappingEnd, _tok.Start, _tok.End, CollectionStyle.Flow);
+        SkipToken();
+    }
+
+    private void ParseFlowMappingValue(bool empty)
+    {
+        TokenKind kind = PeekKind();
+        if (!empty && kind == TokenKind.Value)
+        {
+            SkipToken();
+            TokenKind next = PeekKind();
+            if (next is not (TokenKind.FlowEntry or TokenKind.FlowMappingEnd))
+            {
+                PushState(State.FlowMappingKey);
+                ParseNode(block: false, indentless: false);
+                return;
+            }
+        }
+
+        _state = State.FlowMappingKey;
+        EmitEmptyScalar(_tok.Start);
+    }
+}

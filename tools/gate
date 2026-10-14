@@ -5,7 +5,8 @@
 # public-text check over files changed against main plus untracked files, secret scan
 # of the working tree, and a scan for unsafe code in src/.
 # Environment: GATE_BASE (default main) is the comparison branch; ONEYAML_ARTIFACTS
-# names the build output directory (default: a per-user cache outside the repository).
+# names the build output directory (default: a per-user cache outside the repository);
+# ONEYAML_KIT and ONEYAML_YTS_DIR point the conformance tests at their data.
 # Works before the first commit: then every file counts as changed.
 # Fails if it takes over 180 s.
 set -u
@@ -14,6 +15,18 @@ root=$PWD
 base=${GATE_BASE:-main}
 sln=OneYaml.slnx
 artifacts=${ONEYAML_ARTIFACTS:-${XDG_CACHE_HOME:-$HOME/.cache}/oneyaml-csharp/artifacts}
+
+# Conformance data comes from the environment and the tests skip when it is absent:
+# ONEYAML_KIT names a checkout of the shared case kit, ONEYAML_YTS_DIR the yaml-test-suite data.
+# With only the kit set, the suite data is taken from its usual place inside the kit.
+if [ -n "${ONEYAML_KIT:-}" ] && [ -z "${ONEYAML_YTS_DIR:-}" ] && [ -d "$ONEYAML_KIT/suites/yaml-test-suite/data-2022-01-17" ]; then
+	export ONEYAML_YTS_DIR="$ONEYAML_KIT/suites/yaml-test-suite/data-2022-01-17"
+fi
+if [ -n "${ONEYAML_KIT:-}" ] && [ -n "${ONEYAML_YTS_DIR:-}" ]; then
+	echo "== conformance data: suite and kit cases"
+else
+	echo "== conformance data: not set, those tests are skipped"
+fi
 
 failed=()
 start=$SECONDS

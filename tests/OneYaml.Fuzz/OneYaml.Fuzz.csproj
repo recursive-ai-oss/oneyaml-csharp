@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- No package references, so there is nothing to lock. -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The mutator and the invariant checks are shared with the unit tests. -->
+    <Compile Include="../OneYaml.Tests/Fuzzing/*.cs" LinkBase="Fuzzing" />
+    <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
+  </ItemGroup>
+
+</Project>

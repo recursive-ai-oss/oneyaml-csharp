@@ -3,6 +3,7 @@
     <Project Path="src/OneYaml/OneYaml.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/OneYaml.Fuzz/OneYaml.Fuzz.csproj" />
     <Project Path="tests/OneYaml.Tests/OneYaml.Tests.csproj" />
     <Project Path="tests/OneYaml.Tools.Tests/OneYaml.Tools.Tests.csproj" />
   </Folder>
