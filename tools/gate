@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# tools/gate: the hand-over gate. Run it from anywhere in the checkout: tools/gate
+# Steps: restore, Release build of the solution (both target frameworks, warnings as
+# errors, trim and AOT analyzers on), tests without the Slow category, format check,
+# public-text check over files changed against main plus untracked files, secret scan
+# of the working tree, and a scan for unsafe code in src/.
+# Environment: GATE_BASE (default main) is the comparison branch; ONEYAML_ARTIFACTS
+# names the build output directory (default: a per-user cache outside the repository).
+# Works before the first commit: then every file counts as changed.
+# Fails if it takes over 180 s.
+set -u
+cd "$(dirname "$0")/.." || exit 2
+root=$PWD
+base=${GATE_BASE:-main}
+sln=OneYaml.slnx
+artifacts=${ONEYAML_ARTIFACTS:-${XDG_CACHE_HOME:-$HOME/.cache}/oneyaml-csharp/artifacts}
+
+failed=()
+start=$SECONDS
+
+step() { # step <name> <command...>
+	local name=$1 t0=$SECONDS
+	shift
+	echo "== $name"
+	if "$@"; then
+		echo "-- ok: $name ($((SECONDS - t0)) s)"
+	else
+		echo "-- FAIL: $name"
+		failed+=("$name")
+	fi
+}
+
+tool() { # tool <args...>: the built guard tool, run from the repository root
+	dotnet "$tool_dll" "$@"
+}
+
+unsafe_scan() {
+	local pat='\bunsafe\b|AllowUnsafeBlocks|System\.Runtime\.CompilerServices\.Unsafe|\bUnsafe\.|MemoryMarshal|\bfixed[[:space:]]*\('
+	if grep -rnE --include='*.cs' --include='*.csproj' --include='*.props' --include='*.targets' "$pat" src; then
+		echo "unsafe code or Unsafe/MemoryMarshal found under src/"
+		return 1
+	fi
+}
+
+step "restore" dotnet restore "$sln" --verbosity quiet
+step "build (Release, all target frameworks)" dotnet build "$sln" -c Release --no-restore --verbosity quiet -clp:NoSummary
+step "test (Category!=Slow)" dotnet test --solution "$sln" -c Release --no-build --filter-not-trait "Category=Slow" --results-directory "$artifacts/TestResults"
+
+# Whitespace and style are verified on the whole solution; analyzers already ran in the build.
+step "format" dotnet format "$sln" --verify-no-changes --no-restore --verbosity quiet
+
+tool_dll=$(find "$artifacts/bin/PublicBoundary" -name PublicBoundary.dll -path '*release*' 2>/dev/null | head -n1)
+if [ -z "$tool_dll" ]; then
+	echo "PublicBoundary was not built"
+	failed+=("guard tool missing")
+else
+	step "public text (changed against $base)" tool publictext --changed "$base"
+	step "secret scan (working tree)" tool secretscan --tree
+fi
+step "unsafe scan" unsafe_scan
+
+total=$((SECONDS - start))
+echo "== total ${total} s"
+if [ "$total" -gt 180 ]; then
+	echo "FAIL: gate took over 180 s"
+	failed+=("time budget")
+fi
+if [ ${#failed[@]} -gt 0 ]; then
+	echo "GATE RED: ${failed[*]}"
+	exit 1
+fi
+echo "GATE GREEN"

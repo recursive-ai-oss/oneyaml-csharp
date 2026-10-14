@@ -1,0 +1,38 @@
+<Project>
+
+  <!--
+    Build output never lands in the clone. ONEYAML_ARTIFACTS names the output
+    directory; when it is unset, output goes to a per-user cache directory outside
+    the repository (not the system temp directory, which is memory-backed on many
+    Linux hosts). Restore output (project.assets.json) follows the same path.
+  -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath Condition="'$(ONEYAML_ARTIFACTS)' != ''">$(ONEYAML_ARTIFACTS)</ArtifactsPath>
+    <_UserCache Condition="'$(XDG_CACHE_HOME)' != ''">$(XDG_CACHE_HOME)</_UserCache>
+    <_UserCache Condition="'$(_UserCache)' == '' And $([MSBuild]::IsOSPlatform('Windows'))">$(LOCALAPPDATA)</_UserCache>
+    <_UserCache Condition="'$(_UserCache)' == '' And $([MSBuild]::IsOSPlatform('OSX'))">$(HOME)/Library/Caches</_UserCache>
+    <_UserCache Condition="'$(_UserCache)' == ''">$(HOME)/.cache</_UserCache>
+    <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(_UserCache)/oneyaml-csharp/artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Latest analyzers at the Recommended level: the default level misses most
+         design and reliability rules, and Recommended stays quiet enough to keep
+         warnings as errors workable. Individual rules are tuned in .editorconfig. -->
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+    <NuGetAudit>true</NuGetAudit>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,56 @@
+# Public repository: allowlist.
+#
+# Everything at the top level is ignored unless it is listed below, so a new
+# file stays out of the repository until someone deliberately adds it here.
+/*
+!/.gitignore
+!/.github/
+!/.editorconfig
+!/global.json
+!/Directory.Build.props
+!/Directory.Build.targets
+!/Directory.Packages.props
+!/OneYaml.slnx
+!/src/
+!/tests/
+!/bench/
+!/tools/
+!/docs/
+!/README.md
+!/CHANGELOG.md
+!/CONTRIBUTING.md
+!/CODE_OF_CONDUCT.md
+!/SECURITY.md
+!/LICENSE-APACHE
+!/LICENSE-MIT
+
+# Never commit these anywhere in the tree.
+bin/
+obj/
+artifacts/
+BenchmarkDotNet.Artifacts/
+TestResults/
+*.nupkg
+*.snupkg
+core
+core.[0-9]*
+vgcore.*
+*.core
+*.dmp
+*.nettrace
+*.speedscope.json
+*.etl
+*.trace
+perf.data*
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.user
+*.suo
+.vs/
+.idea/
+*.swp
+*~
+.DS_Store

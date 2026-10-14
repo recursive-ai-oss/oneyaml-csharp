@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>OneYaml</RootNamespace>
+    <AssemblyName>OneYaml</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Public API without an XML doc comment is a build error (warnings are errors). -->
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>OneYaml</PackageId>
+    <Description>A YAML 1.2 library for .NET: a fast serializer and lossless, minimal-diff document editing.</Description>
+    <Authors>Recursive AI, LLC</Authors>
+    <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>yaml;yaml-1.2;serializer;parser</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <InternalsVisibleTo Include="OneYaml.Tests" />
+    <InternalsVisibleTo Include="OneYaml.Benchmarks" />
+  </ItemGroup>
+
+</Project>

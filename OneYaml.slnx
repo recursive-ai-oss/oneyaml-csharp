@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OneYaml/OneYaml.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OneYaml.Tests/OneYaml.Tests.csproj" />
+    <Project Path="tests/OneYaml.Tools.Tests/OneYaml.Tools.Tests.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/OneYaml.Benchmarks/OneYaml.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/PublicBoundary/PublicBoundary.csproj" />
+  </Folder>
+</Solution>

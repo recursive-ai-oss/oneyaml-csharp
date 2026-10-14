@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Repository guard tools: the public-text check and the secret scan. tools/gate builds and runs them. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OneYaml.PublicBoundary</RootNamespace>
+    <AssemblyName>PublicBoundary</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OneYaml.Tools.Tests" />
+  </ItemGroup>
+
+</Project>
