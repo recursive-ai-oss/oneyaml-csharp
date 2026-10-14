@@ -6,6 +6,11 @@
     <AssemblyName>OneYaml</AssemblyName>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
+    <!-- This project has no package references to lock. The trimming analyzer package
+         the SDK adds implicitly follows the installed SDK patch version, so a lock
+         file here would only break restores on other SDK patches. -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <!-- Public API without an XML doc comment is a build error (warnings are errors). -->
   </PropertyGroup>
