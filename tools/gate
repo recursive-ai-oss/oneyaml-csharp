@@ -55,6 +55,10 @@ unsafe_scan() {
 	fi
 }
 
+if [ -z "${ONEYAML_KIT:-}" ]; then
+	echo "note: ONEYAML_KIT is not set; the tests that read the conformance kit are skipped"
+fi
+
 step "restore" dotnet restore "$sln" --verbosity quiet
 step "build (Release, all target frameworks)" dotnet build "$sln" -c Release --no-restore --verbosity quiet -clp:NoSummary
 step "test (Category!=Slow)" dotnet test --solution "$sln" -c Release --no-build --filter-not-trait "Category=Slow" --results-directory "$artifacts/TestResults"

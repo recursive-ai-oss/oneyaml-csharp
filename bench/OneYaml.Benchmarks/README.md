@@ -32,3 +32,8 @@ ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter 
 ```
 
 The benchmarks run in process, so they work wherever the build output is redirected to.
+
+## Scalar benchmarks
+
+The scalar benchmarks read workload files from a checkout of the conformance kit: set
+`ONEYAML_KIT` to its path first.

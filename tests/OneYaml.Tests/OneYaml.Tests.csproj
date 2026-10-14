@@ -10,6 +10,9 @@
 
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
+    <!-- Reference parsers for read-back checks only; never referenced by the library. -->
+    <PackageReference Include="SharpYaml" />
+    <PackageReference Include="YamlDotNet" />
   </ItemGroup>
 
   <ItemGroup>
