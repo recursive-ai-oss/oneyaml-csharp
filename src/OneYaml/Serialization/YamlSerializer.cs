@@ -1,0 +1,444 @@
+using System;
+using System.Buffers;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
+using OneYaml.Text;
+
+namespace OneYaml;
+
+/// <summary>Reads YAML into .NET values.</summary>
+public static class YamlSerializer
+{
+    private const string UnreferencedMessage = "Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.";
+    private const string DynamicMessage = "Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.";
+
+    // ---- string ----
+
+    /// <summary>Reads a value from YAML text.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="yaml"/> is <see langword="null"/>.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static T? Deserialize<T>(string yaml, YamlSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        return ReadChars(yaml, Info<T>(options));
+    }
+
+    /// <summary>Reads a value from YAML text using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    public static T? Deserialize<T>(string yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadChars(yaml, typeInfo);
+    }
+
+    /// <summary>Reads a value of the given type from YAML text.</summary>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="returnType">The type to read.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static object? Deserialize(string yaml, Type returnType, YamlSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(returnType);
+        return ReadBoxed(yaml.AsSpan(), (options ?? YamlSerializerOptions.Default).GetTypeInfo(returnType));
+    }
+
+    /// <summary>Reads a value from YAML text using generated metadata.</summary>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="typeInfo">The metadata for the type to read.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    public static object? Deserialize(string yaml, YamlTypeInfo typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadBoxed(yaml.AsSpan(), typeInfo);
+    }
+
+    // ---- spans ----
+
+    /// <summary>Reads a value from YAML text.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static T? Deserialize<T>(ReadOnlySpan<char> yaml, YamlSerializerOptions? options = null) => ReadChars(yaml, Info<T>(options));
+
+    /// <summary>Reads a value from YAML text using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The YAML text; it must hold one document.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    public static T? Deserialize<T>(ReadOnlySpan<char> yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadChars(yaml, typeInfo);
+    }
+
+    /// <summary>Reads a value from UTF-8 bytes. UTF-16 and UTF-32 are detected by byte order mark or by their null bytes.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The YAML bytes; they must hold one document.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Yaml, YamlSerializerOptions? options = null) => ReadBytes(utf8Yaml, Info<T>(options));
+
+    /// <summary>Reads a value from UTF-8 bytes using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The YAML bytes; they must hold one document.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    public static T? Deserialize<T>(ReadOnlySpan<byte> utf8Yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadBytes(utf8Yaml, typeInfo);
+    }
+
+    // ---- streams and readers ----
+
+    /// <summary>Reads a value from a stream of bytes.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The stream, read to its end.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static T? Deserialize<T>(Stream utf8Yaml, YamlSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Yaml);
+        return ReadStream(utf8Yaml, Info<T>(options));
+    }
+
+    /// <summary>Reads a value from a stream of bytes using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The stream, read to its end.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    public static T? Deserialize<T>(Stream utf8Yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadStream(utf8Yaml, typeInfo);
+    }
+
+    /// <summary>Reads a value from a stream of bytes.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The stream, read to its end.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static ValueTask<T?> DeserializeAsync<T>(Stream utf8Yaml, YamlSerializerOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Yaml);
+        return ReadStreamAsync(utf8Yaml, Info<T>(options), cancellationToken);
+    }
+
+    /// <summary>Reads a value from a stream of bytes using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="utf8Yaml">The stream, read to its end.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    public static ValueTask<T?> DeserializeAsync<T>(Stream utf8Yaml, YamlTypeInfo<T> typeInfo, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(utf8Yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadStreamAsync(utf8Yaml, typeInfo, cancellationToken);
+    }
+
+    /// <summary>Reads a value from a text reader.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The reader, read to its end.</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static T? Deserialize<T>(TextReader yaml, YamlSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        return ReadChars(yaml.ReadToEnd(), Info<T>(options));
+    }
+
+    /// <summary>Reads a value from a text reader using generated metadata.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="yaml">The reader, read to its end.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    public static T? Deserialize<T>(TextReader yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadChars(yaml.ReadToEnd(), typeInfo);
+    }
+
+    // ---- several documents ----
+
+    /// <summary>Reads every document of a stream.</summary>
+    /// <typeparam name="T">The type of each document.</typeparam>
+    /// <param name="yaml">The YAML text, with any number of documents (an empty text has none).</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>One value per document, in order.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static List<T?> DeserializeAll<T>(string yaml, YamlSerializerOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        return ReadAll(yaml, Info<T>(options));
+    }
+
+    /// <summary>Reads every document of a stream using generated metadata.</summary>
+    /// <typeparam name="T">The type of each document.</typeparam>
+    /// <param name="yaml">The YAML text, with any number of documents (an empty text has none).</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>One value per document, in order.</returns>
+    /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
+    public static List<T?> DeserializeAll<T>(string yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(yaml);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return ReadAll(yaml, typeInfo);
+    }
+
+    /// <summary>Reads every document of a stream of bytes.</summary>
+    /// <typeparam name="T">The type of each document.</typeparam>
+    /// <param name="utf8Yaml">The YAML bytes, with any number of documents (empty input has none).</param>
+    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>One value per document, in order.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlSerializerOptions? options = null)
+    {
+        YamlTypeInfo<T> info = Info<T>(options);
+        using YamlInput input = YamlInput.FromBytes(utf8Yaml, info.Options.Limits);
+        return ReadAllUtf8(input.Utf8Text, info);
+    }
+
+    // ---- core ----
+
+    [RequiresUnreferencedCode(UnreferencedMessage)]
+    [RequiresDynamicCode(DynamicMessage)]
+    private static YamlTypeInfo<T> Info<T>(YamlSerializerOptions? options) => (options ?? YamlSerializerOptions.Default).GetTypeInfo<T>();
+
+    private static T? ReadChars<T>(ReadOnlySpan<char> text, YamlTypeInfo<T> info)
+    {
+        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+        return ReadUtf8(input.Utf8Text, info);
+    }
+
+    private static T? ReadBytes<T>(ReadOnlySpan<byte> bytes, YamlTypeInfo<T> info)
+    {
+        using YamlInput input = YamlInput.FromBytes(bytes, info.Options.Limits);
+        return ReadUtf8(input.Utf8Text, info);
+    }
+
+    private static object? ReadBoxed(ReadOnlySpan<char> text, YamlTypeInfo info)
+    {
+        info.Options.MakeReadOnly();
+        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+        var reader = new Utf8YamlReader(input.Utf8Text, info.Options, !IsGeneric(info));
+        try
+        {
+            reader.BeginDocument(synthesizeEmptyStream: true);
+            object? value = info.ReadBoxed(ref reader);
+            reader.EndDocument();
+            reader.EndStreamAfterSingleDocument();
+            return value;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    private static T? ReadUtf8<T>(ReadOnlySpan<byte> utf8, YamlTypeInfo<T> info)
+    {
+        YamlSerializerOptions options = info.Options;
+        options.MakeReadOnly();
+        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info));
+        try
+        {
+            reader.BeginDocument(synthesizeEmptyStream: true);
+            T? value = info.Converter.ReadValue(ref reader, options);
+            reader.EndDocument();
+            reader.EndStreamAfterSingleDocument();
+            return value;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    // Only a plain object target is read without following aliases, so that aliases share instances.
+    private static bool IsGeneric(YamlTypeInfo info) => info.ConverterBase is GenericConverter;
+
+    private static List<T?> ReadAll<T>(string text, YamlTypeInfo<T> info)
+    {
+        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+        return ReadAllUtf8(input.Utf8Text, info);
+    }
+
+    private static List<T?> ReadAllUtf8<T>(ReadOnlySpan<byte> utf8, YamlTypeInfo<T> info)
+    {
+        YamlSerializerOptions options = info.Options;
+        options.MakeReadOnly();
+        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info));
+        try
+        {
+            var all = new List<T?>();
+            while (reader.BeginDocument(synthesizeEmptyStream: false))
+            {
+                all.Add(info.Converter.ReadValue(ref reader, options));
+                reader.EndDocument();
+            }
+
+            return all;
+        }
+        finally
+        {
+            reader.Dispose();
+        }
+    }
+
+    private static T? ReadStream<T>(Stream stream, YamlTypeInfo<T> info)
+    {
+        (byte[] buffer, int length) = ReadAllBytes(stream, info.Options.Limits.MaxInputBytes);
+        try
+        {
+            return ReadBytes(buffer.AsSpan(0, length), info);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static async ValueTask<T?> ReadStreamAsync<T>(Stream stream, YamlTypeInfo<T> info, CancellationToken cancellationToken)
+    {
+        (byte[] buffer, int length) = await ReadAllBytesAsync(stream, info.Options.Limits.MaxInputBytes, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return ReadBytes(buffer.AsSpan(0, length), info);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    // Reads a stream to its end into a pooled buffer, stopping early once it passes the input limit.
+    private static (byte[] Buffer, int Length) ReadAllBytes(Stream stream, long max)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
+        int length = 0;
+        try
+        {
+            while (true)
+            {
+                if (length == buffer.Length)
+                {
+                    buffer = Grow(buffer, length, max);
+                }
+
+                int n = stream.Read(buffer, length, buffer.Length - length);
+                if (n == 0)
+                {
+                    return (buffer, length);
+                }
+
+                length += n;
+                CheckSize(length, max);
+            }
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
+        }
+    }
+
+    private static async ValueTask<(byte[] Buffer, int Length)> ReadAllBytesAsync(Stream stream, long max, CancellationToken cancellationToken)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
+        int length = 0;
+        try
+        {
+            while (true)
+            {
+                if (length == buffer.Length)
+                {
+                    buffer = Grow(buffer, length, max);
+                }
+
+                int n = await stream.ReadAsync(buffer.AsMemory(length), cancellationToken).ConfigureAwait(false);
+                if (n == 0)
+                {
+                    return (buffer, length);
+                }
+
+                length += n;
+                CheckSize(length, max);
+            }
+        }
+        catch
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            throw;
+        }
+    }
+
+    private static void CheckSize(int length, long max)
+    {
+        if (length > max)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+    }
+
+    private static byte[] Grow(byte[] buffer, int length, long max)
+    {
+        if (buffer.Length >= int.MaxValue / 2 || buffer.Length > max)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+
+        byte[] bigger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+        Buffer.BlockCopy(buffer, 0, bigger, 0, length);
+        ArrayPool<byte>.Shared.Return(buffer);
+        return bigger;
+    }
+}

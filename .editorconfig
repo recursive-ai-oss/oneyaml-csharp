@@ -40,3 +40,7 @@ dotnet_diagnostic.CA1707.severity = none
 dotnet_diagnostic.CA1812.severity = none
 dotnet_diagnostic.CA1822.severity = none
 dotnet_diagnostic.CA1515.severity = none
+
+# The benchmark models copy the shapes of the shared benchmark kit, so their names are fixed.
+[bench/**/Models.cs]
+dotnet_diagnostic.CA1716.severity = none
