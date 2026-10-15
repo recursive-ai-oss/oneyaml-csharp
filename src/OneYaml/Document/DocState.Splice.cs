@@ -480,7 +480,8 @@ internal sealed partial class DocState
 
             // For the last item, the edit may reach past its end: into the blanks and comments after the last
             // entry of a block collection, or the gap before a closing bracket.
-            regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e))) : jEnd;
+            // Only a block scalar at the end can read the comment lines after it as its own, so only then are they all included.
+            regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e), EndsInBlockScalar(old, end - 1, text))) : jEnd;
             oldKids = 0;
             for (int c = kFirst; c < tNode; c += old._nodes[c].Size)
             {
@@ -612,11 +613,17 @@ internal sealed partial class DocState
         }
     }
 
+    // Whether the last value of the region, before or after the edit, may be a block scalar. The new text is
+    // judged by its indicator characters, which is cheap and errs towards yes.
+    private static bool EndsInBlockScalar(DocState old, int lastNode, ReadOnlySpan<byte> text)
+        => (old._nodes[lastNode].Kind == NodeKind.Scalar && (ScalarStyle)old._nodes[lastNode].Style is ScalarStyle.Literal or ScalarStyle.Folded)
+           || text.IndexOfAny((byte)'|', (byte)'>') >= 0;
+
     // Past the end of a block collection come the rest of its last line and the blank and comment lines up to
     // the next line with content. A block scalar at the end of the region reads them as its own (a kept one
     // keeps the blank lines, any other reads a more indented comment line as text), so the region must
     // see them too, or it would read the scalar differently from the whole text.
-    private static int TrailingTriviaEnd(ReadOnlySpan<byte> src, int pos)
+    private static int TrailingTriviaEnd(ReadOnlySpan<byte> src, int pos, bool followingLines)
     {
         int p = pos;
         if (p > 0 && !IsBreak(src[p - 1]))
@@ -639,6 +646,11 @@ internal sealed partial class DocState
             }
 
             p = AfterBreak(src, q);
+        }
+
+        if (!followingLines)
+        {
+            return p;
         }
 
         while (p < src.Length)
@@ -668,7 +680,7 @@ internal sealed partial class DocState
     private static int SkipBlanks(ReadOnlySpan<byte> src, int from)
     {
         int q = from;
-        while (q < src.Length && src[q] is (byte)' ' or (byte)'	')
+        while (q < src.Length && src[q] is (byte)' ' or (byte)'\t')
         {
             q++;
         }
@@ -678,12 +690,12 @@ internal sealed partial class DocState
 
     private static int LineEndOf(ReadOnlySpan<byte> src, int from)
     {
-        int i = src.Slice(from).IndexOfAny((byte)'\n', (byte)'\n');
+        int i = src.Slice(from).IndexOfAny((byte)'\n', (byte)'\r');
         return i < 0 ? src.Length : from + i;
     }
 
     private static int AfterBreak(ReadOnlySpan<byte> src, int at)
-        => at + (src[at] == (byte)'\n' && at + 1 < src.Length && src[at + 1] == (byte)'\n' ? 2 : 1);
+        => at + (src[at] == (byte)'\r' && at + 1 < src.Length && src[at + 1] == (byte)'\n' ? 2 : 1);
 
     // The region read on its own must be one collection of the kind it replaces, with nothing beyond it,
     // and must bring no anchors or aliases that would reach outside it.

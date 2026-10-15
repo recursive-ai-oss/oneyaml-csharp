@@ -109,7 +109,8 @@ internal static class ValueWriter
     /// <param name="layout">Indentation to copy.</param>
     /// <param name="keyStyle">The style to prefer for the keys of the first-level entries.</param>
     /// <param name="valueStyle">The style to prefer for the scalar values of the first-level entries.</param>
-    public static void WriteBlock(ByteBuffer o, ValueTree v, int root, int col, bool inlineFirst, in Layout layout, ScalarWriteStyle keyStyle = ScalarWriteStyle.Plain, ScalarWriteStyle valueStyle = ScalarWriteStyle.Plain)
+    /// <param name="blanksFollow">Whether blank lines follow the text; the last value is then never a kept block scalar, which would take them as content.</param>
+    public static void WriteBlock(ByteBuffer o, ValueTree v, int root, int col, bool inlineFirst, in Layout layout, ScalarWriteStyle keyStyle = ScalarWriteStyle.Plain, ScalarWriteStyle valueStyle = ScalarWriteStyle.Plain, bool blanksFollow = false)
     {
         var stack = new List<Frame>();
         stack.Add(new Frame { Remaining = v[root].Count, Col = col, IsMap = v[root].Kind == VKind.Mapping, First = inlineFirst });
@@ -160,6 +161,11 @@ internal static class ValueWriter
                 if (want is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded && (val.Text is null || val.Text.AsSpan().IndexOf((byte)'\n') < 0))
                 {
                     // A block style is kept only for text that has lines; one line reads better as it is.
+                    want = ScalarWriteStyle.Plain;
+                }
+
+                if (blanksFollow && stack.Count == 1 && f.Remaining == 0 && want is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded && val.Text.AsSpan().EndsWith("\n\n"u8))
+                {
                     want = ScalarWriteStyle.Plain;
                 }
 

@@ -189,25 +189,6 @@ internal sealed partial class DocState
         }
     }
 
-    private static bool IsInfinityLiteral(ReadOnlySpan<byte> t) => t.Length > 0 && t[^1] is (byte)'f' or (byte)'F';
-
-    // Two spellings of a finite literal that overflows a double: equal when they differ only in the case of
-    // the exponent letter and an explicit plus sign.
-    private static bool SameFiniteLiteral(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
-    {
-        if (a.Length > 0 && a[0] == (byte)'+')
-        {
-            a = a.Slice(1);
-        }
-
-        if (b.Length > 0 && b[0] == (byte)'+')
-        {
-            b = b.Slice(1);
-        }
-
-        return a.Length == b.Length && System.Text.Ascii.EqualsIgnoreCase(a, b);
-    }
-
     /// <summary>Whether two scalar texts of one Core kind are the same value.</summary>
     /// <param name="kind">The kind both resolve to.</param>
     /// <param name="a">The first text.</param>
@@ -234,10 +215,10 @@ internal sealed partial class DocState
                     return false;
                 }
 
-                if (double.IsInfinity(da) && da == db && (!IsInfinityLiteral(a) || !IsInfinityLiteral(b)))
+                if (da == db && (double.IsInfinity(da) || da == 0))
                 {
-                    // A finite literal beyond the double range (1e400) is not infinity: 1e400 and 2e400 differ.
-                    return SameFiniteLiteral(a, b);
+                    // A literal beyond the double range (1e400, 1e-400) is not infinity or zero: 1e400 and 2e400 differ.
+                    return FloatKeyIdentity.Of(a) == FloatKeyIdentity.Of(b);
                 }
 
                 return da == db || (double.IsNaN(da) && double.IsNaN(db));

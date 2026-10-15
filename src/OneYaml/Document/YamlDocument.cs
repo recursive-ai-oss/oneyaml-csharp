@@ -313,6 +313,8 @@ public sealed class YamlDocument : IDisposable
     /// Sets the value a pointer names. An existing value is replaced, keeping its style where it
     /// can hold the new value; a missing mapping key is added at the end of its mapping; the
     /// token <c>-</c> (or the sequence length) appends to a sequence.
+    /// On a stream with no document (empty, or only comments) the first write makes the document: a first
+    /// token of <c>-</c> or <c>0</c> starts a sequence, any other token a mapping.
     /// </summary>
     /// <param name="path">An RFC 6901 pointer. The empty pointer replaces the whole document's root.</param>
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, or a dictionary or sequence of these.</param>
@@ -327,6 +329,8 @@ public sealed class YamlDocument : IDisposable
     /// <summary>
     /// Adds a value at a pointer as RFC 6902 <c>add</c> does: an existing mapping key is replaced,
     /// a new key goes at the end of its mapping, and a sequence index inserts before the item there.
+    /// On a stream with no document (empty, or only comments) the first write makes the document: a first
+    /// token of <c>-</c> or <c>0</c> starts a sequence, any other token a mapping.
     /// </summary>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The value, as for <see cref="Set"/>.</param>
@@ -352,6 +356,8 @@ public sealed class YamlDocument : IDisposable
     /// <summary>
     /// Applies an RFC 6902 JSON Patch. The patch is atomic: if any operation fails, the document is
     /// left exactly as it was. A <c>test</c> compares by the YAML data model under the Core schema.
+    /// On a stream with no document (empty, or only comments) the first <c>add</c> makes the document: a first
+    /// path token of <c>-</c> or <c>0</c> starts a sequence, any other token a mapping.
     /// </summary>
     /// <param name="patch">A JSON array of operations.</param>
     /// <param name="document">The index of the document in the stream.</param>

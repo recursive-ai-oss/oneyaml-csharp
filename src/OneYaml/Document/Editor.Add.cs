@@ -301,6 +301,43 @@ internal static partial class Editor
         return true;
     }
 
+    private static bool IsBlockScalar(in CstNode n)
+        => n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded;
+
+    // The end of the comment-only lines from pos on (blank lines between them included) that are indented
+    // at least to column; pos itself when there are none.
+    private static int CommentLinesEnd(ReadOnlySpan<byte> src, int pos, int column)
+    {
+        int end = pos;
+        int p = pos;
+        while (p < src.Length)
+        {
+            int q = p;
+            while (q < src.Length && src[q] is (byte)' ' or (byte)'\t')
+            {
+                q++;
+            }
+
+            if (q < src.Length && src[q] == (byte)'#' && q - p >= column)
+            {
+                int e = src.Slice(q).IndexOfAny((byte)'\n', (byte)'\r');
+                q = e < 0 ? src.Length : q + e;
+                end = q < src.Length ? q + (src[q] == (byte)'\r' && q + 1 < src.Length && src[q + 1] == (byte)'\n' ? 2 : 1) : q;
+                p = end;
+            }
+            else if (q < src.Length && src[q] is (byte)'\n' or (byte)'\r')
+            {
+                p = q + (src[q] == (byte)'\r' && q + 1 < src.Length && src[q + 1] == (byte)'\n' ? 2 : 1);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return end;
+    }
+
     private static bool IsKeepBlock(in CstNode n)
         => n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded && (Chomping)n.Chomp == Chomping.Keep;
 
@@ -402,6 +439,13 @@ internal static partial class Editor
                 // A kept block scalar ends right before this entry. The blank lines after the entry would
                 // join it and become part of its value, so they go with the entry.
                 stop = BlankLinesEnd(src, stop);
+            }
+
+            if (first > 0 && IsBlockScalar(s.Node(first - 1)))
+            {
+                // A block scalar ends right before this entry. Comment lines after the entry that are indented
+                // as deep as its lines would be read as text of the scalar, so they go with the entry.
+                stop = CommentLinesEnd(src, stop, s.Node(first - 1).Aux);
             }
 
             if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0)

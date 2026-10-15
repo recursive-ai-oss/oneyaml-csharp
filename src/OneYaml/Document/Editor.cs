@@ -212,12 +212,10 @@ internal static partial class Editor
         ScalarWriteStyle nested = n.Kind == NodeKind.Scalar && pref is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded ? pref : ScalarWriteStyle.Plain;
         bool oldKeep = n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded && (Chomping)n.Chomp == Chomping.Keep;
         int regionEnd = oldKeep ? DocState.TrimBlankLines(src, n.Start, n.End, n.Aux) : n.End;
-        if (!oldKeep && nested != ScalarWriteStyle.Plain && BlankLinesEnd(src, regionEnd) > regionEnd)
-        {
-            // Blank lines follow the old scalar. A new kept block scalar inside the replacement would take
-            // them as its own content, so strings in the replacement are quoted instead.
-            nested = ScalarWriteStyle.Plain;
-        }
+
+        // Blank lines follow the old scalar. A kept block scalar as the replacement's last value would take
+        // them as its own content, so that one value is written another way.
+        bool blanksFollow = !oldKeep && nested != ScalarWriteStyle.Plain && BlankLinesEnd(src, regionEnd) > regionEnd;
 
         if (v.IsScalar)
         {
@@ -292,7 +290,7 @@ internal static partial class Editor
             // A comment sits between the key (or dash) and a value on a later line. It stays, and only the
             // value's own line and lines are replaced. Properties on the key's line stay there (or lose the
             // tag that no longer fits); properties on the value's line are written again in front of the value.
-            return ReplaceAfterComment(s, limits, node, v, body.WrittenSpan, lay, ownerCol, oldEndsWithBreak, valueEndsWithBreak, regionEnd, nested, keepTag);
+            return ReplaceAfterComment(s, limits, node, v, body.WrittenSpan, lay, ownerCol, oldEndsWithBreak, valueEndsWithBreak, regionEnd, nested, blanksFollow, keepTag);
         }
         else
         {
@@ -304,8 +302,12 @@ internal static partial class Editor
                 if (hasProps && propsUntouched)
                 {
                     // The properties stay on the marker line; the collection starts on the next one.
-                    regionStart = s.PropEnd(node);
+                    regionStart = (n.Flags & NodeFlags.Empty) != 0 ? PastMarkerComment(src, s.PropEnd(node)) : s.PropEnd(node);
+                    regionEnd = Math.Max(regionEnd, regionStart);
                     edit.Write((byte)'\n');
+
+                    // The break that ends the marker's line is still there, so the new lines need no final one.
+                    endsAtBreak = regionStart < src.Length && DocState.IsBreak(src[regionStart]);
                 }
                 else if (hasProps)
                 {
@@ -315,6 +317,13 @@ internal static partial class Editor
                 else
                 {
                     // The collection starts a line of its own; a block collection cannot share the line of a "---" marker.
+                    if ((n.Flags & NodeFlags.Empty) != 0)
+                    {
+                        // A comment on the marker's line stays there.
+                        regionStart = PastMarkerComment(src, regionStart);
+                        regionEnd = Math.Max(regionEnd, regionStart);
+                    }
+
                     while (regionStart > 0 && src[regionStart - 1] is (byte)' ' or (byte)'\t')
                     {
                         regionStart--;
@@ -354,17 +363,17 @@ internal static partial class Editor
                         edit.Write((byte)'\n');
                     }
 
-                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay, valueStyle: nested);
+                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay, valueStyle: nested, blanksFollow: blanksFollow);
                 }
                 else if (parent >= 0)
                 {
                     edit.Write((byte)'\n');
                     int col = ownerCol + (v[0].Kind == VKind.Mapping ? lay.Step : lay.SeqOffset);
-                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested);
+                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
                 }
                 else
                 {
-                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay, valueStyle: nested);
+                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
                 }
 
                 ReadOnlySpan<byte> text = lines.WrittenSpan;
@@ -400,6 +409,24 @@ internal static partial class Editor
         using var final = new ByteBuffer(edit.Count + 16);
         ValueWriter.WriteWithBreaks(edit.WrittenSpan, lay.Nl, final);
         return Commit(s, limits, regionStart, regionEnd, final);
+    }
+
+    // The end of the comment that follows blanks at a position, or the position itself when there is none.
+    private static int PastMarkerComment(ReadOnlySpan<byte> src, int pos)
+    {
+        int q = pos;
+        while (q < src.Length && src[q] is (byte)' ' or (byte)'\t')
+        {
+            q++;
+        }
+
+        if (q >= src.Length || src[q] != (byte)'#')
+        {
+            return pos;
+        }
+
+        int e = src.Slice(q).IndexOfAny((byte)'\n', (byte)'\r');
+        return e < 0 ? src.Length : q + e;
     }
 
     // The header of the block scalar whose indicator character sits at an offset: its chomping and indentation indicator.
@@ -467,6 +494,7 @@ internal static partial class Editor
         bool valueEndsWithBreak,
         int regionEnd,
         ScalarWriteStyle nested,
+        bool blanksFollow,
         bool keepTag)
     {
         ReadOnlySpan<byte> src = s.Text;
@@ -501,7 +529,7 @@ internal static partial class Editor
         if (newBlockNonEmpty)
         {
             using var lines = new ByteBuffer();
-            ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested);
+            ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
             ReadOnlySpan<byte> text = lines.WrittenSpan;
             if (!oldEndsWithBreak)
             {
