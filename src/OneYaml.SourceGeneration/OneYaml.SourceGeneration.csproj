@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Roslyn loads generators into compilers that run on .NET Framework and .NET, so the
+         generator targets netstandard2.0. It ships inside the OneYaml package, not on its own. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>OneYaml.SourceGeneration</RootNamespace>
+    <AssemblyName>OneYaml.SourceGeneration</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 4.8 is the compiler of the .NET 8 SDK; a generator built against it loads in every later compiler.
+         Build-time only: nothing here reaches the package's dependency list. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

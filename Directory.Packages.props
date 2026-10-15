@@ -6,6 +6,10 @@
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
+  <!-- Roslyn, for the source generator (build time only) and its tests. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" />
+  </ItemGroup>
   <!-- Competitor parsers, used by the benchmarks only. -->
   <ItemGroup>
     <PackageVersion Include="VYaml" Version="1.4.0" />

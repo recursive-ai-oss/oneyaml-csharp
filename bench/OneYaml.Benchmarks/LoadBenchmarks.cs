@@ -35,10 +35,12 @@ public class TypedLoadBenchmarks
         if (IsRecords)
         {
             Check(YamlSerializer.Deserialize<List<Record>>(_bytes)!.Count);
+            Check(YamlSerializer.Deserialize(_bytes, OneYamlContext.Default.ListRecord)!.Count);
         }
         else
         {
             Check(YamlSerializer.Deserialize<Workflow>(_bytes)!.Jobs.Count);
+            Check(YamlSerializer.Deserialize(_bytes, OneYamlContext.Default.Workflow)!.Jobs.Count);
         }
     }
 
@@ -54,6 +56,11 @@ public class TypedLoadBenchmarks
     public object? ReadOneYaml() => IsRecords
         ? YamlSerializer.Deserialize<List<Record>>(_bytes)
         : YamlSerializer.Deserialize<Workflow>(_bytes);
+
+    [Benchmark(Description = "OneYaml generated")]
+    public object? ReadOneYamlGenerated() => IsRecords
+        ? YamlSerializer.Deserialize(_bytes, OneYamlContext.Default.ListRecord)
+        : YamlSerializer.Deserialize(_bytes, OneYamlContext.Default.Workflow);
 
     [Benchmark(Description = "VYaml generated")]
     public object? ReadVYaml() => IsRecords

@@ -14,7 +14,8 @@ public abstract class YamlSerializerContext : IYamlTypeInfoResolver
     {
         Options = new YamlSerializerOptions
         {
-            PropertyNamingPolicy = options?.PropertyNamingPolicy ?? System.Text.Json.JsonNamingPolicy.CamelCase,
+            // A null policy in the given options is a choice (names as written), so only a missing options object gets the default.
+            PropertyNamingPolicy = options is null ? System.Text.Json.JsonNamingPolicy.CamelCase : options.PropertyNamingPolicy,
             PropertyNameCaseInsensitive = options?.PropertyNameCaseInsensitive ?? false,
             UnmappedMemberHandling = options?.UnmappedMemberHandling ?? YamlUnmappedMemberHandling.Skip,
             Limits = options?.Limits ?? YamlLimits.Default,

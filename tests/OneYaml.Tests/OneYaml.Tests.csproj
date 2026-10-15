@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
+    <!-- The generator runs on this project's own sources, so the tests bind through generated contexts. -->
+    <ProjectReference Include="../../src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
