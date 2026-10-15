@@ -198,11 +198,18 @@ internal static class DocumentBuilder
 {
     public static void Build(Loaded source, List<YamlDocument> into)
     {
-        using var scope = new HashScope();
-        BuildAll(source, into);
+        var keys = new LoadKeyComparer();
+        try
+        {
+            BuildAll(source, into, keys);
+        }
+        finally
+        {
+            keys.Complete();
+        }
     }
 
-    private static void BuildAll(Loaded source, List<YamlDocument> into)
+    private static void BuildAll(Loaded source, List<YamlDocument> into, LoadKeyComparer keys)
     {
         DocState s = source.State;
         int count = s.NoRealDocument ? 0 : s.DocCount;
@@ -226,13 +233,18 @@ internal static class DocumentBuilder
                 if (n.Kind == NodeKind.Alias)
                 {
                     node = map[n.Aux - root]!;
+                    if (n.Aux < i && i < n.Aux + s.Node(n.Aux).Size)
+                    {
+                        // An alias to a node that is still being built.
+                        keys.Abandon();
+                    }
                 }
                 else
                 {
                     node = n.Kind switch
                     {
                         NodeKind.Scalar => new YamlScalarNode(s.ScalarString(i)) { Style = StyleOf(n.Style) },
-                        NodeKind.Mapping => new YamlMappingNode { Style = n.IsFlow ? MappingStyle.Flow : MappingStyle.Block },
+                        NodeKind.Mapping => new YamlMappingNode(keys) { Style = n.IsFlow ? MappingStyle.Flow : MappingStyle.Block },
                         _ => new YamlSequenceNode { Style = n.IsFlow ? SequenceStyle.Flow : SequenceStyle.Block },
                     };
                     if (s.HasAnchor(i))
@@ -290,12 +302,21 @@ internal static class EventDocumentBuilder
 {
     public static YamlDocument Read(IParser parser)
     {
-        using var scope = new HashScope();
-        return ReadDocument(parser);
+        // The memo of key hashes lives here, out of reach of the parser, which is the caller's code.
+        var keys = new LoadKeyComparer();
+        try
+        {
+            return ReadDocument(parser, keys);
+        }
+        finally
+        {
+            keys.Complete();
+        }
     }
 
-    private static YamlDocument ReadDocument(IParser parser)
+    private static YamlDocument ReadDocument(IParser parser, LoadKeyComparer keys)
     {
+        var building = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
         parser.Consume<DocumentStart>();
         var anchors = new Dictionary<string, YamlNode>(StringComparer.Ordinal);
         var stack = new Stack<(YamlNode Node, YamlNode? PendingKey)>();
@@ -314,12 +335,18 @@ internal static class EventDocumentBuilder
                     produced = anchors.TryGetValue(alias.Value.Value ?? string.Empty, out YamlNode? target)
                         ? target
                         : throw new AnchorNotFoundException(current.Start, current.End, $"Anchor '{alias.Value}' not found.");
+                    if (building.Contains(produced))
+                    {
+                        // An alias to a node that is still being built.
+                        keys.Abandon();
+                    }
+
                     break;
                 case SequenceStart start:
                     produced = new YamlSequenceNode { Style = start.Style, Anchor = start.Anchor, Tag = start.Tag };
                     break;
                 case MappingStart start:
-                    produced = new YamlMappingNode { Style = start.Style, Anchor = start.Anchor, Tag = start.Tag };
+                    produced = new YamlMappingNode(keys) { Style = start.Style, Anchor = start.Anchor, Tag = start.Tag };
                     break;
                 case SequenceEnd or MappingEnd:
                     closes = true;
@@ -334,7 +361,7 @@ internal static class EventDocumentBuilder
             parser.MoveNext();
             if (closes)
             {
-                stack.Pop();
+                building.Remove(stack.Pop().Node);
                 continue;
             }
 
@@ -368,6 +395,7 @@ internal static class EventDocumentBuilder
 
             if (current is SequenceStart or MappingStart)
             {
+                building.Add(produced);
                 stack.Push((produced, null));
             }
         }

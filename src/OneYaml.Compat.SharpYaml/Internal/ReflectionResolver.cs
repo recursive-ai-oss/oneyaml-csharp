@@ -92,7 +92,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         where T : struct
     {
         var inner = (Oy.YamlTypeInfo<T>)_default.GetTypeInfo(typeof(T), options)!;
-        return Oy.YamlMetadataServices.CreateValueInfo(options, new LenientScalarConverter<T>(inner.Converter, LenientScalarConverter<T>.ParserFor(), LenientScalarConverter<T>.IsInteger()));
+        return Oy.YamlMetadataServices.CreateValueInfo(options, new LenientScalarConverter<T>(inner.Converter, LenientScalarConverter<T>.ParserFor(inner), LenientScalarConverter<T>.IsInteger()));
     }
 
     private static Oy.YamlTypeInfo<TEnum> MakeEnum<TEnum>(Oy.YamlSerializerOptions options)

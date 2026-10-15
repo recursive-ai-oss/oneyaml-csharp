@@ -52,8 +52,9 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 | Difference | Repro |
 |---|---|
 | YAML 1.2 Core only: `1_000` and `0b11` are text, not numbers (the real library reads them as numbers) | `Deserialize<int>("1_000")` throws here (real: 1000) |
-| A hexadecimal integer is accepted into a `double` member | `Deserialize<Holder>("Score: 0x10")` |
+| A hexadecimal integer is accepted into a `double` member, and into `Int128`, `UInt128` and `Half` (the real library refuses it for these three; YAML 1.2 reads `0x10` as an integer, as for `long`) | `Deserialize<Holder>("Score: 0x10")`; `Deserialize<Int128>("0x10")` |
 | A very large integer in an `object` read is a `BigInteger` (real: `double`) | `Deserialize<object>("123456789012345678901234567890")` |
+| `Half` infinity and NaN are written as `.inf`, `-.inf` and `.nan`, the YAML 1.2 floats that `double` gets in both libraries (the real library writes `Infinity`, `-Infinity` and `NaN`, plain strings to any other reader), and `.inf`, `-.inf` and `.nan` are read into `Half` (the real library refuses them and reads its own spellings, which are text here) | `Serialize(Half.PositiveInfinity)` gives `.inf\n`; `Deserialize<Half>(".nan")` is NaN |
 | Whole doubles and halves are written with a fraction so they read back as floats, and an exponent form carries one too | `Serialize(100.0)` gives `100.0` (real: `100`); `Serialize(Half.Epsilon)` gives `6.0E-08` (real: `6E-08`) |
 | 1.1 look-alikes are quoted on output so any reader sees a string | `Serialize("y")` gives `'y'`; also `'Y'`, `'on'` |
 | Member order is base class first, fields before properties; `Sorted` order applies to members only | `Serialize(new Derived())` |

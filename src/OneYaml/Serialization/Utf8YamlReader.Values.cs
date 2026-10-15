@@ -391,26 +391,40 @@ public ref partial struct Utf8YamlReader
         }
     }
 
-    // A decimal float is parsed straight to Half: going through double first rounds twice and can land one step off.
+    // Half.TryParse does not round every tie and near-tie correctly on every runtime, so the text goes through double, which
+    // does, and the one case where two roundings can disagree is settled from the text: a double that sits exactly on the
+    // midpoint of two Half values may stand for a text a little above or below it. A double that is not on a midpoint
+    // rounds to the same Half as the text, because no midpoint can lie between the text and its nearest double.
     internal readonly NumberStatus TryReadHalf(out Half value)
     {
         value = default;
-        if (Type == YamlTokenType.Scalar)
+        NumberStatus s = TryReadDouble(out double v);
+        if (s != NumberStatus.Ok)
+        {
+            return s;
+        }
+
+        value = (Half)v;
+        if (double.IsFinite(v) && v != 0 && IsHalfMidpoint(Math.Abs(v)) && Type == YamlTokenType.Scalar)
         {
             byte[]? rented = null;
             try
             {
                 Span<byte> scratch = stackalloc byte[ScratchSize];
                 ReadOnlySpan<byte> t = Text(scratch, ref rented);
-                if (TryResolve(t, out ScalarKind k) && k == ScalarKind.Float && t.IndexOfAny((byte)'f', (byte)'F') < 0
-                    && t.IndexOfAny((byte)'n', (byte)'N') < 0)
+                if (TryResolve(t, out ScalarKind k) && k == ScalarKind.Float)
                 {
-                    if (!Half.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value))
+                    int order = CompareDecimalToMidpoint(t, Math.Abs(v));
+                    if (order != 0)
                     {
-                        return NumberStatus.NotNumber;
+                        // The cast chose the even neighbour of the midpoint; the text decides instead.
+                        ushort bits = BitConverter.HalfToUInt16Bits(value);
+                        bool castWentUp = Math.Abs((double)value) > Math.Abs(v);
+                        ushort magnitude = (ushort)(bits & 0x7FFF);
+                        ushort lower = castWentUp ? (ushort)(magnitude - 1) : magnitude;
+                        ushort chosen = order > 0 ? (ushort)(lower + 1) : lower;
+                        value = BitConverter.UInt16BitsToHalf((ushort)(chosen | (bits & 0x8000)));
                     }
-
-                    return Half.IsInfinity(value) ? NumberStatus.OutOfRange : NumberStatus.Ok;
                 }
             }
             finally
@@ -422,14 +436,108 @@ public ref partial struct Utf8YamlReader
             }
         }
 
-        NumberStatus s = TryReadDouble(out double v);
-        if (s != NumberStatus.Ok)
+        return Half.IsInfinity(value) && !double.IsInfinity(v) ? NumberStatus.OutOfRange : NumberStatus.Ok;
+    }
+
+    // Whether a positive finite double is exactly halfway between two adjacent Half values (65520 is halfway between the
+    // largest Half and the next step up).
+    private static bool IsHalfMidpoint(double magnitude)
+    {
+        if (magnitude >= 65520.0)
         {
-            return s;
+            return magnitude == 65520.0;
         }
 
-        value = (Half)v;
-        return Half.IsInfinity(value) && !double.IsInfinity(v) ? NumberStatus.OutOfRange : NumberStatus.Ok;
+        // Half values are multiples of 2^-24; a midpoint is an odd multiple of 2^-25 at the scale of its binade.
+        double scaled = magnitude * 33554432.0; // 2^25, exact
+        if (scaled != Math.Floor(scaled))
+        {
+            return false;
+        }
+
+        long k = (long)scaled;
+        // Spacing between Half values in this binade is 2^(e-10) with e the exponent of the value (at least -14).
+        int exponent = Math.Max(-14, Math.ILogB(magnitude));
+        int spacingShift = exponent - 10 + 24; // spacing in units of 2^-24
+        long unit = 2L << spacingShift;        // spacing in units of 2^-25
+        return k % unit == unit / 2;
+    }
+
+    // Compares the decimal float text with a midpoint exactly: -1 below, 0 equal, 1 above. A midpoint has a short, exact
+    // decimal expansion, so both sides are reduced to their significant digits and a decimal exponent.
+    private static int CompareDecimalToMidpoint(ReadOnlySpan<byte> text, double midpoint)
+    {
+        // The midpoint as digits: midpoint = k / 2^25 = k * 5^25 / 10^25.
+        var scaled = new System.Numerics.BigInteger(midpoint * 33554432.0) * System.Numerics.BigInteger.Pow(5, 25);
+        string wanted = scaled.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int wantedPoint = wanted.Length - 25;
+        wanted = wanted.TrimEnd('0');
+
+        // The text: sign, digits with an optional point, optional exponent.
+        int i = 0;
+        if (i < text.Length && (text[i] == (byte)'+' || text[i] == (byte)'-'))
+        {
+            i++;
+        }
+
+        var digits = new System.Text.StringBuilder(text.Length);
+        int intDigits = 0;
+        bool seenPoint = false;
+        for (; i < text.Length; i++)
+        {
+            byte c = text[i];
+            if (c == (byte)'.')
+            {
+                seenPoint = true;
+            }
+            else if (c >= (byte)'0' && c <= (byte)'9')
+            {
+                digits.Append((char)c);
+                if (!seenPoint)
+                {
+                    intDigits++;
+                }
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        long exponent = 0;
+        if (i < text.Length)
+        {
+            i++; // the e or E
+            bool negative = false;
+            if (i < text.Length && (text[i] == (byte)'+' || text[i] == (byte)'-'))
+            {
+                negative = text[i] == (byte)'-';
+                i++;
+            }
+
+            for (; i < text.Length; i++)
+            {
+                // A double that sits on a midpoint has a small exponent; the cap only keeps the sum from overflowing.
+                exponent = Math.Min(exponent * 10 + (text[i] - (byte)'0'), 1_000_000);
+            }
+
+            if (negative)
+            {
+                exponent = -exponent;
+            }
+        }
+
+        string all = digits.ToString();
+        string significant = all.TrimStart('0');
+        long point = intDigits + exponent - (all.Length - significant.Length);
+        significant = significant.TrimEnd('0');
+        if (point != wantedPoint)
+        {
+            return point > wantedPoint ? 1 : -1;
+        }
+
+        // Same magnitude: the digit strings order like the numbers (a shorter one is a prefix padded with zeros).
+        return Math.Sign(string.CompareOrdinal(significant, wanted));
     }
 
     internal readonly NumberStatus TryReadDecimal(out decimal value)

@@ -57,6 +57,7 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
     {
         double d => double.IsFinite(d),
         float f => float.IsFinite(f),
+        Half h => Half.IsFinite(h),
         _ => true,
     };
 
@@ -126,7 +127,7 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
         return i == text.Length;
     }
 
-    internal static TextParser<T>? ParserFor()
+    internal static TextParser<T>? ParserFor(Oy.YamlTypeInfo<T> inner)
     {
         const NumberStyles Int = NumberStyles.AllowLeadingSign;
         const NumberStyles Float = NumberStyles.Float;
@@ -180,11 +181,38 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
         {
             parser = new TextParser<bool>((string s, out bool v) => bool.TryParse(s, out v));
         }
+        else if (typeof(T) == typeof(Int128))
+        {
+            parser = new TextParser<Int128>((string s, out Int128 v) => Int128.TryParse(s, Int, inv, out v));
+        }
+        else if (typeof(T) == typeof(UInt128))
+        {
+            parser = new TextParser<UInt128>((string s, out UInt128 v) => UInt128.TryParse(s, Int, inv, out v));
+        }
+        else if (typeof(T) == typeof(Half))
+        {
+            // The engine rounds a decimal text to Half exactly; Half.TryParse does not on every runtime.
+            var info = (Oy.YamlTypeInfo<Half>)(object)inner;
+            parser = new TextParser<Half>((string s, out Half v) =>
+            {
+                try
+                {
+                    v = Oy.YamlSerializer.Deserialize(s, info);
+                    return true;
+                }
+                catch (Oy.YamlException)
+                {
+                    v = default;
+                    return false;
+                }
+            });
+        }
 
         return (TextParser<T>?)parser;
     }
 
     internal static bool IsInteger() =>
         typeof(T) == typeof(int) || typeof(T) == typeof(long) || typeof(T) == typeof(short) || typeof(T) == typeof(sbyte)
-        || typeof(T) == typeof(byte) || typeof(T) == typeof(ushort) || typeof(T) == typeof(uint) || typeof(T) == typeof(ulong);
+        || typeof(T) == typeof(byte) || typeof(T) == typeof(ushort) || typeof(T) == typeof(uint) || typeof(T) == typeof(ulong)
+        || typeof(T) == typeof(Int128) || typeof(T) == typeof(UInt128);
 }

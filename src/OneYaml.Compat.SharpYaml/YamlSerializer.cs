@@ -114,53 +114,52 @@ public static class YamlSerializer
     // The second document may be preceded by directives or comments that belong to it; they are cut off as well.
     private static T? ReadPrefix<T>(ReadOnlySpan<char> yaml, int cut, Oy.YamlTypeInfo<T> info)
     {
-        while (true)
+        try
         {
-            try
-            {
-                return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
-            }
-            catch (Oy.YamlException) when (TrimTrailingLines(yaml, ref cut))
-            {
-            }
+            return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
         }
+        catch (Oy.YamlException error) when (CutAtError(yaml, error, ref cut))
+        {
+        }
+
+        return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
     }
 
-    // Drops the trailing run of directive, comment and blank lines from the prefix in one step, so a first document
-    // followed by thousands of such lines is parsed twice at most. Blank lines that come before the first comment or
-    // directive stay, because they can belong to a block scalar that keeps its trailing line breaks. False when the run
-    // holds no comment or directive, or when nothing would be left. This runs only after the prefix failed to read as it
-    // stands; a directive-looking line inside a scalar is part of the text and never gets here.
-    private static bool TrimTrailingLines(ReadOnlySpan<char> yaml, ref int cut)
+    // SharpYaml takes a % line after a block collection for the directive of the next document, while after a scalar the
+    // same line is part of the scalar. So the prefix is first read as it stands, and only when that fails, the text is cut
+    // at the start of the line where the failure was reported, provided that line and everything after it is blank, a
+    // comment or a directive. Cutting there, not at the start of the whole run, keeps the lines before it that still belong
+    // to the first document (a % line that continues a plain scalar). One cut, one more parse: a first document followed by
+    // thousands of such lines is read twice at most. False when the failure is anywhere else.
+    private static bool CutAtError(ReadOnlySpan<char> yaml, Oy.YamlException error, ref int cut)
     {
-        ReadOnlySpan<char> rest = yaml[..cut];
-        int firstMarked = -1;
-        while (!rest.IsEmpty)
-        {
-            int end = rest.TrimEnd("\r\n").Length;
-            int start = rest[..end].LastIndexOfAny('\n', '\r') + 1;
-            ReadOnlySpan<char> line = rest[start..end];
-            if (line.IsWhiteSpace())
-            {
-                rest = rest[..start];
-                continue;
-            }
-
-            if (line[0] is not ('%' or '#'))
-            {
-                break;
-            }
-
-            firstMarked = start;
-            rest = rest[..start];
-        }
-
-        if (firstMarked <= 0)
+        ReadOnlySpan<char> head = yaml[..cut];
+        int at = ErrorMap.CharIndexOf(error, head);
+        if (at < 0)
         {
             return false;
         }
 
-        cut = firstMarked;
+        int start = head[..Math.Min(at, head.Length)].LastIndexOfAny('\n', '\r') + 1;
+        if (start <= 0 || start >= head.Length)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> rest = head[start..];
+        while (!rest.IsEmpty)
+        {
+            int eol = rest.IndexOfAny('\n', '\r');
+            ReadOnlySpan<char> line = eol < 0 ? rest : rest[..eol];
+            if (!line.IsWhiteSpace() && line[0] is not ('%' or '#'))
+            {
+                return false;
+            }
+
+            rest = eol < 0 ? default : rest[(eol + 1)..];
+        }
+
+        cut = start;
         return true;
     }
 
@@ -171,14 +170,16 @@ public static class YamlSerializer
         int cut = Documents.FirstDocumentEnd(yaml);
         if (cut > 0)
         {
+            bool retried = false;
             while (true)
             {
                 try
                 {
                     return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
                 }
-                catch (Oy.YamlException) when (TrimTrailingLines(yaml, ref cut))
+                catch (Oy.YamlException error) when (!retried && CutAtError(yaml, error, ref cut))
                 {
+                    retried = true;
                 }
                 catch (Oy.YamlException)
                 {
