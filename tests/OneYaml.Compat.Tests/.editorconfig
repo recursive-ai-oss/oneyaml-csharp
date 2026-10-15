@@ -1,0 +1,19 @@
+# Test code builds many throwaway strings and arrays; these rules guard library behaviour, not test scaffolding.
+[*.cs]
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1307.severity = none
+dotnet_diagnostic.CA1310.severity = none
+dotnet_diagnostic.CA1861.severity = none
+dotnet_diagnostic.CA1859.severity = none
+dotnet_diagnostic.CA2201.severity = none
+dotnet_diagnostic.CA1051.severity = none
+dotnet_diagnostic.CA1720.severity = none
+dotnet_diagnostic.CA1819.severity = none
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+dotnet_diagnostic.CA1062.severity = none
+dotnet_diagnostic.CA1812.severity = none
+dotnet_diagnostic.CA1515.severity = none
+dotnet_diagnostic.CA1822.severity = none
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1716.severity = none
