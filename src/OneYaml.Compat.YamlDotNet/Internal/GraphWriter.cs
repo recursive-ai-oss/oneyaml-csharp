@@ -42,7 +42,7 @@ internal sealed class GraphWriter
 
     private void WriteValue(object? value, Type? declared, ScalarStyle memberStyle, bool isKey)
     {
-        if (++_depth > _settings.MaxRecursion)
+        if (++_depth > _settings.EffectiveMaxRecursion || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             throw new MaximumRecursionLevelReachedException("Too much recursion when traversing the object graph.");
         }

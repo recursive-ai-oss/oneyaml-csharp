@@ -48,7 +48,7 @@ internal sealed class NodeBinder
 
     public object? Bind(BindContext c, int node, Type type)
     {
-        if (++c.Depth > _settings.MaxRecursion)
+        if (++c.Depth > _settings.EffectiveMaxRecursion || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             Mark at = c.Source.MarkAt(c.S.Node(node).Start);
             throw new MaximumRecursionLevelReachedException(at, at, "Maximum level of recursion reached");
