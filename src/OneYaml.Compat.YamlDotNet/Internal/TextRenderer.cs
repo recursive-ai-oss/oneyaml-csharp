@@ -47,12 +47,41 @@ internal sealed class TextRenderer
         _depth = 0;
         _lineOpen = false;
         _anchorNames.Clear();
+        // Names the caller gave stay as they are; the generated ones skip any name already taken, so an alias
+        // can never resolve to a different node than the one it pointed at.
+        HashSet<string> taken = [];
+        for (int i = from; i < to; i++)
+        {
+            if (buffer[i].Anchor is { } used)
+            {
+                taken.Add(used);
+            }
+            else if (buffer[i].Kind == EvKind.Alias && buffer[i].Target < 0 && buffer[i].Text is { } unresolved)
+            {
+                taken.Add(unresolved);
+            }
+        }
+
         int named = 0;
         for (int i = from; i < to; i++)
         {
             if (buffer[i].NeedsAnchor)
             {
-                _anchorNames[i] = buffer[i].Anchor ?? "o" + named++.ToString(CultureInfo.InvariantCulture);
+                string auto;
+                if (buffer[i].Anchor is { } given0)
+                {
+                    auto = given0;
+                }
+                else
+                {
+                    do
+                    {
+                        auto = "o" + named++.ToString(CultureInfo.InvariantCulture);
+                    }
+                    while (taken.Contains(auto));
+                }
+
+                _anchorNames[i] = auto;
             }
             else if (buffer[i].Anchor is { } given)
             {
@@ -132,6 +161,7 @@ internal sealed class TextRenderer
         bool isMapping = e.Kind == EvKind.MappingStart;
         bool empty = collection && i + 1 < buffer.Count && buffer[i + 1].Kind is EvKind.SequenceEnd or EvKind.MappingEnd;
         bool flow = _settings.JsonCompatible || e.Flow || (!root && parent.Flow);
+        bool explicitScalarKey = isKey && e.Kind == EvKind.Scalar && NeedsExplicitKey(ref e, parent.Flow || flow);
         string? anchor = _anchorNames.TryGetValue(i, out string? name) ? name : null;
         string props = Properties(anchor, e.Tag);
 
@@ -165,6 +195,11 @@ internal sealed class TextRenderer
             {
                 Raw(", ");
             }
+
+            if (explicitScalarKey)
+            {
+                Raw("? ");
+            }
         }
         else if (parent.IsMapping)
         {
@@ -176,11 +211,12 @@ internal sealed class TextRenderer
                     _w.WriteSpaces(parent.Indent);
                 }
 
-                if (collection)
+                if (collection || explicitScalarKey)
                 {
                     Raw("? ");
                     _frames[_depth - 1].ExplicitKey = true;
-                    flow = true;
+                    parent.ExplicitKey = true;
+                    flow = flow || collection;
                 }
             }
             else if (parent.ExplicitKey)
@@ -233,7 +269,7 @@ internal sealed class TextRenderer
                 Raw(" ");
             }
 
-            WriteScalar(ref e, parent.Flow || flow, isKey, parentIndent, contentIndent);
+            WriteScalar(ref e, parent.Flow || flow, isKey, parentIndent, contentIndent, explicitScalarKey);
             After(isKey, parent, root, flow);
             return i + 1;
         }
@@ -353,7 +389,56 @@ internal sealed class TextRenderer
 
     private bool _blockEnded;
 
-    private void WriteScalar(ref Ev e, bool flow, bool isKey, int parentIndent, int contentIndent)
+    // The style a string is asked for: the one it has, else folded for text with line breaks and plain for the rest.
+    private ScalarWriteStyle PreferredStyle(byte[] bytes, string text, ScalarStyle style, bool flow, bool isKey, EmitContext context, int parentIndent, int contentIndent)
+    {
+        ScalarWriteStyle preferred = style switch
+        {
+            ScalarStyle.SingleQuoted => ScalarWriteStyle.SingleQuoted,
+            ScalarStyle.DoubleQuoted => ScalarWriteStyle.DoubleQuoted,
+            ScalarStyle.Literal => ScalarWriteStyle.Literal,
+            ScalarStyle.Folded => ScalarWriteStyle.Folded,
+            _ => text.Contains('\n', StringComparison.Ordinal) && !flow && !isKey ? ScalarWriteStyle.Folded : ScalarWriteStyle.Plain,
+        };
+        // With quoting of necessary strings on, the quotes a string needs are double quotes.
+        if (_settings.QuoteNecessaryStrings && preferred == ScalarWriteStyle.Plain
+            && Utf8YamlWriter.ChooseStyle(bytes, preferred, context, StyleMode.Dump, parentIndent, contentIndent) == ScalarWriteStyle.SingleQuoted)
+        {
+            preferred = ScalarWriteStyle.DoubleQuoted;
+        }
+
+        return preferred;
+    }
+
+    // Tells whether a key must be written after "? " because it is longer than an implicit key may be.
+    private bool NeedsExplicitKey(ref Ev e, bool flow)
+    {
+        string text = e.Text ?? string.Empty;
+        if (text.Length == 0 && !e.IsString)
+        {
+            return false;
+        }
+
+        ScalarStyle style = _settings.JsonCompatible && e.IsString ? ScalarStyle.DoubleQuoted : e.Style;
+        if (text.Length <= 150)
+        {
+            return false;
+        }
+
+        EmitContext context = flow ? EmitContext.FlowKey : EmitContext.BlockKey;
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        ScalarWriteStyle preferred = e.IsString
+            ? PreferredStyle(bytes, text, style, flow, true, context, 0, 2)
+            : style switch
+            {
+                ScalarStyle.SingleQuoted => ScalarWriteStyle.SingleQuoted,
+                ScalarStyle.DoubleQuoted => ScalarWriteStyle.DoubleQuoted,
+                _ => ScalarWriteStyle.Plain,
+            };
+        return Utf8YamlWriter.ChooseStyle(bytes, preferred, context, StyleMode.Dump) == ScalarWriteStyle.ExplicitKeyRequired;
+    }
+
+    private void WriteScalar(ref Ev e, bool flow, bool isKey, int parentIndent, int contentIndent, bool explicitKey)
     {
         string text = e.Text ?? string.Empty;
         ScalarStyle style = e.Style;
@@ -378,33 +463,22 @@ internal sealed class TextRenderer
 
         EmitContext context = flow ? (isKey ? EmitContext.FlowKey : EmitContext.FlowValue) : (isKey ? EmitContext.BlockKey : EmitContext.BlockValue);
         byte[] bytes = Encoding.UTF8.GetBytes(text);
+        if (explicitKey)
+        {
+            // A key too long to be implicit: after "? " the text may be as long as it needs to be.
+            _w.WriteExplicitKeyText(bytes, flow);
+            return;
+        }
+
         if (!e.IsString)
         {
             WriteRawScalar(bytes, text, style, flow, parentIndent, contentIndent, context);
             return;
         }
 
-        ScalarWriteStyle preferred = style switch
-        {
-            ScalarStyle.SingleQuoted => ScalarWriteStyle.SingleQuoted,
-            ScalarStyle.DoubleQuoted => ScalarWriteStyle.DoubleQuoted,
-            ScalarStyle.Literal => ScalarWriteStyle.Literal,
-            ScalarStyle.Folded => ScalarWriteStyle.Folded,
-            _ => text.Contains('\n', StringComparison.Ordinal) && !flow && !isKey ? ScalarWriteStyle.Folded : ScalarWriteStyle.Plain,
-        };
-        // With quoting of necessary strings on, the quotes a string needs are double quotes.
-        if (_settings.QuoteNecessaryStrings && preferred == ScalarWriteStyle.Plain
-            && Utf8YamlWriter.ChooseStyle(bytes, preferred, context, StyleMode.Dump, parentIndent, contentIndent) == ScalarWriteStyle.SingleQuoted)
-        {
-            preferred = ScalarWriteStyle.DoubleQuoted;
-        }
-
+        ScalarWriteStyle preferred = PreferredStyle(bytes, text, style, flow, isKey, context, parentIndent, contentIndent);
         ScalarWriteStyle used = _w.WriteString(bytes, preferred, context, StyleMode.Dump, parentIndent, contentIndent);
-        if (used == ScalarWriteStyle.ExplicitKeyRequired)
-        {
-            _w.WriteDoubleQuoted(bytes);
-        }
-        else if (used is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded)
+        if (used is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded)
         {
             _blockEnded = true;
             _lineOpen = false;

@@ -70,45 +70,129 @@ public abstract class YamlVisitorBase : IYamlVisitor
     /// <inheritdoc/>
     public virtual void Visit(YamlMappingNode mapping) => VisitChildren(mapping);
 
+    // A walk through the base class is bounded in depth, in nodes visited and in scalar text seen, because a model
+    // built from aliases can be far larger as a tree than it is in memory. The counts start over with each walk.
+    private int _depth;
+    private int _visits;
+    private long _bytes;
+
+    private void Enter()
+    {
+        if (_depth == 0)
+        {
+            _visits = 0;
+            _bytes = 0;
+        }
+
+        if (++_depth > YamlNode.MaxDepth || ++_visits > YamlNode.MaxVisits || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        {
+            _depth = 0;
+            throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
+        }
+    }
+
+    private void Count(YamlNode child)
+    {
+        if (++_visits > YamlNode.MaxVisits)
+        {
+            _depth = 0;
+            throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
+        }
+
+        if (child is YamlScalarNode { Value: { } text } && (_bytes += text.Length) > YamlNode.MaxTextChars)
+        {
+            _depth = 0;
+            throw new MaximumRecursionLevelReachedException("The node tree holds more text than the limits allow.");
+        }
+    }
+
     /// <summary>Visits the documents of a stream.</summary>
-    /// <param name="stream">The stream.</param>
+    /// <param name="stream">The node.</param>
     protected virtual void VisitChildren(YamlStream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        foreach (YamlDocument document in stream.Documents)
+        Enter();
+        try
         {
-            document.Accept(this);
+            foreach (YamlDocument document in stream.Documents)
+            {
+                document.Accept(this);
+            }
+        }
+        finally
+        {
+            if (_depth > 0)
+            {
+                _depth--;
+            }
         }
     }
 
     /// <summary>Visits the root of a document.</summary>
-    /// <param name="document">The document.</param>
+    /// <param name="document">The node.</param>
     protected virtual void VisitChildren(YamlDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
-        document.RootNode.Accept(this);
+        Enter();
+        try
+        {
+            Count(document.RootNode);
+            document.RootNode.Accept(this);
+        }
+        finally
+        {
+            if (_depth > 0)
+            {
+                _depth--;
+            }
+        }
     }
 
     /// <summary>Visits the items of a sequence.</summary>
-    /// <param name="sequence">The sequence.</param>
+    /// <param name="sequence">The node.</param>
     protected virtual void VisitChildren(YamlSequenceNode sequence)
     {
         ArgumentNullException.ThrowIfNull(sequence);
-        foreach (YamlNode node in sequence.Children)
+        Enter();
+        try
         {
-            node.Accept(this);
+            foreach (YamlNode node in sequence.Children)
+            {
+                Count(node);
+                node.Accept(this);
+            }
+        }
+        finally
+        {
+            if (_depth > 0)
+            {
+                _depth--;
+            }
         }
     }
 
     /// <summary>Visits the keys and values of a mapping.</summary>
-    /// <param name="mapping">The mapping.</param>
+    /// <param name="mapping">The node.</param>
     protected virtual void VisitChildren(YamlMappingNode mapping)
     {
         ArgumentNullException.ThrowIfNull(mapping);
-        foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+        Enter();
+        try
         {
-            pair.Key.Accept(this);
-            pair.Value.Accept(this);
+            foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+            {
+                Count(pair.Key);
+                pair.Key.Accept(this);
+                Count(pair.Value);
+                pair.Value.Accept(this);
+            }
+        }
+        finally
+        {
+            if (_depth > 0)
+            {
+                _depth--;
+            }
         }
     }
 }
@@ -120,6 +204,13 @@ public abstract class YamlNode
     // larger as a tree than as text, so every walk is bounded.
     internal const int MaxDepth = 1000;
     internal const int MaxVisits = 1_000_000;
+
+    // The most text, in characters, that ToString or a visitor walk may produce or see.
+    internal const int MaxTextChars = 32 * 1024 * 1024;
+
+    // Hashing looks at this many nodes at most, level by level so that keys that differ in a late item still differ. Equal nodes agree on every node they share, so equal nodes hash alike,
+    // and a key that is a huge shared structure costs no more to hash than a small one.
+    private const int HashNodes = 32;
 
     private Loaded? _source;
     private int _startOffset = -1;
@@ -214,8 +305,59 @@ public abstract class YamlNode
     public override int GetHashCode()
     {
         var hash = new HashCode();
-        int visits = 0;
-        Hash(ref hash, 0, ref visits);
+        if (this is YamlScalarNode only)
+        {
+            // The usual key is a scalar: no queue needed.
+            hash.Add(NodeType);
+            hash.Add(Tag.Value, StringComparer.Ordinal);
+            hash.Add(only.Value, StringComparer.Ordinal);
+            return hash.ToHashCode();
+        }
+
+        var queue = new Queue<YamlNode>();
+        queue.Enqueue(this);
+        int seen = 0;
+        while (queue.Count > 0 && seen++ < HashNodes)
+        {
+            YamlNode node = queue.Dequeue();
+            hash.Add(node.NodeType);
+            hash.Add(node.Tag.Value, StringComparer.Ordinal);
+            switch (node)
+            {
+                case YamlScalarNode scalar:
+                    hash.Add(scalar.Value, StringComparer.Ordinal);
+                    break;
+                case YamlSequenceNode sequence:
+                    hash.Add(sequence.Children.Count);
+                    for (int i = 0; i < Math.Min(sequence.Children.Count, HashNodes); i++)
+                    {
+                        queue.Enqueue(sequence.Children[i]);
+                    }
+
+                    break;
+                case YamlMappingNode mapping:
+                    hash.Add(mapping.Children.Count);
+                    var pairs = new List<YamlNode>();
+                    foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
+                    {
+                        if (pairs.Count >= HashNodes)
+                        {
+                            break;
+                        }
+
+                        pairs.Add(pair.Key);
+                        pairs.Add(pair.Value);
+                    }
+
+                    foreach (YamlNode child in pairs)
+                    {
+                        queue.Enqueue(child);
+                    }
+
+                    break;
+            }
+        }
+
         return hash.ToHashCode();
     }
 
@@ -232,7 +374,14 @@ public abstract class YamlNode
 
     internal abstract void Print(StringBuilder sb, int depth, ref int visits);
 
-    internal abstract void Hash(ref HashCode hash, int depth, ref int visits);
+    // Text produced by ToString is bounded: a shared structure can print far larger than it is in memory.
+    internal static void CheckSize(StringBuilder sb)
+    {
+        if (sb.Length > MaxTextChars)
+        {
+            throw new MaximumRecursionLevelReachedException("The text of the node tree is longer than the limits allow.");
+        }
+    }
 
     internal static void Guard(int depth, ref int visits)
     {
@@ -248,6 +397,7 @@ public abstract class YamlNode
         var stack = new Stack<(YamlNode, YamlNode, int)>();
         stack.Push((a, b, 0));
         int visits = 0;
+        long compared = 0;
         while (stack.Count > 0)
         {
             (YamlNode x, YamlNode y, int depth) = stack.Pop();
@@ -268,6 +418,11 @@ public abstract class YamlNode
                     if (!string.Equals(sx.Value, ((YamlScalarNode)y).Value, StringComparison.Ordinal))
                     {
                         return false;
+                    }
+
+                    if ((compared += sx.Value?.Length ?? 0) > MaxTextChars)
+                    {
+                        throw new MaximumRecursionLevelReachedException("The node trees hold more text than the limits allow.");
                     }
 
                     break;
@@ -353,13 +508,9 @@ public sealed class YamlScalarNode : YamlNode
     {
         Guard(depth, ref visits);
         sb.Append(Value);
+        CheckSize(sb);
     }
 
-    internal override void Hash(ref HashCode hash, int depth, ref int visits)
-    {
-        Guard(depth, ref visits);
-        hash.Add(Value, StringComparer.Ordinal);
-    }
 }
 
 /// <summary>A sequence node.</summary>
@@ -430,6 +581,7 @@ public sealed class YamlSequenceNode : YamlNode, IEnumerable<YamlNode>
     internal override void Print(StringBuilder sb, int depth, ref int visits)
     {
         Guard(depth, ref visits);
+        CheckSize(sb);
         sb.Append("[ ");
         for (int i = 0; i < Children.Count; i++)
         {
@@ -444,14 +596,6 @@ public sealed class YamlSequenceNode : YamlNode, IEnumerable<YamlNode>
         sb.Append(" ]");
     }
 
-    internal override void Hash(ref HashCode hash, int depth, ref int visits)
-    {
-        Guard(depth, ref visits);
-        foreach (YamlNode child in Children)
-        {
-            child.Hash(ref hash, depth + 1, ref visits);
-        }
-    }
 }
 
 /// <summary>A mapping node.</summary>
@@ -567,6 +711,7 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
     internal override void Print(StringBuilder sb, int depth, ref int visits)
     {
         Guard(depth, ref visits);
+        CheckSize(sb);
         sb.Append("{ ");
         bool first = true;
         foreach (KeyValuePair<YamlNode, YamlNode> pair in Children)
@@ -587,13 +732,4 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
         sb.Append(" }");
     }
 
-    internal override void Hash(ref HashCode hash, int depth, ref int visits)
-    {
-        Guard(depth, ref visits);
-        foreach (KeyValuePair<YamlNode, YamlNode> pair in Children)
-        {
-            pair.Key.Hash(ref hash, depth + 1, ref visits);
-            pair.Value.Hash(ref hash, depth + 1, ref visits);
-        }
-    }
 }

@@ -182,11 +182,11 @@ public class RepresentationTests
         c.Save(cw, false);
 
         // The text can differ in layout details; what a reader gets back must not.
-        var r2 = new Rl.YamlStream();
-        r2.Load(new StringReader(cw.ToString()));
-        var r3 = new Rl.YamlStream();
-        r3.Load(new StringReader(rw.ToString()));
-        Assert.Equal(Shape(r3), Shape(r2));
+        var viaCompat = new Rl.YamlStream();
+        viaCompat.Load(new StringReader(cw.ToString()));
+        var viaReal = new Rl.YamlStream();
+        viaReal.Load(new StringReader(rw.ToString()));
+        Assert.Equal(Shape(viaReal), Shape(viaCompat));
         Assert.Equal(rw.ToString(), cw.ToString().TrimEnd() + "\n...\n");
     }
 
