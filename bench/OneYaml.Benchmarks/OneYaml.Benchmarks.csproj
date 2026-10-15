@@ -22,6 +22,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
     <ProjectReference Include="../../src/OneYaml.Compat.YamlDotNet/OneYaml.Compat.YamlDotNet.csproj" />
+    <ProjectReference Include="../../src/OneYaml.Compat.SharpYaml/OneYaml.Compat.SharpYaml.csproj" />
     <ProjectReference Include="../../src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

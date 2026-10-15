@@ -223,6 +223,12 @@
       "oneyaml": {
         "type": "Project"
       },
+      "oneyaml.compat.sharpyaml": {
+        "type": "Project",
+        "dependencies": {
+          "OneYaml": "[1.0.0, )"
+        }
+      },
       "oneyaml.compat.yamldotnet": {
         "type": "Project",
         "dependencies": {
@@ -473,6 +479,12 @@
       },
       "oneyaml": {
         "type": "Project"
+      },
+      "oneyaml.compat.sharpyaml": {
+        "type": "Project",
+        "dependencies": {
+          "OneYaml": "[1.0.0, )"
+        }
       },
       "oneyaml.compat.yamldotnet": {
         "type": "Project",

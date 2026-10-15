@@ -14,11 +14,13 @@
     <PackageReference Include="xunit.v3" />
     <!-- The real library, as the reference the compat package is checked against; never referenced by the package. -->
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="SharpYaml" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
     <ProjectReference Include="../../src/OneYaml.Compat.YamlDotNet/OneYaml.Compat.YamlDotNet.csproj" />
+    <ProjectReference Include="../../src/OneYaml.Compat.SharpYaml/OneYaml.Compat.SharpYaml.csproj" />
   </ItemGroup>
 
 </Project>
