@@ -60,6 +60,10 @@ internal struct TapeEvent
 
     // For an alias event, the index of the anchor entry it refers to.
     public int Alias;
+
+    // For an event that starts an anchored node on a tape made from a document: its anchor entry plus one,
+    // so that zero means none.
+    public int Anchor;
 }
 
 // An anchor definition. Names are offsets into the source, so nothing is allocated per anchor.
@@ -423,6 +427,17 @@ public ref partial struct Utf8YamlReader
 
             if (e.Type == YamlTokenType.Alias)
             {
+                if (!_expand)
+                {
+                    // The generic loader shares the value it built for the anchor, so the alias is delivered as it is.
+                    Type = YamlTokenType.Alias;
+                    AliasEntry = e.Alias;
+                    Start = e.Start;
+                    End = e.End;
+                    NodeEntry = -1;
+                    return true;
+                }
+
                 // The charge for this expansion was taken with the outer alias.
                 PushReplay(e.Alias);
                 continue;
@@ -438,7 +453,7 @@ public ref partial struct Utf8YamlReader
             BlockIndent = e.BlockIndent;
             Start = e.Start;
             End = e.End;
-            NodeEntry = -1;
+            NodeEntry = e.Anchor - 1;
             Track(e.Type);
             return true;
         }

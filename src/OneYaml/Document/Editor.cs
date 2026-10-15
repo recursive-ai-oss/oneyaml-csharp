@@ -207,6 +207,8 @@ internal static partial class Editor
             contentIndent = n.Aux;
         }
 
+        // A string with line breaks inside a collection that replaces a block scalar keeps that block style.
+        ScalarWriteStyle nested = n.Kind == NodeKind.Scalar && pref is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded ? pref : ScalarWriteStyle.Plain;
         bool oldKeep = n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded && (Chomping)n.Chomp == Chomping.Keep;
         int regionEnd = oldKeep ? DocState.TrimBlankLines(src, n.Start, n.End, n.Aux) : n.End;
         if (v.IsScalar)
@@ -277,33 +279,12 @@ internal static partial class Editor
                 edit.Write((byte)'\n');
             }
         }
-        else if (parent >= 0 && !inFlow && !hasProps && slotStart >= 0 && n.Start > slotStart && HasCommentIn(src, slotStart, n.Start))
+        else if (parent >= 0 && !inFlow && slotStart >= 0 && n.Start > slotStart && HasCommentIn(s, slotStart, n.Start) && !PropsCrossLines(s, node))
         {
             // A comment sits between the key (or dash) and a value on a later line. It stays, and only the
-            // value's own lines are replaced.
-            regionStart = s.LineStart(n.Start);
-            int col = n.Start - regionStart;
-            if (newBlockNonEmpty)
-            {
-                using var lines = new ByteBuffer();
-                ValueWriter.WriteBlock(lines, v, 0, col, false, lay);
-                ReadOnlySpan<byte> text = lines.WrittenSpan;
-                if (!oldEndsWithBreak)
-                {
-                    text = text.Slice(0, text.Length - 1);
-                }
-
-                edit.Write(text);
-            }
-            else
-            {
-                edit.WriteSpaces(col);
-                edit.Write(body.WrittenSpan);
-                if (oldEndsWithBreak && !valueEndsWithBreak)
-                {
-                    edit.Write((byte)'\n');
-                }
-            }
+            // value's own line and lines are replaced. Properties on the key's line stay there (or lose the
+            // tag that no longer fits); properties on the value's line are written again in front of the value.
+            return ReplaceAfterComment(s, limits, node, v, body.WrittenSpan, lay, ownerCol, oldEndsWithBreak, valueEndsWithBreak, regionEnd, nested, keepTag);
         }
         else
         {
@@ -365,17 +346,17 @@ internal static partial class Editor
                         edit.Write((byte)'\n');
                     }
 
-                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay);
+                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay, valueStyle: nested);
                 }
                 else if (parent >= 0)
                 {
                     edit.Write((byte)'\n');
                     int col = ownerCol + (v[0].Kind == VKind.Mapping ? lay.Step : lay.SeqOffset);
-                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay);
+                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested);
                 }
                 else
                 {
-                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay);
+                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay, valueStyle: nested);
                 }
 
                 ReadOnlySpan<byte> text = lines.WrittenSpan;
@@ -383,6 +364,12 @@ internal static partial class Editor
                 if ((!oldEndsWithBreak && !(root && (n.Flags & NodeFlags.Empty) != 0)) || (endsAtBreak && (n.Flags & NodeFlags.Empty) != 0))
                 {
                     text = text.Slice(0, text.Length - 1);
+                }
+
+                if (oldKeep && text.EndsWith("\n\n"u8))
+                {
+                    // The new text carries its own blank lines (a kept block scalar inside it): the old ones go.
+                    regionEnd = BlankLinesEnd(src, regionEnd);
                 }
 
                 edit.Write(text);
@@ -436,8 +423,139 @@ internal static partial class Editor
         return new BlockHeader(chomping, indicator);
     }
 
-    // Between a key (or dash) and a value on a later line only blanks and comments can lie.
-    private static bool HasCommentIn(ReadOnlySpan<byte> src, int from, int to) => src.Slice(from, to - from).IndexOf((byte)'#') >= 0;
+    // Between a key (or dash) and a value on a later line only properties, blanks and comments can lie.
+    private static bool HasCommentIn(DocState s, int from, int to)
+    {
+        ReadOnlySpan<byte> src = s.Text;
+        for (int i = from; i < to; i++)
+        {
+            if (src[i] == (byte)'#' && s.IsCommentAt(i))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Whether the node's properties are split over two lines (an anchor on one, a tag on the next).
+    private static bool PropsCrossLines(DocState s, int node)
+    {
+        int start = s.PropStart(node);
+        int end = s.PropEnd(node);
+        return end > start && s.LineStart(start) != s.LineStart(end - 1);
+    }
+
+    // The value lines of a node that has a comment between its key (or dash) and its first line.
+    private static DocState ReplaceAfterComment(
+        DocState s,
+        YamlLimits limits,
+        int node,
+        ValueTree v,
+        ReadOnlySpan<byte> body,
+        Layout lay,
+        int ownerCol,
+        bool oldEndsWithBreak,
+        bool valueEndsWithBreak,
+        int regionEnd,
+        ScalarWriteStyle nested,
+        bool keepTag)
+    {
+        ReadOnlySpan<byte> src = s.Text;
+        ref readonly CstNode n = ref s.Node(node);
+        bool hasTag = s.HasTag(node);
+        bool anchor = s.HasAnchor(node);
+        bool propsUntouched = !hasTag || keepTag;
+        int propsStart = s.PropStart(node);
+        int propsEnd = s.PropEnd(node);
+        bool anyProps = propsEnd > propsStart;
+        int lineStart = s.LineStart(n.Start);
+        bool propsOnValueLine = anyProps && propsStart >= lineStart;
+        bool propsOnKeyLine = anyProps && !propsOnValueLine;
+
+        using var props = new ByteBuffer();
+        WriteProps(s, node, propsUntouched, anchor, props);
+        bool newBlockNonEmpty = !v.IsScalar && v[0].Count > 0;
+
+        // A sequence may sit as far left as its key; anything else must be indented under it.
+        int firstCol = (propsOnValueLine ? propsStart : n.Start) - lineStart;
+        int col = v[0].Kind == VKind.Sequence ? firstCol : Math.Max(firstCol, ownerCol + lay.Step);
+
+        using var edit = new ByteBuffer();
+        if (propsOnValueLine && newBlockNonEmpty && props.Count > 0)
+        {
+            // Properties of a block collection stand on a line of their own, above it.
+            edit.WriteSpaces(col);
+            edit.Write(props.WrittenSpan);
+            edit.Write((byte)'\n');
+        }
+
+        if (newBlockNonEmpty)
+        {
+            using var lines = new ByteBuffer();
+            ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested);
+            ReadOnlySpan<byte> text = lines.WrittenSpan;
+            if (!oldEndsWithBreak)
+            {
+                text = text.Slice(0, text.Length - 1);
+            }
+
+            if (text.EndsWith("\n\n"u8) && regionEnd < src.Length)
+            {
+                regionEnd = BlankLinesEnd(src, regionEnd);
+            }
+
+            edit.Write(text);
+        }
+        else
+        {
+            edit.WriteSpaces(col);
+            if (propsOnValueLine && props.Count > 0)
+            {
+                edit.Write(props.WrittenSpan);
+                edit.Write((byte)' ');
+            }
+
+            edit.Write(body);
+            if (oldEndsWithBreak && !valueEndsWithBreak)
+            {
+                edit.Write((byte)'\n');
+            }
+        }
+
+        using var final = new ByteBuffer(edit.Count + props.Count + 16);
+        Span<TextEdit> edits = stackalloc TextEdit[2];
+        int count = 0;
+        if (propsOnKeyLine && !propsUntouched)
+        {
+            // The tag that no longer fits goes; an anchor stays. Spaces next to it go with it.
+            int from = propsStart;
+            int to = propsEnd;
+            if (props.Count == 0)
+            {
+                while (to < src.Length && src[to] == (byte)' ')
+                {
+                    to++;
+                }
+
+                if (to >= src.Length || DocState.IsBreak(src[to]))
+                {
+                    while (from > 0 && src[from - 1] == (byte)' ')
+                    {
+                        from--;
+                    }
+                }
+            }
+
+            edits[count++] = new TextEdit(from, to, 0, props.Count);
+            final.Write(props.WrittenSpan);
+        }
+
+        int textStart = final.Count;
+        ValueWriter.WriteWithBreaks(edit.WrittenSpan, lay.Nl, final);
+        edits[count++] = new TextEdit(lineStart, regionEnd, textStart, final.Count - textStart);
+        return DocState.Rebuild(s, edits.Slice(0, count), final.WrittenSpan, limits);
+    }
 
     // A value for an explicit key that has none: "? a" gets a line ": value" under it.
     private static DocState ReplaceBareExplicit(DocState s, YamlLimits limits, int node, ValueTree v)

@@ -156,7 +156,14 @@ internal static class ValueWriter
             else if (val.Kind == VKind.Scalar)
             {
                 o.Write((byte)' ');
-                ScalarWriteStyle used = WriteScalar(o, val, stack.Count == 1 ? valueStyle : ScalarWriteStyle.Plain, EmitContext.BlockValue, f.Col, f.Col + layout.Step);
+                ScalarWriteStyle want = stack.Count == 1 ? valueStyle : ScalarWriteStyle.Plain;
+                if (want is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded && (val.Text is null || val.Text.AsSpan().IndexOf((byte)'\n') < 0))
+                {
+                    // A block style is kept only for text that has lines; one line reads better as it is.
+                    want = ScalarWriteStyle.Plain;
+                }
+
+                ScalarWriteStyle used = WriteScalar(o, val, want, EmitContext.BlockValue, f.Col, f.Col + layout.Step);
                 if (!EndsWithBreak(used))
                 {
                     o.Write((byte)'\n');

@@ -120,6 +120,44 @@ internal struct AliasBudget
         _bytes = limits.AliasByteBudget(state.Length);
     }
 
+    /// <summary>
+    /// Charges for one node written into a copy: the node itself and the bytes of its text. Copies count
+    /// whether or not an alias stood behind them, so that repeated copies of a value, and values that
+    /// expand through aliases, are bounded by the same budget.
+    /// </summary>
+    /// <param name="state">The document.</param>
+    /// <param name="node">The node being copied (for the error position).</param>
+    /// <param name="bytes">The bytes of its text.</param>
+    public void ChargeCopied(DocState state, int node, long bytes)
+    {
+        _nodes--;
+        _bytes -= Math.Max(bytes, 1);
+        if (_nodes < 0 || _bytes < 0)
+        {
+            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit.", state.Text, state.Node(node).Start);
+        }
+    }
+
+    /// <summary>
+    /// Charges a read for work that grows with what an alias stands for. Reading a short scalar through an
+    /// alias costs about what reading it directly does, so it is free; longer text and walks over
+    /// collections are charged, which bounds a walk that expands an alias bomb without limiting how
+    /// often a program may read small values.
+    /// </summary>
+    /// <param name="state">The document.</param>
+    /// <param name="node">The node read (for the error position).</param>
+    /// <param name="nodes">The nodes the read visits.</param>
+    /// <param name="bytes">The bytes of text the read produces.</param>
+    public void ChargeRead(DocState state, int node, long nodes, long bytes)
+    {
+        _nodes -= nodes;
+        _bytes -= bytes;
+        if (_nodes < 0 || _bytes < 0)
+        {
+            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit.", state.Text, state.Node(node).Start);
+        }
+    }
+
     /// <summary>Charges for following an alias to <paramref name="target"/>.</summary>
     /// <param name="state">The document.</param>
     /// <param name="alias">The alias node (for the error position).</param>

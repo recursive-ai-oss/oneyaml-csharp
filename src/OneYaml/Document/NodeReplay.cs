@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using OneYaml.Parsing;
 using OneYaml.Schema;
 
@@ -16,6 +17,39 @@ internal static class NodeReplay
 {
     private const long Cap = 1L << 60;
 
+    // What every node stands for once its aliases are followed (nodes and bytes), made when a read first
+    // needs it and kept for the state, so many small reads of one document do not each scan all of it.
+    // It lives beside the state, not in it, so a document that is never read through aliases pays nothing.
+    private static readonly ConditionalWeakTable<DocState, ExpansionSizes> SizeCache = new();
+
+    [ThreadStatic]
+    private static int t_sizePasses;
+
+    /// <summary>How many times expansion sizes were worked out on this thread; a test reads it to see that reads share one pass.</summary>
+    internal static int SizePassesOnThisThread => t_sizePasses;
+
+    internal sealed class ExpansionSizes
+    {
+        public long[] Nodes = [];
+        public long[] Bytes = [];
+
+    }
+
+    /// <summary>The expansion sizes of a state, worked out on first use.</summary>
+    /// <param name="s">The state.</param>
+    /// <returns>The sizes, indexed by node.</returns>
+    internal static ExpansionSizes SizesOf(DocState s)
+    {
+        if (SizeCache.TryGetValue(s, out ExpansionSizes? known))
+        {
+            return known;
+        }
+
+        var sizes = new ExpansionSizes();
+        ComputeSizes(s, out sizes.Nodes, out sizes.Bytes);
+        return SizeCache.GetValue(s, _ => sizes);
+    }
+
     /// <summary>Binds a node with the converters of a type, as the serializer binds the text of that node.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
     /// <param name="s">The document.</param>
@@ -26,8 +60,14 @@ internal static class NodeReplay
     {
         YamlSerializerOptions options = info.Options;
         options.MakeReadOnly();
-        AnchorBook book = Record(s, node, out int count);
-        var reader = new Utf8YamlReader(s.Text, options, book, count);
+
+        // A plain object target shares the value of an anchor between its aliases, as the serializer does for
+        // text, when every anchor the aliases name lies inside the node.
+        int count = 0;
+        AnchorBook? shared = info.ConverterBase is GenericConverter ? RecordShared(s, node, out count) : null;
+        bool share = shared is not null;
+        AnchorBook book = shared ?? Record(s, node, out count);
+        var reader = new Utf8YamlReader(s.Text, options, book, count, expandAliases: !share);
         try
         {
             reader.BeginReplay();
@@ -83,19 +123,17 @@ internal static class NodeReplay
         var book = new AnchorBook();
         book.Tape = ArrayPool<TapeEvent>.Shared.Rent(Math.Max(16, Math.Min(s.Node(root).Size * 2 + 2, 1 << 16)));
         var closes = new CloseStack();
-        long[]? expNodes = null;
-        long[]? expBytes = null;
         Dictionary<int, int>? entryOf = null;
         List<int>? targets = null;
         try
         {
-            RecordRange(s, book, ref closes, root, ref expNodes, ref expBytes, ref entryOf, ref targets);
+            RecordRange(s, book, ref closes, root, ref entryOf, ref targets);
             rootCount = book.TapeCount;
             for (int e = 0; targets is not null && e < targets.Count; e++)
             {
                 int t = targets[e];
                 book.Entries[e].TapeStart = book.TapeCount;
-                RecordRange(s, book, ref closes, t, ref expNodes, ref expBytes, ref entryOf, ref targets);
+                RecordRange(s, book, ref closes, t, ref entryOf, ref targets);
                 book.Entries[e].TapeEnd = book.TapeCount;
             }
 
@@ -109,11 +147,117 @@ internal static class NodeReplay
         finally
         {
             closes.Dispose();
-            if (expNodes is not null)
+        }
+    }
+
+    /// <summary>
+    /// Records a node with its aliases left as aliases, for a reader that does not expand them: an anchored
+    /// node carries its entry, and each alias names the entry of its anchor.
+    /// </summary>
+    /// <param name="s">The document.</param>
+    /// <param name="root">The node to record.</param>
+    /// <param name="rootCount">The number of events recorded.</param>
+    /// <returns>The book, or <see langword="null"/> when an alias names an anchor outside the node (the caller expands instead).</returns>
+    public static AnchorBook? RecordShared(DocState s, int root, out int rootCount)
+    {
+        rootCount = 0;
+        int end = root + s.Node(root).Size;
+        bool any = false;
+        for (int i = root; i < end; i++)
+        {
+            ref readonly CstNode n = ref s.Node(i);
+            if (n.Kind != NodeKind.Alias)
             {
-                ArrayPool<long>.Shared.Return(expNodes);
-                ArrayPool<long>.Shared.Return(expBytes!);
+                continue;
             }
+
+            int target = n.Aux;
+            if (target < root || target + s.Node(target).Size > i)
+            {
+                return null;
+            }
+
+            any = true;
+        }
+
+        if (!any)
+        {
+            return null;
+        }
+
+        ExpansionSizes sizes = SizesOf(s);
+        var book = new AnchorBook();
+        book.Tape = ArrayPool<TapeEvent>.Shared.Rent(Math.Max(16, Math.Min(s.Node(root).Size * 2 + 2, 1 << 16)));
+        var closes = new CloseStack();
+        Dictionary<int, int> entryOf = [];
+        try
+        {
+            for (int i = root; i < end; i++)
+            {
+                while (closes.Count > 0 && closes.EndOf(closes.Count - 1) <= i)
+                {
+                    Emit(book, EndEvent(s, closes.Pop()));
+                }
+
+                ref readonly CstNode n = ref s.Node(i);
+                if (n.Kind == NodeKind.Alias)
+                {
+                    Emit(book, new TapeEvent { Type = YamlTokenType.Alias, Start = n.Start, End = n.End, Alias = entryOf[n.Aux] });
+                    continue;
+                }
+
+                TapeEvent e = n.Kind == NodeKind.Scalar
+                    ? ScalarEvent(s, i, in n)
+                    : new TapeEvent
+                    {
+                        Type = n.Kind == NodeKind.Mapping ? YamlTokenType.MappingStart : YamlTokenType.SequenceStart,
+                        Tag = s.TagClassOf(i),
+                        Start = n.Start,
+                        End = n.Start,
+                    };
+                if ((n.Flags & NodeFlags.HasAliases) != 0)
+                {
+                    int entry = book.Count++;
+                    if (entry == book.Entries.Length)
+                    {
+                        Array.Resize(ref book.Entries, book.Entries.Length * 2);
+                    }
+
+                    book.Entries[entry] = new AnchorEntry
+                    {
+                        TapeStart = book.TapeCount,
+                        TapeEnd = book.TapeCount + 1,
+                        Nodes = Math.Min(sizes.Nodes[i], Cap),
+                        Bytes = Math.Min(sizes.Bytes[i], Cap),
+                        IsScalar = n.Kind == NodeKind.Scalar,
+                    };
+                    entryOf[i] = entry;
+                    e.Anchor = entry + 1;
+                }
+
+                Emit(book, e);
+                if (n.Kind != NodeKind.Scalar)
+                {
+                    closes.Push(i, i + n.Size);
+                }
+            }
+
+            while (closes.Count > 0)
+            {
+                Emit(book, EndEvent(s, closes.Pop()));
+            }
+
+            rootCount = book.TapeCount;
+            return book;
+        }
+        catch
+        {
+            book.ReturnBuffers();
+            throw;
+        }
+        finally
+        {
+            closes.Dispose();
         }
     }
 
@@ -122,8 +266,6 @@ internal static class NodeReplay
         AnchorBook book,
         ref CloseStack closes,
         int first,
-        ref long[]? expNodes,
-        ref long[]? expBytes,
         ref Dictionary<int, int>? entryOf,
         ref List<int>? targets)
     {
@@ -151,10 +293,7 @@ internal static class NodeReplay
                         targets ??= [];
                         if (!entryOf.TryGetValue(target, out int entry))
                         {
-                            if (expNodes is null)
-                            {
-                                ComputeSizes(s, out expNodes, out expBytes);
-                            }
+                            ExpansionSizes sizes = SizesOf(s);
 
                             entry = book.Count++;
                             if (entry == book.Entries.Length)
@@ -162,7 +301,7 @@ internal static class NodeReplay
                                 Array.Resize(ref book.Entries, book.Entries.Length * 2);
                             }
 
-                            book.Entries[entry] = new AnchorEntry { Nodes = Math.Min(expNodes[target], Cap), Bytes = Math.Min(expBytes![target], Cap) };
+                            book.Entries[entry] = new AnchorEntry { Nodes = Math.Min(sizes.Nodes[target], Cap), Bytes = Math.Min(sizes.Bytes[target], Cap) };
                             entryOf[target] = entry;
                             targets.Add(target);
                         }
@@ -243,9 +382,10 @@ internal static class NodeReplay
     // the answer for a target by the time an alias to it comes up.
     private static void ComputeSizes(DocState s, out long[] nodes, out long[] bytes)
     {
+        t_sizePasses++;
         int count = s.NodeCount;
-        nodes = ArrayPool<long>.Shared.Rent(count);
-        bytes = ArrayPool<long>.Shared.Rent(count);
+        nodes = new long[count];
+        bytes = new long[count];
         var open = new CloseStack();
         long[] accN = ArrayPool<long>.Shared.Rent(16);
         long[] accB = ArrayPool<long>.Shared.Rent(16);

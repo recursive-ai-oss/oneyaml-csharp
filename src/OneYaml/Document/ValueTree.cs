@@ -552,12 +552,14 @@ internal sealed class ValueTree
                 int target = n.Aux;
                 if (policy is not null && (n.Flags & NodeFlags.IsKey) == 0 && policy.Keeps(target))
                 {
+                    budget.ChargeCopied(state, cur, n.End - n.Start);
                     ranges[top] = (cur + 1, end);
                     Add(new VNode { Kind = VKind.Alias, Size = 1, Text = state.AnchorName(target).ToArray() });
                     continue;
                 }
 
-                budget.Charge(state, cur, target);
+                // The nodes behind the alias are charged one by one as they are copied.
+                budget.ChargeCopied(state, cur, 1);
                 ranges[top] = (cur + 1, end);
                 ranges.Add((target, target + state.Node(target).Size));
                 continue;
@@ -566,11 +568,14 @@ internal sealed class ValueTree
             if (n.Kind == NodeKind.Scalar)
             {
                 ranges[top] = (cur + 1, end);
-                Add(ScalarFrom(state, cur));
+                VNode scalar = ScalarFrom(state, cur);
+                budget.ChargeCopied(state, cur, scalar.Text?.Length ?? 0);
+                Add(scalar);
             }
             else
             {
                 ranges[top] = (cur + 1, end);
+                budget.ChargeCopied(state, cur, 1);
                 Add(new VNode { Kind = n.Kind == NodeKind.Mapping ? VKind.Mapping : VKind.Sequence, Size = 1, Count = n.Count });
             }
         }

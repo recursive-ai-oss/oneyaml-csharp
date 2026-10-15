@@ -98,7 +98,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
         return _doc.State;
     }
 
-    // The node whose content reads see: aliases followed, with the budget charged.
+    // Scalars up to this many bytes read through an alias at the price of reading them directly.
+    private const int FreeAliasReadBytes = 256;
+
+    // The node whose content reads see: aliases followed. Following costs nothing by itself; the reads
+    // that do work in proportion to what the alias stands for charge the document's walk budget.
     private int Followed(DocState s, out bool via)
     {
         via = _viaAlias;
@@ -107,10 +111,17 @@ public sealed class YamlNode : IEquatable<YamlNode>
             return _index;
         }
 
-        // One budget for the whole walk from a root, so a traversal that follows aliases without end hits the limit.
-        _doc!.Walk.Charge(s, _index, s.Node(_index).Aux);
         via = true;
         return s.Node(_index).Aux;
+    }
+
+    // Charges the text of a node read through an alias.
+    private void ChargeText(DocState s, int node, bool via, int length)
+    {
+        if (via && length > FreeAliasReadBytes)
+        {
+            _doc!.Walk.ChargeRead(s, node, 1, length);
+        }
     }
 
     /// <summary>The kind of node. An alias is reported as <see cref="YamlNodeKind.Alias"/>; use <see cref="Target"/> to see what it names.</summary>
@@ -233,7 +244,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public T GetValue<T>()
     {
         DocState s = State();
-        int t = Followed(s, out _);
+        int t = Followed(s, out bool via);
+        ChargeText(s, t, via, s.Node(t).End - s.Node(t).Start);
         if (NodeValues.TryGet(s, t, _doc!.BindOptions, out T value, out YamlException? error))
         {
             return value;
@@ -249,7 +261,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public bool TryGetValue<T>(out T value)
     {
         DocState s = State();
-        int t = Followed(s, out _);
+        int t = Followed(s, out bool via);
+        ChargeText(s, t, via, s.Node(t).End - s.Node(t).Start);
         return NodeValues.TryGet(s, t, _doc!.BindOptions, out value, out _);
     }
 
@@ -261,7 +274,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
     [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
     [RequiresDynamicCode("Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
-    public T? Deserialize<T>(YamlSerializerOptions? options = null) => NodeReplay.Bind(State(), _index, (options ?? YamlSerializerOptions.Default).GetTypeInfo<T>());
+    public T? Deserialize<T>(YamlSerializerOptions? options = null) => NodeReplay.Bind(State(), _index, (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo<T>());
 
     /// <summary>Binds the node to a type using generated metadata.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -396,7 +409,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     }
 
     // A document root with no text at all: nothing is written yet, so a write may give it a kind.
-    private bool IsEmptyRoot(DocState s) => !_viaAlias && s.Node(_index).Parent < 0 && (s.Node(_index).Flags & NodeFlags.Empty) != 0 && s.Node(_index).Kind == NodeKind.Scalar && !s.HasTag(_index) && !s.HasAnchor(_index);
+    private bool IsEmptyRoot(DocState s) => !_viaAlias && s.IsEmptyRoot(_index);
 
     // The collection an indexer writes into; writing through an alias is refused.
     private int WriteContainer(DocState s, NodeKind expected)
@@ -489,6 +502,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
         DocState s = State();
         int start = s.PropStart(_index);
+        ChargeText(s, _index, _viaAlias, s.Node(_index).End - start);
         return Encoding.UTF8.GetString(s.Text.Slice(start, s.Node(_index).End - start));
     }
 
@@ -560,6 +574,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
             ref readonly CstNode n = ref s.Node(t);
             _step = n.Kind == NodeKind.Mapping ? 2 : 1;
             _remaining = n.Kind is NodeKind.Mapping or NodeKind.Sequence ? n.Count : 0;
+            if (_via && _remaining > 0)
+            {
+                node._doc!.Walk.ChargeRead(s, t, _remaining, 0);
+            }
+
             _next = t + 1;
             if (_step == 2 && _remaining > 0)
             {
@@ -645,6 +664,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
             int t = node.Followed(s, out _via);
             ref readonly CstNode n = ref s.Node(t);
             _remaining = n.Kind == NodeKind.Mapping ? n.Count : 0;
+            if (_via && _remaining > 0)
+            {
+                node._doc!.Walk.ChargeRead(s, t, _remaining, 0);
+            }
+
             _next = t + 1;
         }
 

@@ -196,6 +196,8 @@ internal sealed partial class DocState : IDisposable
         array = bigger;
     }
 
+    private const int MaxFirstNodeGuess = 1 << 20;
+
     private int AddNode()
     {
         if (NodeCount == _nodes.Length)
@@ -210,7 +212,9 @@ internal sealed partial class DocState : IDisposable
     private void Parse(YamlLimits limits)
     {
         ReadOnlySpan<byte> src = Text;
-        _nodes = ArrayPool<CstNode>.Shared.Rent((src.Length / 6) + 16);
+        // About one node per six bytes is typical; the cap keeps a huge text with few nodes (long scalars)
+        // from reserving more node storage than it will ever fill. The array grows if the guess is short.
+        _nodes = ArrayPool<CstNode>.Shared.Rent(Math.Min((src.Length / 6) + 16, MaxFirstNodeGuess));
         _docs = ArrayPool<DocInfo>.Shared.Rent(4);
         var anchors = new AnchorMap();
         int[] openNode = ArrayPool<int>.Shared.Rent(32);

@@ -357,8 +357,10 @@ internal static partial class Editor
                 after++;
             }
 
+            bool ownComma = false;
             if (after < src.Length && src[after] == (byte)',')
             {
+                ownComma = true;
                 after++;
                 while (after < src.Length && src[after] == (byte)' ')
                 {
@@ -366,7 +368,9 @@ internal static partial class Editor
                 }
             }
 
-            if (s.StartsLine(entryAt) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
+            // Without a comma of its own an entry that is not the last one is separated from the next by the
+            // comma at the start of the next line; taking its line alone would leave that comma first.
+            if (s.StartsLine(entryAt) && (ownComma || nextEntry < 0) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
             {
                 // The item has its lines to itself, its own comment included: they go, and nothing else moves.
                 using var lines = new ByteBuffer(1);

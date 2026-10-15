@@ -341,6 +341,13 @@ public sealed class YamlDocument : IDisposable
         // could otherwise leave the edit working on a state that has been replaced.
         ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth);
         DocState s = Current(document);
+        if (p.Count == 1 && s.IsEmptyRoot(s.Doc(document).Root))
+        {
+            // A stream with no content takes its first member here, as it does through an indexer.
+            Swap(Editor.Replace(s, _limits, s.Doc(document).Root, ValueTree.Wrap(p[0].ToArray(), v)));
+            return;
+        }
+
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
     }
 

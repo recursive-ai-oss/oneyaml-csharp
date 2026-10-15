@@ -184,6 +184,12 @@ internal sealed partial class DocState
 
     public static bool IsBreak(byte b) => b is (byte)'\n' or (byte)'\r';
 
+    /// <summary>Whether a node is the root of a document with no text at all, which a first write may give a kind.</summary>
+    /// <param name="node">A node.</param>
+    /// <returns><see langword="true"/> for such a root.</returns>
+    public bool IsEmptyRoot(int node)
+        => _nodes[node].Parent < 0 && (_nodes[node].Flags & NodeFlags.Empty) != 0 && _nodes[node].Kind == NodeKind.Scalar && !HasTag(node) && !HasAnchor(node);
+
     /// <summary>The offset where the line holding <paramref name="pos"/> starts.</summary>
     public int LineStart(int pos)
     {
