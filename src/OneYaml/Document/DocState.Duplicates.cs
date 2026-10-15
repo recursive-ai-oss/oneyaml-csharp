@@ -189,6 +189,25 @@ internal sealed partial class DocState
         }
     }
 
+    private static bool IsInfinityLiteral(ReadOnlySpan<byte> t) => t.Length > 0 && t[^1] is (byte)'f' or (byte)'F';
+
+    // Two spellings of a finite literal that overflows a double: equal when they differ only in the case of
+    // the exponent letter and an explicit plus sign.
+    private static bool SameFiniteLiteral(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)
+    {
+        if (a.Length > 0 && a[0] == (byte)'+')
+        {
+            a = a.Slice(1);
+        }
+
+        if (b.Length > 0 && b[0] == (byte)'+')
+        {
+            b = b.Slice(1);
+        }
+
+        return a.Length == b.Length && System.Text.Ascii.EqualsIgnoreCase(a, b);
+    }
+
     /// <summary>Whether two scalar texts of one Core kind are the same value.</summary>
     /// <param name="kind">The kind both resolve to.</param>
     /// <param name="a">The first text.</param>
@@ -210,7 +229,18 @@ internal sealed partial class DocState
 
                 return CoreSchema.TryParseBigInteger(a, out BigInteger ba) && CoreSchema.TryParseBigInteger(b, out BigInteger bb) && ba == bb;
             case ScalarKind.Float:
-                return CoreSchema.TryParseDouble(a, out double da) && CoreSchema.TryParseDouble(b, out double db) && (da == db || (double.IsNaN(da) && double.IsNaN(db)));
+                if (!CoreSchema.TryParseDouble(a, out double da) || !CoreSchema.TryParseDouble(b, out double db))
+                {
+                    return false;
+                }
+
+                if (double.IsInfinity(da) && da == db && (!IsInfinityLiteral(a) || !IsInfinityLiteral(b)))
+                {
+                    // A finite literal beyond the double range (1e400) is not infinity: 1e400 and 2e400 differ.
+                    return SameFiniteLiteral(a, b);
+                }
+
+                return da == db || (double.IsNaN(da) && double.IsNaN(db));
             default:
                 return a.SequenceEqual(b);
         }

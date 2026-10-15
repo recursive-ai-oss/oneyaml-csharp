@@ -19,9 +19,7 @@ internal static class NodeReplay
 
     // What every node stands for once its aliases are followed (nodes and bytes), made when a read first
     // needs it and kept for the state, so many small reads of one document do not each scan all of it.
-    // It lives beside the state, not in it, so a document that is never read through aliases pays nothing.
-    private static readonly ConditionalWeakTable<DocState, ExpansionSizes> SizeCache = new();
-
+    // The state holds only a reference; the arrays come from the pool and go back when the state is disposed.
     [ThreadStatic]
     private static int t_sizePasses;
 
@@ -33,6 +31,22 @@ internal static class NodeReplay
         public long[] Nodes = [];
         public long[] Bytes = [];
 
+        public void Release()
+        {
+            long[] n = Nodes;
+            long[] b = Bytes;
+            Nodes = [];
+            Bytes = [];
+            if (n.Length != 0)
+            {
+                ArrayPool<long>.Shared.Return(n);
+            }
+
+            if (b.Length != 0)
+            {
+                ArrayPool<long>.Shared.Return(b);
+            }
+        }
     }
 
     /// <summary>The expansion sizes of a state, worked out on first use.</summary>
@@ -40,14 +54,24 @@ internal static class NodeReplay
     /// <returns>The sizes, indexed by node.</returns>
     internal static ExpansionSizes SizesOf(DocState s)
     {
-        if (SizeCache.TryGetValue(s, out ExpansionSizes? known))
+        if (s.ExpansionCache is ExpansionSizes known)
         {
             return known;
         }
 
         var sizes = new ExpansionSizes();
-        ComputeSizes(s, out sizes.Nodes, out sizes.Bytes);
-        return SizeCache.GetValue(s, _ => sizes);
+        try
+        {
+            ComputeSizes(s, out sizes.Nodes, out sizes.Bytes);
+        }
+        catch
+        {
+            sizes.Release();
+            throw;
+        }
+
+        s.ExpansionCache = sizes;
+        return sizes;
     }
 
     /// <summary>Binds a node with the converters of a type, as the serializer binds the text of that node.</summary>
@@ -384,8 +408,10 @@ internal static class NodeReplay
     {
         t_sizePasses++;
         int count = s.NodeCount;
-        nodes = new long[count];
-        bytes = new long[count];
+        nodes = ArrayPool<long>.Shared.Rent(Math.Max(count, 1));
+        bytes = ArrayPool<long>.Shared.Rent(Math.Max(count, 1));
+        Array.Clear(nodes, 0, count);
+        Array.Clear(bytes, 0, count);
         var open = new CloseStack();
         long[] accN = ArrayPool<long>.Shared.Rent(16);
         long[] accB = ArrayPool<long>.Shared.Rent(16);

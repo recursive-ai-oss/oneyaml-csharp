@@ -1,5 +1,6 @@
 using System;
 using OneYaml.Emitting;
+using OneYaml.Parsing;
 using OneYaml.Schema;
 
 namespace OneYaml.Documents;
@@ -300,6 +301,9 @@ internal static partial class Editor
         return true;
     }
 
+    private static bool IsKeepBlock(in CstNode n)
+        => n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded && (Chomping)n.Chomp == Chomping.Keep;
+
     /// <summary>Removes an entry: a mapping value with its key, or a sequence item.</summary>
     /// <param name="s">The current state.</param>
     /// <param name="limits">Limits for the new state.</param>
@@ -393,6 +397,13 @@ internal static partial class Editor
         {
             start = s.OwnedCommentsStart(s.LineStart(entryStart));
             stop = s.PastLine(end);
+            if (first > 0 && IsKeepBlock(s.Node(first - 1)))
+            {
+                // A kept block scalar ends right before this entry. The blank lines after the entry would
+                // join it and become part of its value, so they go with the entry.
+                stop = BlankLinesEnd(src, stop);
+            }
+
             if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0)
             {
                 // The text had no final line break; the new last line should not gain one.

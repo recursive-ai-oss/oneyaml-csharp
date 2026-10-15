@@ -8,8 +8,9 @@ namespace OneYaml.Documents;
 /// <summary>
 /// The edit engine. Every edit, whether it comes from an indexer or a pointer, is one of four
 /// operations that read a state and return the next one: replace a node, add a mapping member,
-/// insert a sequence item, remove an entry. None of them changes the state it is given, so a
-/// failure leaves the document as it was, and a series of them can be chained and committed at once.
+/// insert a sequence item, remove an entry. None of them changes a state it is given unless a patch has
+/// marked that state exclusive (it made the state itself and nobody else can see it). A failure therefore
+/// leaves the document as it was, and a series of them can be chained and committed at once.
 /// </summary>
 internal static partial class Editor
 {
@@ -211,6 +212,13 @@ internal static partial class Editor
         ScalarWriteStyle nested = n.Kind == NodeKind.Scalar && pref is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded ? pref : ScalarWriteStyle.Plain;
         bool oldKeep = n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded && (Chomping)n.Chomp == Chomping.Keep;
         int regionEnd = oldKeep ? DocState.TrimBlankLines(src, n.Start, n.End, n.Aux) : n.End;
+        if (!oldKeep && nested != ScalarWriteStyle.Plain && BlankLinesEnd(src, regionEnd) > regionEnd)
+        {
+            // Blank lines follow the old scalar. A new kept block scalar inside the replacement would take
+            // them as its own content, so strings in the replacement are quoted instead.
+            nested = ScalarWriteStyle.Plain;
+        }
+
         if (v.IsScalar)
         {
             ref readonly VNode sv = ref v[0];
@@ -543,6 +551,12 @@ internal static partial class Editor
                     while (from > 0 && src[from - 1] == (byte)' ')
                     {
                         from--;
+                    }
+
+                    if ((from == 0 || DocState.IsBreak(src[from - 1])) && to < src.Length)
+                    {
+                        // The properties filled their own line: the line goes with them.
+                        to += src[to] == (byte)'\r' && to + 1 < src.Length && src[to + 1] == (byte)'\n' ? 2 : 1;
                     }
                 }
             }

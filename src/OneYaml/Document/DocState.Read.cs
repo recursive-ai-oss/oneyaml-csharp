@@ -318,7 +318,7 @@ internal sealed partial class DocState
         ReadOnlySpan<byte> src = Text;
         int from = Math.Min(pos, Length);
         int b;
-        if (ReferenceEquals(s_breakOwner, this) && s_breakFrom <= from && from <= s_breakAt)
+        if (s_breakOwner == _id && s_breakFrom <= from && from <= s_breakAt)
         {
             // The same line as last time: nothing between the two positions is a line break.
             b = s_breakAt;
@@ -328,7 +328,7 @@ internal sealed partial class DocState
             b = LineBreakAt(from);
             if (b < src.Length)
             {
-                s_breakOwner = this;
+                s_breakOwner = _id;
                 s_breakFrom = from;
                 s_breakAt = b;
             }

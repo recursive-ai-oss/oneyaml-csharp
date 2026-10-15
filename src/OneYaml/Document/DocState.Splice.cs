@@ -17,8 +17,13 @@ internal sealed partial class DocState
 
     // The last line break found after a position, so that a long line is not searched again by every edit
     // of a patch. It is kept per thread, for one state, and moves with the edits made in place.
+    // The owner is an identity number, not the state itself, so that the cache keeps nothing alive.
     [ThreadStatic]
-    private static DocState? s_breakOwner;
+    private static long s_breakOwner;
+
+    private static long s_nextId;
+
+    private readonly long _id = System.Threading.Interlocked.Increment(ref s_nextId);
 
     [ThreadStatic]
     private static int s_breakFrom;
@@ -475,7 +480,7 @@ internal sealed partial class DocState
 
             // For the last item, the edit may reach past its end: into the blanks and comments after the last
             // entry of a block collection, or the gap before a closing bracket.
-            regionEnd = tNode == end ? (flow ? nn.Aux : Math.Max(jEnd, e)) : jEnd;
+            regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e))) : jEnd;
             oldKids = 0;
             for (int c = kFirst; c < tNode; c += old._nodes[c].Size)
             {
@@ -537,6 +542,16 @@ internal sealed partial class DocState
             }
         }
 
+        // Aliases and anchors in the old region may reach outside it; the whole text decides those.
+        for (int i = kFirst; i < tNode; i++)
+        {
+            ref readonly CstNode o = ref old._nodes[i];
+            if (o.Kind == NodeKind.Alias || old.HasAnchor(i))
+            {
+                return null;
+            }
+        }
+
         int subLength = prefix + (s - kStart) + text.Length + (regionEnd - e) + (flow ? 1 : 0);
         byte[] subBuf = ArrayPool<byte>.Shared.Rent(Math.Max(subLength, 1));
         DocState sub = RentScratch(subBuf, subLength, old);
@@ -586,15 +601,6 @@ internal sealed partial class DocState
                 return null;
             }
 
-            for (int i = kFirst; i < tNode; i++)
-            {
-                ref readonly CstNode o = ref old._nodes[i];
-                if (o.Kind == NodeKind.Alias || old.HasAnchor(i))
-                {
-                    return null;
-                }
-            }
-
             int newKids = sub._nodes[0].Count;
             bool checkKeys = map && !old.AllowDuplicateKeys && nn.Count - oldKids + newKids > 2 && old.KeysDiffer(sub, kFirst, oldKids, newKids);
             return old.Splice(sub, n, kFirst, tNode, oldKids, newKids, kStart, regionEnd, s, e, text, flow ? kStart - 1 : kStart - prefix, checkKeys, touchesEnd);
@@ -605,6 +611,79 @@ internal sealed partial class DocState
             s_scratch = sub;
         }
     }
+
+    // Past the end of a block collection come the rest of its last line and the blank and comment lines up to
+    // the next line with content. A block scalar at the end of the region reads them as its own (a kept one
+    // keeps the blank lines, any other reads a more indented comment line as text), so the region must
+    // see them too, or it would read the scalar differently from the whole text.
+    private static int TrailingTriviaEnd(ReadOnlySpan<byte> src, int pos)
+    {
+        int p = pos;
+        if (p > 0 && !IsBreak(src[p - 1]))
+        {
+            // The rest of the entry's last line: blanks and a comment, then the break.
+            int q = SkipBlanks(src, p);
+            if (q < src.Length && src[q] == (byte)'#')
+            {
+                q = LineEndOf(src, q);
+            }
+
+            if (q >= src.Length)
+            {
+                return src.Length;
+            }
+
+            if (!IsBreak(src[q]))
+            {
+                return pos;
+            }
+
+            p = AfterBreak(src, q);
+        }
+
+        while (p < src.Length)
+        {
+            int q = SkipBlanks(src, p);
+            if (q < src.Length && src[q] == (byte)'#')
+            {
+                q = LineEndOf(src, q);
+            }
+
+            if (q >= src.Length)
+            {
+                return src.Length;
+            }
+
+            if (!IsBreak(src[q]))
+            {
+                return p;
+            }
+
+            p = AfterBreak(src, q);
+        }
+
+        return p;
+    }
+
+    private static int SkipBlanks(ReadOnlySpan<byte> src, int from)
+    {
+        int q = from;
+        while (q < src.Length && src[q] is (byte)' ' or (byte)'	')
+        {
+            q++;
+        }
+
+        return q;
+    }
+
+    private static int LineEndOf(ReadOnlySpan<byte> src, int from)
+    {
+        int i = src.Slice(from).IndexOfAny((byte)'\n', (byte)'\n');
+        return i < 0 ? src.Length : from + i;
+    }
+
+    private static int AfterBreak(ReadOnlySpan<byte> src, int at)
+        => at + (src[at] == (byte)'\n' && at + 1 < src.Length && src[at + 1] == (byte)'\n' ? 2 : 1);
 
     // The region read on its own must be one collection of the kind it replaces, with nothing beyond it,
     // and must bring no anchors or aliases that would reach outside it.
@@ -741,6 +820,9 @@ internal sealed partial class DocState
 
     private void ApplySplice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, int d, int bd, bool touchesEnd)
     {
+        // Sizes worked out for the text before the edit no longer fit it.
+        ExpansionCache?.Release();
+        ExpansionCache = null;
         int oldCount = NodeCount;
         int newCount = sub.NodeCount - 1;
         int propBase = PropCountRows;
@@ -922,7 +1004,7 @@ internal sealed partial class DocState
         CommentCount = newComments;
 
         // The cached line break stays right when the edit is on that line and adds no break.
-        if (ReferenceEquals(s_breakOwner, this))
+        if (s_breakOwner == _id)
         {
             if (s_breakFrom <= s && e <= s_breakAt && text.IndexOfAny((byte)'\n', (byte)'\r') < 0)
             {
@@ -930,7 +1012,7 @@ internal sealed partial class DocState
             }
             else
             {
-                s_breakOwner = null;
+                s_breakOwner = 0;
             }
         }
 

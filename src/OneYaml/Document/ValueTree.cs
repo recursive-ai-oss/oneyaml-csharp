@@ -532,7 +532,8 @@ internal sealed class ValueTree
     /// <param name="node">The node.</param>
     /// <param name="budget">What aliases may expand to.</param>
     /// <param name="policy">Decides which aliases may stay aliases; <see langword="null"/> writes all of them out.</param>
-    public void AppendFrom(DocState state, int node, ref AliasBudget budget, AliasPolicy? policy = null)
+    /// <param name="chargeCopies">Whether every node copied counts against the budget. A move copies nothing new, so it passes false and pays only for the aliases it writes out.</param>
+    public void AppendFrom(DocState state, int node, ref AliasBudget budget, AliasPolicy? policy = null, bool chargeCopies = true)
     {
         int first = Count;
         var ranges = new List<(int Cur, int End)> { (node, node + state.Node(node).Size) };
@@ -552,14 +553,18 @@ internal sealed class ValueTree
                 int target = n.Aux;
                 if (policy is not null && (n.Flags & NodeFlags.IsKey) == 0 && policy.Keeps(target))
                 {
-                    budget.ChargeCopied(state, cur, n.End - n.Start);
+                    if (chargeCopies || ranges.Count > 1)
+                    {
+                        budget.ChargeCopied(state, cur, n.End - n.Start, ranges.Count > 1);
+                    }
+
                     ranges[top] = (cur + 1, end);
                     Add(new VNode { Kind = VKind.Alias, Size = 1, Text = state.AnchorName(target).ToArray() });
                     continue;
                 }
 
                 // The nodes behind the alias are charged one by one as they are copied.
-                budget.ChargeCopied(state, cur, 1);
+                budget.ChargeCopied(state, cur, 1, viaAlias: true);
                 ranges[top] = (cur + 1, end);
                 ranges.Add((target, target + state.Node(target).Size));
                 continue;
@@ -569,13 +574,21 @@ internal sealed class ValueTree
             {
                 ranges[top] = (cur + 1, end);
                 VNode scalar = ScalarFrom(state, cur);
-                budget.ChargeCopied(state, cur, scalar.Text?.Length ?? 0);
+                if (chargeCopies || ranges.Count > 1)
+                {
+                    budget.ChargeCopied(state, cur, scalar.Text?.Length ?? 0, ranges.Count > 1);
+                }
+
                 Add(scalar);
             }
             else
             {
                 ranges[top] = (cur + 1, end);
-                budget.ChargeCopied(state, cur, 1);
+                if (chargeCopies || ranges.Count > 1)
+                {
+                    budget.ChargeCopied(state, cur, 1, ranges.Count > 1);
+                }
+
                 Add(new VNode { Kind = n.Kind == NodeKind.Mapping ? VKind.Mapping : VKind.Sequence, Size = 1, Count = n.Count });
             }
         }
