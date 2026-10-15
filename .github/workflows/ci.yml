@@ -40,7 +40,11 @@ jobs:
       - name: Restore
         run: dotnet restore OneYaml.slnx
       - name: Format
-        run: dotnet format OneYaml.slnx --verify-no-changes --no-restore
+        # The formatter loads projects in the Debug configuration and runs the source
+        # generator from its Debug output, so that output has to exist first.
+        run: |
+          dotnet build src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj -c Debug --no-restore
+          dotnet format OneYaml.slnx --verify-no-changes --no-restore
       - name: Build the guard tool
         run: dotnet build tools/PublicBoundary/PublicBoundary.csproj -c Release --no-restore
       - name: Pushed range

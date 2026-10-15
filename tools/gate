@@ -70,7 +70,13 @@ step "build (Release, all target frameworks)" dotnet build "$sln" -c Release --n
 step "test (Category!=Slow)" dotnet test --solution "$sln" -c Release --no-build --filter-not-trait "Category=Slow" --results-directory "$artifacts/TestResults"
 
 # Whitespace and style are verified on the whole solution; analyzers already ran in the build.
-step "format" dotnet format "$sln" --verify-no-changes --no-restore --verbosity quiet
+# The formatter loads projects in the Debug configuration and runs the source generator
+# from its Debug output, so that output has to exist first.
+format_check() {
+	dotnet build src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj -c Debug --no-restore --verbosity quiet -clp:NoSummary &&
+		dotnet format "$sln" --verify-no-changes --no-restore --verbosity quiet
+}
+step "format" format_check
 
 tool_dll=$(find "$artifacts/bin/PublicBoundary" -name PublicBoundary.dll -path '*release*' 2>/dev/null | head -n1)
 if [ -z "$tool_dll" ]; then
