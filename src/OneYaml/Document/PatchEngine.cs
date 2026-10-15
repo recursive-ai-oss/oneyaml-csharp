@@ -589,11 +589,14 @@ internal static class PatchEngine
                     continue;
                 }
 
-                foreach (string key in f.Deletions)
+                if (!DeleteMany(ref cur, original, limits, document, tokens, f.Deletions))
                 {
-                    tokens.Add(Utf8Strict(key));
-                    Swap(ref cur, original, DeleteMember(cur, limits, document, tokens));
-                    tokens.RemoveAt(tokens.Count - 1);
+                    foreach (string key in f.Deletions)
+                    {
+                        tokens.Add(Utf8Strict(key));
+                        Swap(ref cur, original, DeleteMember(cur, limits, document, tokens));
+                        tokens.RemoveAt(tokens.Count - 1);
+                    }
                 }
 
                 frames.RemoveAt(frames.Count - 1);
@@ -714,6 +717,35 @@ internal static class PatchEngine
         {
             tokens.RemoveAt(tokens.Count - 1);
         }
+    }
+
+    // Many null members of one mapping: one pass over the mapping and one rebuild, when the plain block case applies.
+    private static bool DeleteMany(ref DocState cur, DocState original, YamlLimits limits, int document, List<byte[]> tokens, List<string> names)
+    {
+        if (names.Count < 2)
+        {
+            return false;
+        }
+
+        int map = Locate(cur, document, tokens);
+        if (map < 0 || cur.Node(map).Kind != NodeKind.Mapping)
+        {
+            return false;
+        }
+
+        var keys = new List<byte[]>(names.Count);
+        foreach (string name in names)
+        {
+            keys.Add(Utf8Strict(name));
+        }
+
+        if (!Editor.TryRemoveMany(cur, limits, map, keys, out DocState next))
+        {
+            return false;
+        }
+
+        Swap(ref cur, original, next);
+        return true;
     }
 
     private static DocState DeleteMember(DocState s, YamlLimits limits, int document, List<byte[]> tokens)
