@@ -350,7 +350,18 @@ internal sealed class SingleConverter : YamlConverter<float>
     public override float Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadDouble(out double v);
-        return s == NumberStatus.Ok ? (float)v : throw BindingErrors.Number(in reader, s, "a number");
+        if (s == NumberStatus.Ok)
+        {
+            float f = (float)v;
+            if (!float.IsInfinity(f) || double.IsInfinity(v))
+            {
+                return f;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "a number");
     }
 }
 
@@ -540,6 +551,7 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
     private readonly Dictionary<string, TEnum> _exact = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TEnum> _ignoreCase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<TEnum, string> _written = [];
+    private readonly TypeCode _underlying = Type.GetTypeCode(Enum.GetUnderlyingType(typeof(TEnum)));
 
     public EnumConverter(YamlSerializerOptions options)
     {
@@ -582,13 +594,39 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
         }
     }
 
+    private bool InRange(long number) => _underlying switch
+    {
+        TypeCode.SByte => number is >= sbyte.MinValue and <= sbyte.MaxValue,
+        TypeCode.Byte => number is >= byte.MinValue and <= byte.MaxValue,
+        TypeCode.Int16 => number is >= short.MinValue and <= short.MaxValue,
+        TypeCode.UInt16 => number is >= ushort.MinValue and <= ushort.MaxValue,
+        TypeCode.Int32 => number is >= int.MinValue and <= int.MaxValue,
+        TypeCode.UInt32 => number is >= uint.MinValue and <= uint.MaxValue,
+        TypeCode.UInt64 => number >= 0,
+        _ => true,
+    };
+
+    private static YamlException OutOfRange(in Utf8YamlReader reader) =>
+        reader.CreateException($"The number is outside the range of {typeof(TEnum).Name}.");
+
     public override TEnum Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         reader.RequireScalar();
         NumberStatus s = reader.TryReadInt64(out long number);
         if (s == NumberStatus.Ok)
         {
-            return (TEnum)Enum.ToObject(typeof(TEnum), number);
+            // Enum.ToObject cuts a number down to the underlying type, so check the range first.
+            return InRange(number) ? (TEnum)Enum.ToObject(typeof(TEnum), number) : throw OutOfRange(in reader);
+        }
+
+        if (s == NumberStatus.OutOfRange)
+        {
+            if (_underlying == TypeCode.UInt64 && reader.TryReadUInt64(out ulong wide) == NumberStatus.Ok)
+            {
+                return (TEnum)Enum.ToObject(typeof(TEnum), wide);
+            }
+
+            throw OutOfRange(in reader);
         }
 
         string text = reader.GetString();

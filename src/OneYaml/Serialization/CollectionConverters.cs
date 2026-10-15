@@ -217,6 +217,8 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
 
     private void ReadMerge(ref Utf8YamlReader reader, YamlSerializerOptions options, Dictionary<TKey, TValue> dict, ref HashSet<TKey>? merged)
     {
+        // A merge value may itself hold a merge key, so this recurses with the input.
+        ConverterGuards.EnsureStack(in reader);
         if (!reader.Read())
         {
             throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
@@ -290,6 +292,13 @@ internal sealed class GeneralDictionaryConverter<TDictionary, TKey, TValue> : Ya
         TDictionary target = _create();
         foreach (KeyValuePair<TKey, TValue> pair in source)
         {
+            // The target may compare keys its own way (case-insensitively, say), so two keys that were
+            // different in the mapping can still collide here.
+            if (target.ContainsKey(pair.Key))
+            {
+                throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has two keys the target treats as the same key.", reader.Source, reader.Start);
+            }
+
             target.Add(pair.Key, pair.Value);
         }
 

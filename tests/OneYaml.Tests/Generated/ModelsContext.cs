@@ -34,6 +34,18 @@ namespace OneYaml.Tests.Generated;
 [YamlSerializable(typeof(Dictionary<string, object>))]
 [YamlSerializable(typeof(Dictionary<string, object?>))]
 [YamlSerializable(typeof(List<object>))]
+[YamlSerializable(typeof(BaseInit))]
+[YamlSerializable(typeof(DerivedInit))]
+[YamlSerializable(typeof(BaseVirtual))]
+[YamlSerializable(typeof(DerivedVirtual))]
+[YamlSerializable(typeof(DerivedVirtualMarked))]
+[YamlSerializable(typeof(WithDelegate))]
+[YamlSerializable(typeof(ConstructorAndMembers))]
+[YamlSerializable(typeof(EnumRanges))]
+[YamlSerializable(typeof(Numbers))]
+[YamlSerializable(typeof(Wide70))]
+[YamlSerializable(typeof(IgnoreCaseMap))]
+[YamlSerializable(typeof(RefConstructor))]
 internal sealed partial class ModelsContext : YamlSerializerContext
 {
 }

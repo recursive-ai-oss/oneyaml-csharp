@@ -352,7 +352,13 @@ public ref partial struct Utf8YamlReader
 
             if (k == ScalarKind.Float)
             {
-                return CoreSchema.TryParseDouble(t, out value) ? NumberStatus.Ok : NumberStatus.NotNumber;
+                if (!CoreSchema.TryParseDouble(t, out value))
+                {
+                    return NumberStatus.NotNumber;
+                }
+
+                // Only the .inf spellings may read as infinity; a finite number that overflows is an error.
+                return double.IsInfinity(value) && t.IndexOfAny((byte)'f', (byte)'F') < 0 ? NumberStatus.OutOfRange : NumberStatus.Ok;
             }
 
             if (k != ScalarKind.Int)
@@ -373,7 +379,7 @@ public ref partial struct Utf8YamlReader
             }
 
             value = (double)big;
-            return NumberStatus.Ok;
+            return double.IsInfinity(value) ? NumberStatus.OutOfRange : NumberStatus.Ok;
         }
         finally
         {
@@ -512,8 +518,9 @@ public ref partial struct Utf8YamlReader
                         return "i" + l.ToString(CultureInfo.InvariantCulture);
                     }
 
+                    // Hex of the bytes: BigInteger.ToString is quadratic in the digits, and this only needs to be one text per value.
                     CheckIntegerLength(t);
-                    return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? "i" + big.ToString(CultureInfo.InvariantCulture) : null;
+                    return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? "i" + Convert.ToHexString(big.ToByteArray()) : null;
                 case ScalarKind.Float:
                     return CoreSchema.TryParseDouble(t, out double d) ? "f" + d.ToString("R", CultureInfo.InvariantCulture) : null;
                 default:

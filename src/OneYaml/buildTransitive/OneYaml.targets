@@ -1,0 +1,13 @@
+<Project>
+  <!-- Reflection-based binding is off by default in trimmed and ahead-of-time published applications,
+       where it cannot work reliably. Set YamlSerializerIsReflectionEnabledByDefault to true to keep it
+       (and keep the types you bind). -->
+  <PropertyGroup Condition="'$(YamlSerializerIsReflectionEnabledByDefault)' == '' and ('$(PublishTrimmed)' == 'true' or '$(PublishAot)' == 'true')">
+    <YamlSerializerIsReflectionEnabledByDefault>false</YamlSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(YamlSerializerIsReflectionEnabledByDefault)' != ''">
+    <RuntimeHostConfigurationOption Include="OneYaml.YamlSerializer.IsReflectionEnabledByDefault"
+                                    Value="$(YamlSerializerIsReflectionEnabledByDefault)"
+                                    Trim="true" />
+  </ItemGroup>
+</Project>

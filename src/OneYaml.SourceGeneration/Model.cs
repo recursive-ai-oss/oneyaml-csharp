@@ -135,6 +135,10 @@ internal sealed class MemberSpec
     public int? IgnoreCondition { get; set; }
 
     public SetterKind Setter { get; set; }
+
+    // The type that declares the property, which an accessor for its init-only setter must name:
+    // the runtime looks the setter up on that type and does not search its base types.
+    public string? DeclaringTypeName { get; set; }
 }
 
 // A diagnostic that can be compared, so the pipeline can tell when nothing changed.

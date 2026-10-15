@@ -41,6 +41,7 @@ internal sealed class Parser
     private readonly List<TypeSpec> _order = [];
     private readonly Queue<TypeSpec> _pending = new();
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _contextMembers = new(StringComparer.Ordinal);
 
     private readonly INamedTypeSymbol? _yamlIgnore;
     private readonly INamedTypeSymbol? _yamlName;
@@ -80,6 +81,7 @@ internal sealed class Parser
         foreach (ISymbol member in context.GetMembers())
         {
             _names.Add(member.Name);
+            _contextMembers.Add(member.Name);
         }
     }
 
@@ -521,7 +523,8 @@ internal sealed class Parser
         string baseName = Friendly(type);
         string name = baseName;
         int n = 1;
-        while (!_names.Add(name))
+        // Each type gets a property, a backing field named _Name and a method named CreateName; none may meet a member the user declared.
+        while (_contextMembers.Contains("_" + name) || _contextMembers.Contains("Create" + name) || !_names.Add(name))
         {
             name = baseName + (++n).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
@@ -610,7 +613,8 @@ internal sealed class Parser
 
         // A struct's implicit parameterless constructor is not one reflection lists; the default value stands in.
         List<IMethodSymbol> ctors = type.InstanceConstructors
-            .Where(c => c.DeclaredAccessibility == Accessibility.Public && !(type.IsValueType && c.IsImplicitlyDeclared))
+            // A constructor with a ref, in or out parameter cannot be called with a value from a mapping.
+            .Where(c => c.DeclaredAccessibility == Accessibility.Public && !(type.IsValueType && c.IsImplicitlyDeclared) && c.Parameters.All(x => x.RefKind == RefKind.None))
             .ToList();
         IMethodSymbol? marked = ctors.FirstOrDefault(c => HasAttribute(c, _yamlConstructor))
             ?? ctors.FirstOrDefault(c => HasAttribute(c, _jsonConstructor));
@@ -657,14 +661,23 @@ internal sealed class Parser
             }
         }
 
-        return names.Count == 0 ? string.Empty : " { " + string.Join(", ", names.Select(n => n + " = default")) + " }";
+        return names.Count == 0 ? string.Empty : " { " + string.Join(", ", names.Select(n => CodeName(n) + " = default")) + " }";
     }
 
     private void CollectMembers(INamedTypeSymbol type, ObjectSpec obj, IParameterSymbol[] parameters)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
 
-        bool BoundByConstructor(string name) => parameters.Any(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+        bool BoundByConstructor(string name, ITypeSymbol memberType, Location where)
+        {
+            IParameterSymbol? parameter = parameters.FirstOrDefault(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (parameter is not null && !SymbolEqualityComparer.Default.Equals(parameter.Type, memberType))
+            {
+                Report(Diagnostics.ParameterTypeMismatch, where, parameter.Name, Show(type), Show(parameter.Type), Show(memberType));
+            }
+
+            return parameter is not null;
+        }
 
         // Derived members first, so a member hidden by a derived one is the one that stays.
         for (INamedTypeSymbol? t = type; t is not null && !IsRootType(t); t = t.BaseType)
@@ -672,13 +685,19 @@ internal sealed class Parser
             foreach (IPropertySymbol p in t.GetMembers().OfType<IPropertySymbol>())
             {
                 if (p.DeclaredAccessibility != Accessibility.Public || p.IsStatic || p.IsIndexer || p.RefKind != RefKind.None
-                    || p.ExplicitInterfaceImplementations.Length != 0 || p.Type.IsRefLikeType || p.Type.TypeKind == TypeKind.Pointer
-                    || IsIgnored(p))
+                    || p.ExplicitInterfaceImplementations.Length != 0 || p.Type.IsRefLikeType || p.Type.TypeKind == TypeKind.Pointer)
                 {
                     continue;
                 }
 
-                bool bound = BoundByConstructor(p.Name);
+                // An ignored member still takes its name, so the base member it overrides or hides stays out too.
+                if (IsIgnored(p))
+                {
+                    names.Add(p.Name);
+                    continue;
+                }
+
+                bool bound = BoundByConstructor(p.Name, p.Type, p.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None);
                 bool publicSetter = p.SetMethod is { DeclaredAccessibility: Accessibility.Public };
                 if (!publicSetter && !bound)
                 {
@@ -701,6 +720,7 @@ internal sealed class Parser
                 member.CanRead = p.GetMethod is { DeclaredAccessibility: Accessibility.Public };
                 // A member filled through the constructor is never assigned afterwards.
                 member.Setter = !publicSetter || bound ? SetterKind.None : p.SetMethod!.IsInitOnly ? SetterKind.InitOnly : SetterKind.Plain;
+                member.DeclaringTypeName = p.ContainingType.ToDisplayString(s_typeFormat);
                 obj.Members.Add(member);
             }
         }
@@ -715,7 +735,7 @@ internal sealed class Parser
                     continue;
                 }
 
-                bool bound = BoundByConstructor(f.Name);
+                bool bound = BoundByConstructor(f.Name, f.Type, f.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None);
                 if (f.IsReadOnly && !bound)
                 {
                     continue;
@@ -736,6 +756,10 @@ internal sealed class Parser
             }
         }
     }
+
+    // A member name as it must appear in code: a keyword needs the @ prefix.
+    internal static string CodeName(string name) =>
+        SyntaxFacts.GetKeywordKind(name) != SyntaxKind.None || SyntaxFacts.GetContextualKeywordKind(name) != SyntaxKind.None ? "@" + name : name;
 
     private static bool IsRootType(INamedTypeSymbol t) =>
         t.SpecialType is SpecialType.System_Object or SpecialType.System_ValueType or SpecialType.System_Enum;
@@ -785,7 +809,8 @@ internal sealed class Parser
 
     private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attribute) => FindAttribute(symbol, attribute) is not null;
 
-    // Attributes are inherited through overrides, as the reflection resolver reads them.
+    // Only the attributes on the member itself count, not those on a base member it overrides: that is
+    // what the reflection resolver reads and how System.Text.Json treats member attributes.
     private static AttributeData? FindAttribute(ISymbol symbol, INamedTypeSymbol? attribute)
     {
         if (attribute is null)
@@ -793,14 +818,11 @@ internal sealed class Parser
             return null;
         }
 
-        for (ISymbol? current = symbol; current is not null; current = (current as IPropertySymbol)?.OverriddenProperty)
+        foreach (AttributeData data in symbol.GetAttributes())
         {
-            foreach (AttributeData data in current.GetAttributes())
+            if (SymbolEqualityComparer.Default.Equals(data.AttributeClass, attribute))
             {
-                if (SymbolEqualityComparer.Default.Equals(data.AttributeClass, attribute))
-                {
-                    return data;
-                }
+                return data;
             }
         }
 
@@ -826,6 +848,10 @@ internal sealed class Parser
                 return b ? "true" : "false";
             case char c:
                 return SymbolDisplay.FormatLiteral(c, quote: true);
+            case float f when float.IsNaN(f) || float.IsInfinity(f):
+                return float.IsNaN(f) ? "float.NaN" : f > 0 ? "float.PositiveInfinity" : "float.NegativeInfinity";
+            case double d when double.IsNaN(d) || double.IsInfinity(d):
+                return double.IsNaN(d) ? "double.NaN" : d > 0 ? "double.PositiveInfinity" : "double.NegativeInfinity";
             case sbyte:
             case byte:
             case short:

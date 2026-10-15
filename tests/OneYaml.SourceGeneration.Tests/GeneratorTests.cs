@@ -211,6 +211,13 @@ public class GeneratorTests
             """
         },
         {
+            "OY0007", DiagnosticSeverity.Error, """
+            public sealed class Mismatch { public Mismatch(long count) { Count = (int)count; } public int Count { get; } }
+            [YamlSerializable(typeof(Mismatch))]
+            public partial class Ctx : YamlSerializerContext { }
+            """
+        },
+        {
             "OY0006", DiagnosticSeverity.Error, """
             public sealed class Loop : List<Loop> { }
             [YamlSerializable(typeof(Loop))]
@@ -246,6 +253,43 @@ public class GeneratorTests
         Diagnostic d = Assert.Single(run.GeneratorDiagnostics, x => x.Id == "OY0005");
 
         Assert.Equal(3, d.Location.GetLineSpan().StartLinePosition.Line);
+    }
+
+    [Fact]
+    public void Keyword_member_names_special_default_values_and_user_members_named_like_generated_ones_compile()
+    {
+        GeneratorRun run = GeneratorHarness.Run(Header + """
+            public sealed class Keywords { public string @class { get; set; } = ""; public int @event; public required string @namespace { get; init; } }
+            public sealed record Defaults(double A = double.NaN, float B = float.PositiveInfinity, double C = double.NegativeInfinity);
+            public sealed class Item { public int V { get; set; } }
+            [YamlSerializable(typeof(Keywords))]
+            [YamlSerializable(typeof(Defaults))]
+            [YamlSerializable(typeof(Item))]
+            public partial class Ctx : YamlSerializerContext
+            {
+                public int _Item;
+                private static void CreateKeywords() { }
+            }
+            """);
+
+        Assert.Empty(GeneratorHarness.Ids(run.GeneratorDiagnostics));
+        Assert.DoesNotContain(run.CompilationDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
+    }
+
+    [Fact]
+    public void An_init_only_setter_declared_on_a_base_type_is_reached_through_that_type()
+    {
+        GeneratorRun run = GeneratorHarness.Run(Header + """
+            public class BaseInit { public string? Name { get; init; } }
+            public sealed class DerivedInit : BaseInit { }
+            [YamlSerializable(typeof(DerivedInit))]
+            public partial class Ctx : YamlSerializerContext { }
+            """);
+
+        string source = Assert.Single(run.Sources).Source;
+
+        Assert.Matches(@"extern void SetInit\d+\(global::[\w.]*BaseInit instance,", source);
+        Assert.DoesNotContain(run.CompilationDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
     }
 
     [Fact]

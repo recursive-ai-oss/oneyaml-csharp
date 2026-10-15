@@ -10,8 +10,21 @@ using OneYaml.Text;
 namespace OneYaml;
 
 /// <summary>Reads YAML into .NET values and writes .NET values as YAML.</summary>
+/// <remarks>
+/// A <see cref="DateTime"/> read from a timestamp that has an offset is converted to the local time of the
+/// machine, as <see cref="System.Text.Json.JsonSerializer"/> does, so the result depends on its time zone; use <see cref="DateTimeOffset"/> to keep the offset.
+/// </remarks>
 public static partial class YamlSerializer
 {
+    /// <summary>
+    /// Whether options without a resolver fall back to reflection. It is <see langword="true"/> unless the
+    /// application sets the <c>OneYaml.YamlSerializer.IsReflectionEnabledByDefault</c> runtime switch to
+    /// <see langword="false"/>. Trimmed and ahead-of-time published applications get
+    /// <see langword="false"/> unless the project sets <c>YamlSerializerIsReflectionEnabledByDefault</c>;
+    /// the trimmer then removes the reflection code.
+    /// </summary>
+    public static bool IsReflectionEnabledByDefault { get; } = !AppContext.TryGetSwitch("OneYaml.YamlSerializer.IsReflectionEnabledByDefault", out bool enabled) || enabled;
+
     private const string UnreferencedMessage = "Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.";
     private const string DynamicMessage = "Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.";
 
@@ -57,7 +70,7 @@ public static partial class YamlSerializer
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(returnType);
-        return ReadBoxed(yaml.AsSpan(), (options ?? YamlSerializerOptions.Default).GetTypeInfo(returnType));
+        return ReadBoxed(yaml.AsSpan(), (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo(returnType));
     }
 
     /// <summary>Reads a value from YAML text using generated metadata.</summary>
@@ -251,7 +264,7 @@ public static partial class YamlSerializer
 
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
-    private static YamlTypeInfo<T> Info<T>(YamlSerializerOptions? options) => (options ?? YamlSerializerOptions.Default).GetTypeInfo<T>();
+    private static YamlTypeInfo<T> Info<T>(YamlSerializerOptions? options) => (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo<T>();
 
     private static T? ReadChars<T>(ReadOnlySpan<char> text, YamlTypeInfo<T> info)
     {

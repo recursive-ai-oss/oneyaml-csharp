@@ -56,7 +56,7 @@ public static partial class YamlSerializer
     public static string Serialize(object? value, Type inputType, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(inputType);
-        return WriteBoxedString(value, (options ?? YamlSerializerOptions.Default).GetTypeInfo(inputType));
+        return WriteBoxedString(value, (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo(inputType));
     }
 
     /// <summary>Writes a value as YAML text using generated metadata for its declared type.</summary>

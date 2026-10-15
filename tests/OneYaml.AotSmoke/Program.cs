@@ -76,5 +76,37 @@ catch (NotSupportedException)
     reflectionOff = true;
 }
 
+// The reflection overloads carry the trim and AOT annotations. Calling one here is suppressed on purpose,
+// to show what a program that ignores the warning gets: a clear error, not reflection. Without the
+// suppression the build fails with IL2026 and IL3050, which is the warning applications see.
+bool switchOff = !YamlSerializer.IsReflectionEnabledByDefault && CallsReflectionOverload();
+
+[System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The smoke test calls it to see it refuse.")]
+[System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("AOT", "IL3050", Justification = "The smoke test calls it to see it refuse.")]
+static bool CallsReflectionOverload()
+{
+    try
+    {
+        YamlSerializer.Deserialize<BuildJob>("name: x");
+        return false;
+    }
+    catch (InvalidOperationException)
+    {
+        return true;
+    }
+}
+
+// Options with no resolver never reach reflection through GetTypeInfo.
+bool plainOptionsRefuse = false;
+try
+{
+    new YamlSerializerOptions().GetTypeInfo<BuildJob>();
+}
+catch (InvalidOperationException)
+{
+    plainOptionsRefuse = true;
+}
+
+Console.WriteLine($"switchOff={switchOff} plainOptionsRefuse={plainOptionsRefuse}");
 Console.WriteLine($"typed={ok} generic={genericOk} write={writeOk} genericWrite={genericWriteOk} error={error} reflectionOff={reflectionOff}");
-return ok && genericOk && writeOk && genericWriteOk && error == "Binding at 1:11" && reflectionOff ? 0 : 1;
+return ok && genericOk && writeOk && genericWriteOk && error == "Binding at 1:11" && reflectionOff && switchOff && plainOptionsRefuse ? 0 : 1;
