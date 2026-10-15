@@ -9,7 +9,7 @@ internal static partial class Editor
     /// <summary>
     /// Removes several entries of one block mapping in a single pass: one walk over the mapping finds the
     /// keys, and one rebuild applies every cut. The result is byte-identical to removing the entries one
-    /// by one. When any entry needs the careful single-entry rules (anchors, a kept block scalar before it,
+    /// by one. When any entry needs the careful single-entry rules (an alias anywhere in the stream, a kept block scalar before it,
     /// a last line without a break, a line that does not start with the entry, an ambiguous key), nothing is
     /// done and the caller removes the entries one at a time.
     /// </summary>
@@ -32,6 +32,7 @@ internal static partial class Editor
         var index = new KeyIndex(keys);
         var cuts = new List<TextEdit>();
         int deleted = 0;
+        int lastWanted = -1;
         int previousStop = 0;
         bool runKeep = false;
         bool runBlock = false;
@@ -71,6 +72,7 @@ internal static partial class Editor
                 }
 
                 deleted++;
+                lastWanted = Math.Max(lastWanted, wanted);
                 gapMatters = runBlock;
                 runKeep |= keepHere;
                 runBlock |= blockHere;
@@ -101,11 +103,50 @@ internal static partial class Editor
 
         if (deleted == items)
         {
-            return false;
+            return RemoveAll(s, limits, map, keys, lastWanted, out next);
         }
 
         next = DocState.Rebuild(s, cuts.ToArray(), ReadOnlySpan<byte>.Empty, limits);
         return true;
+    }
+
+    // Every entry goes: the mapping stays, empty, as when the entries are removed one at a time. All entries but
+    // the one removed last are cut in one pass, and the last removal is the ordinary single-entry one.
+    private static bool RemoveAll(DocState s, YamlLimits limits, int map, List<byte[]> keys, int lastWanted, out DocState next)
+    {
+        next = s;
+        DocState mid = s;
+        if (s.Node(map).Count > 2)
+        {
+            var rest = new List<byte[]>(keys.Count - 1);
+            for (int i = 0; i < keys.Count; i++)
+            {
+                if (i != lastWanted)
+                {
+                    rest.Add(keys[i]);
+                }
+            }
+
+            if (!TryRemoveMany(s, limits, map, rest, out mid) || ReferenceEquals(mid, s))
+            {
+                return false;
+            }
+        }
+
+        try
+        {
+            int value = map + 1;
+            value += mid.Node(value).Size;
+            next = Remove(mid, limits, value);
+            return true;
+        }
+        finally
+        {
+            if (!ReferenceEquals(mid, s))
+            {
+                mid.Dispose();
+            }
+        }
     }
 
     // The cut for one block entry that starts its own line: the same lines the single-entry removal takes.
@@ -139,7 +180,7 @@ internal static partial class Editor
 
         private readonly List<byte[]> _keys;
         private readonly int[] _slots;
-        private readonly uint[] _hashes;
+        private readonly int[] _hashes;
         private readonly bool[] _seen;
 
         public KeyIndex(List<byte[]> keys)
@@ -152,13 +193,13 @@ internal static partial class Editor
             }
 
             _slots = new int[size];
-            _hashes = new uint[keys.Count];
+            _hashes = new int[keys.Count];
             _seen = new bool[keys.Count];
             for (int i = 0; i < keys.Count; i++)
             {
-                uint h = Hash(keys[i]);
+                int h = Hash(keys[i]);
                 _hashes[i] = h;
-                int at = (int)(h & (uint)(size - 1));
+                int at = h & (size - 1);
                 while (_slots[at] != 0)
                 {
                     at = (at + 1) & (size - 1);
@@ -184,9 +225,9 @@ internal static partial class Editor
                     text = s.DecodedScalar(key, out rented);
                 }
 
-                uint h = Hash(text);
+                int h = Hash(text);
                 int mask = _slots.Length - 1;
-                for (int at = (int)(h & (uint)mask); _slots[at] != 0; at = (at + 1) & mask)
+                for (int at = h & mask; _slots[at] != 0; at = (at + 1) & mask)
                 {
                     int w = _slots[at] - 1;
                     if (_hashes[w] == h && text.SequenceEqual(_keys[w]))
@@ -209,15 +250,13 @@ internal static partial class Editor
             }
         }
 
-        private static uint Hash(ReadOnlySpan<byte> bytes)
+        // The BCL hash is seeded randomly for each process, so member names chosen to collide
+        // under a known hash cannot push every lookup into one probe chain.
+        private static int Hash(ReadOnlySpan<byte> bytes)
         {
-            uint h = 2166136261;
-            foreach (byte b in bytes)
-            {
-                h = (h ^ b) * 16777619;
-            }
-
-            return h;
+            var h = new HashCode();
+            h.AddBytes(bytes);
+            return h.ToHashCode();
         }
     }
 }

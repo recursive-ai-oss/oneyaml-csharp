@@ -138,8 +138,17 @@ internal sealed partial class DocState
                 case ScalarKind.Float:
                     if (CoreSchema.TryParseDouble(text, out double d))
                     {
-                        // Zero and negative zero are one key, and so are all NaN.
-                        h.Add(d == 0 ? 0.0 : d);
+                        if (FloatKeyIdentity.NeedsDecimal(d, text))
+                        {
+                            // Beyond the double range every literal rounds to the same infinity or zero; hashing the
+                            // decimal form keeps many such keys out of one bucket.
+                            h.Add(FloatKeyIdentity.Of(text));
+                        }
+                        else
+                        {
+                            // Zero and negative zero are one key, and so are all NaN.
+                            h.Add(d == 0 ? 0.0 : d);
+                        }
                     }
 
                     break;

@@ -12,7 +12,11 @@ public enum YamlErrorCategory
     /// <summary>A configured limit (depth, size, document count, alias expansion) was exceeded.</summary>
     Limit,
 
-    /// <summary>A mapping has the same key twice.</summary>
+    /// <summary>
+    /// A mapping has the same key twice. Keys are compared by value after Core resolution, so <c>1</c> and <c>0x1</c> are
+    /// one key. A float literal beyond the double range keeps its own value (<c>1e400</c> and <c>2e400</c> differ), except that
+    /// literals which round to the same subnormal double, such as <c>3e-324</c> and <c>4e-324</c>, are one key.
+    /// </summary>
     DuplicateKey,
 
     /// <summary>A tag cannot be resolved or is not allowed.</summary>

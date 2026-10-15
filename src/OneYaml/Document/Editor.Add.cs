@@ -305,13 +305,14 @@ internal static partial class Editor
         => n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded;
 
     // The end of the comment-only lines from pos on (blank lines between them included) that are indented
-    // at least to column; pos itself when there are none.
+    // at least to column, and of the blank lines with more blanks than that; pos itself when there are none.
     private static int CommentLinesEnd(ReadOnlySpan<byte> src, int pos, int column)
     {
         int end = pos;
         int p = pos;
         while (p < src.Length)
         {
+            int p0 = p;
             int q = p;
             while (q < src.Length && src[q] is (byte)' ' or (byte)'\t')
             {
@@ -328,6 +329,11 @@ internal static partial class Editor
             else if (q < src.Length && src[q] is (byte)'\n' or (byte)'\r')
             {
                 p = q + (src[q] == (byte)'\r' && q + 1 < src.Length && src[q + 1] == (byte)'\n' ? 2 : 1);
+                if (q - p0 > column)
+                {
+                    // Blanks beyond the scalar's indentation would be read as part of its text.
+                    end = p;
+                }
             }
             else
             {
