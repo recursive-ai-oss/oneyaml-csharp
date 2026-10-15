@@ -260,6 +260,19 @@ public static partial class YamlSerializer
         return ReadAllUtf8(input.Utf8Text, info);
     }
 
+    /// <summary>Reads every document of a stream of bytes using generated metadata.</summary>
+    /// <typeparam name="T">The type of each document.</typeparam>
+    /// <param name="utf8Yaml">The YAML bytes, with any number of documents (empty input has none).</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>One value per document, in order.</returns>
+    /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
+    public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        using YamlInput input = YamlInput.FromBytes(utf8Yaml, typeInfo.Options.Limits);
+        return ReadAllUtf8(input.Utf8Text, typeInfo);
+    }
+
     // ---- core ----
 
     [RequiresUnreferencedCode(UnreferencedMessage)]

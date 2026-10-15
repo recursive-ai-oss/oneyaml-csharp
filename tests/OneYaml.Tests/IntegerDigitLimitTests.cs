@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Numerics;
 using OneYaml.Documents;
 using Xunit;
@@ -34,40 +33,40 @@ public sealed class IntegerDigitLimitTests
     {
         string huge = Digits(1_000_000);
         string doc = "v: " + huge + "\n";
-        var watch = Stopwatch.StartNew();
-        AssertLimit(() => YamlSerializer.Deserialize<BigInteger>(huge));
-        AssertLimit(() => YamlSerializer.Deserialize<double>(huge));
-        AssertLimit(() => YamlSerializer.Deserialize<decimal>(huge));
-        AssertLimit(() => YamlSerializer.Deserialize<ulong>(huge));
-        AssertLimit(() => YamlSerializer.Deserialize<object>(huge));
-        AssertLimit(() => YamlSerializer.Deserialize<Dictionary<string, object?>>(doc));
-        // An implicit key is at most 1,024 characters, so a long integer key needs a lower limit.
-        AssertLimit(() => YamlSerializer.Deserialize<object>(Digits(200) + ": a\n", With(YamlLimits.Default with { MaxIntegerDigits = 100 })));
-        watch.Stop();
-        TestContext.Current.SendDiagnosticMessage($"seven refusals of a 1,000,000-digit integer, including reading it: {watch.Elapsed.TotalMilliseconds:F1} ms");
 
-        // Each call also reads the megabyte; converting it would take over a second apiece.
-        Assert.True(watch.ElapsedMilliseconds < 1000, $"took {watch.ElapsedMilliseconds} ms");
+        // What reading the megabyte costs on this machine right now: the same text read as a string goes through
+        // the same decoding, scanning and parsing, and converts nothing. A refusal must cost about that much.
+        // Converting a million digits to a number takes 90 ms on .NET 10 and over a second on .NET 8, far above that.
+        TimeSpan reading = SteadyState.Fastest(() => YamlSerializer.Deserialize<string>(huge), 5);
+        var refusals = new (string Name, Action Run)[]
+        {
+            ("BigInteger", () => AssertLimit(() => YamlSerializer.Deserialize<BigInteger>(huge))),
+            ("double", () => AssertLimit(() => YamlSerializer.Deserialize<double>(huge))),
+            ("decimal", () => AssertLimit(() => YamlSerializer.Deserialize<decimal>(huge))),
+            ("ulong", () => AssertLimit(() => YamlSerializer.Deserialize<ulong>(huge))),
+            ("object", () => AssertLimit(() => YamlSerializer.Deserialize<object>(huge))),
+            ("mapping value", () => AssertLimit(() => YamlSerializer.Deserialize<Dictionary<string, object?>>(doc))),
+
+            // An implicit key is at most 1,024 characters, so a long integer key needs a lower limit.
+            ("key", () => AssertLimit(() => YamlSerializer.Deserialize<object>(Digits(200) + ": a\n", With(YamlLimits.Default with { MaxIntegerDigits = 100 })))),
+        };
+
+        TimeSpan bound = (reading * 10) + TimeSpan.FromMilliseconds(20);
+        foreach ((string name, Action run) in refusals)
+        {
+            TimeSpan refusal = SteadyState.Fastest(run, 3);
+            TestContext.Current.SendDiagnosticMessage($"refusing a 1,000,000-digit {name}: {refusal.TotalMilliseconds:F1} ms; reading it as a string: {reading.TotalMilliseconds:F1} ms");
+            Assert.True(refusal <= bound, $"{name}: {refusal.TotalMilliseconds:F1} ms to refuse; reading the same text takes {reading.TotalMilliseconds:F1} ms");
+        }
     }
 
     [Fact]
     public void The_check_itself_does_not_look_at_the_digits_of_a_decimal_integer()
     {
         byte[] huge = System.Text.Encoding.ASCII.GetBytes(Digits(1_000_000));
-        var watch = new Stopwatch();
-        long before = GC.GetAllocatedBytesForCurrentThread();
         bool within = true;
-        watch.Start();
-        for (int i = 0; i < 1000; i++)
-        {
-            within &= OneYaml.Schema.CoreSchema.IsWithinIntegerDigits(huge, 4300);
-        }
-
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        TestContext.Current.SendDiagnosticMessage($"the digit check on 1,000,000 digits: {watch.Elapsed.TotalMilliseconds * 1000 / 1000:F2} us per call");
-
+        SteadyState.AssertAllocatesNothing(() => within &= OneYaml.Schema.CoreSchema.IsWithinIntegerDigits(huge, 4300), 1000);
         Assert.False(within);
-        Assert.Equal(0, allocated);
     }
 
     [Fact]

@@ -38,7 +38,7 @@ The benchmarks run in process, so they work wherever the build output is redirec
 `TypedLoadBenchmarks` binds the gha-workflow, records-4k and records-64k files to the kit's models
 (`Models.cs`, the same shapes the kit's harness uses) with the OneYaml reflection binder, VYaml and
 SharpYaml through generated code, and YamlDotNet through reflection. `GenericLoadBenchmarks` loads
-six files as untyped values (`object`) with all four libraries. Both report time and allocated bytes.
+eleven files as untyped values (`object`) with OneYaml (reflection and generated), VYaml, SharpYaml and YamlDotNet; a file with several documents is read as a list of them. Both report time and allocated bytes.
 They read the same `ONEYAML_WORKLOADS` directory; `records-4k` is cut from the first records of
 `records-64k` when no file of that name exists.
 
@@ -65,7 +65,10 @@ ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter 
 Two helpers compare builds without BenchmarkDotNet. `--dump-hash [name...]` prints a hash of what the
 untyped dump writes for each workload, so two builds can be checked for identical output. `--dump-loop name
 seconds` dumps one tree repeatedly and prints the best time of a batch, for a quick before/after on a
-busy machine.
+busy machine. The load counterparts are `--load-hash [name...]`, a hash of the value graph a generic load
+builds (reflection, generated, and the string overload), and `--load-loop name seconds`, which loads one
+workload repeatedly with OneYaml (both paths), VYaml and SharpYaml as the kit does and prints each best batch
+time in microseconds and the bytes one load allocates.
 
 ## Scalar benchmarks
 

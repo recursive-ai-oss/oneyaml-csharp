@@ -93,7 +93,7 @@ public class GenericLoadBenchmarks
     private byte[] _bytes = [];
     private string _text = string.Empty;
 
-    [Params("gha-workflow", "k8s-multi-16k", "openapi-100k", "records-64k", "long-scalars-256k", "anchors-64k")]
+    [Params("reference-a", "reference-b", "compose-merge-2k", "gha-workflow", "k8s-ingress-nginx-multi", "k8s-multi-16k", "openapi-100k", "records-64k", "wide-map-64k", "long-scalars-256k", "anchors-32k")]
     public string Workload { get; set; } = string.Empty;
 
     private bool _multi;
@@ -113,6 +113,11 @@ public class GenericLoadBenchmarks
     public object? ReadOneYaml() => _multi
         ? YamlSerializer.DeserializeAll<object>(_bytes)
         : YamlSerializer.Deserialize<object>(_bytes);
+
+    [Benchmark(Description = "OneYaml generated")]
+    public object? ReadOneYamlGenerated() => _multi
+        ? YamlSerializer.DeserializeAll(_bytes, OneYamlContext.Default.Object)
+        : YamlSerializer.Deserialize(_bytes, OneYamlContext.Default.Object);
 
     [Benchmark(Description = "VYaml")]
     public object? ReadVYaml() => _multi
