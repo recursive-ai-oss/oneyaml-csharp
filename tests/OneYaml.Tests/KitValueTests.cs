@@ -17,9 +17,9 @@ public class KitValueTests
         ["schema/quoted-and-plain-keys-differ-by-type"] = (YamlErrorCategory.DuplicateKey, "same key twice"),
     };
 
-    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: false));
+    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: false), Corpus.KitVariable);
 
-    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: true));
+    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: true), Corpus.KitVariable);
 
     private static IEnumerable<string> ValueCaseIds(params string[] categories)
     {

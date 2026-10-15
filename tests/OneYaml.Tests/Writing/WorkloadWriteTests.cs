@@ -128,36 +128,7 @@ public class WorkloadWriteTests
 {
     public static IEnumerable<object[]> Files()
     {
-        var seen = new SortedSet<string>(StringComparer.Ordinal);
-        if (Corpus.KitDirectory is { } kit)
-        {
-            string real = Path.Combine(kit, "bench", "workloads", "real");
-            if (Directory.Exists(real))
-            {
-                foreach (string dir in Directory.EnumerateDirectories(real))
-                {
-                    string file = Path.Combine(dir, "input.yaml");
-                    if (File.Exists(file))
-                    {
-                        seen.Add(file);
-                    }
-                }
-            }
-        }
-
-        // The larger generated workloads sit outside the repository; they are used when the directory is named.
-        if (Environment.GetEnvironmentVariable("ONEYAML_WORKLOADS") is { Length: > 0 } extra && Directory.Exists(extra))
-        {
-            foreach (string file in Directory.EnumerateFiles(extra, "*.yaml"))
-            {
-                seen.Add(file);
-            }
-        }
-
-        foreach (string file in seen)
-        {
-            yield return [file];
-        }
+        return Corpus.Rows(Corpus.Workloads().Select(d => Path.Combine(d, "input.yaml")), Corpus.KitVariable, Corpus.WorkloadsVariable);
     }
 
     [Fact]
@@ -168,13 +139,18 @@ public class WorkloadWriteTests
             Assert.Skip($"{Corpus.KitVariable} is not set");
         }
 
-        Assert.True(Files().Count() >= 7);
+        Assert.True(Corpus.Workloads().Count() >= 7, "fewer than seven workloads found");
     }
 
     [Theory]
     [MemberData(nameof(Files))]
     public void A_workload_loaded_as_objects_is_written_back_whole(string file)
     {
+        if (file.Length == 0)
+        {
+            Assert.Skip($"{Corpus.KitVariable} is not set");
+        }
+
         string text = File.ReadAllText(file);
         List<object?> documents = YamlSerializer.DeserializeAll<object>(text)!;
 
@@ -194,9 +170,14 @@ public class WorkloadWriteTests
         foreach (object[] row in Files())
         {
             string file = (string)row[0];
-            string name = Path.GetFileNameWithoutExtension(file);
+            if (file.Length == 0)
+            {
+                continue;
+            }
+
+            string name = Path.GetFileName(Path.GetDirectoryName(file))!;
             string text = File.ReadAllText(file);
-            if (name == "gha-workflow" || file.Contains("gha-workflow", StringComparison.Ordinal))
+            if (name == "gha-workflow")
             {
                 WorkWorkflow model = YamlSerializer.Deserialize<WorkWorkflow>(text)!;
                 string written = YamlSerializer.Serialize(model);
@@ -218,7 +199,12 @@ public class WorkloadWriteTests
 
         if (typed == 0)
         {
-            Assert.Skip("no typed workload files are available");
+            if (Corpus.KitDirectory is not null || Corpus.Workloads().Any())
+            {
+                Assert.Fail("no typed workload (gha-workflow, records) was found");
+            }
+
+            Assert.Skip($"{Corpus.KitVariable} is not set");
         }
     }
 

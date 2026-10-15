@@ -17,6 +17,10 @@ internal static partial class Editor
         if (scope >= 0 && s.Node(scope).Kind == NodeKind.Mapping)
         {
             Probe(s, scope, ref step, ref seqOff);
+            if (step == 0)
+            {
+                step = EnclosingStep(s, scope);
+            }
         }
 
         for (int i = 0; i < s.NodeCount && (step == 0 || seqOff < 0); i++)
@@ -38,6 +42,32 @@ internal static partial class Editor
         }
 
         return new Layout(nl, step, seqOff);
+    }
+
+    // The step of the nearest block mapping, from the mapping out, that sits on its own lines under a key: how far its
+    // entries are indented under that key. A mapping that is a sequence item has no such key, so the search goes on
+    // outward. Returns 0 when no enclosing mapping gives a step (the new key is in the root mapping).
+    private static int EnclosingStep(DocState s, int map)
+    {
+        for (int m = map; m >= 0; m = s.Node(m).Parent)
+        {
+            ref readonly CstNode n = ref s.Node(m);
+            int parent = n.Parent;
+            if (n.Kind != NodeKind.Mapping || n.IsFlow || (n.Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0 || parent < 0
+                || s.Node(parent).Kind != NodeKind.Mapping || s.Node(parent).IsFlow || !s.StartsLine(n.Start))
+            {
+                continue;
+            }
+
+            int key = s.PrevSibling(m);
+            int step = s.Column(n.Start) - s.Column(s.EntryStart(key));
+            if (step > 0)
+            {
+                return step;
+            }
+        }
+
+        return 0;
     }
 
     // A flow collection takes only the line break from its surroundings, so the document is not searched

@@ -8,11 +8,14 @@ namespace OneYaml.Tests.Emitting;
 /// <summary>Event lists from SharpYaml's parser, in the same form as <see cref="YamlDotNetEvents"/>.</summary>
 internal static class SharpYamlEvents
 {
+    // The reader refuses more than 64 levels unless told otherwise; the deep workloads go further.
+    private const int MaxDepth = 1000;
+
     /// <summary>Parses the text; scalar lines look like <c>=VAL :value</c> (style mark, then the value).</summary>
     public static List<string> Read(string text)
     {
         var events = new List<string>();
-        var parser = Parser.CreateParser(new StringReader(text));
+        var parser = Parser.CreateParser(new StringReader(text), MaxDepth);
         while (parser.MoveNext())
         {
             switch (parser.Current)
