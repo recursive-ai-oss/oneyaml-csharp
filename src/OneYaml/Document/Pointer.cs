@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Text;
 
 namespace OneYaml.Documents;
@@ -6,6 +7,8 @@ namespace OneYaml.Documents;
 /// <summary>An RFC 6901 JSON Pointer, split into tokens and unescaped, as UTF-8.</summary>
 internal readonly struct Pointer
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+
     private readonly byte[] _data;
     private readonly int[] _bounds;
 
@@ -40,7 +43,7 @@ internal readonly struct Pointer
         byte[] utf8;
         try
         {
-            utf8 = new UTF8Encoding(false, true).GetBytes(pointer);
+            utf8 = StrictUtf8.GetBytes(pointer);
         }
         catch (EncoderFallbackException)
         {
@@ -99,6 +102,53 @@ internal readonly struct Pointer
 
         bounds[(t * 2) + 1] = w - bounds[t * 2];
         return new Pointer(data, bounds);
+    }
+
+    /// <summary>Builds a pointer from tokens that are already unescaped.</summary>
+    /// <param name="tokens">The tokens, UTF-8.</param>
+    /// <returns>The pointer.</returns>
+    public static Pointer FromTokens(IReadOnlyList<byte[]> tokens)
+    {
+        int total = 0;
+        foreach (byte[] t in tokens)
+        {
+            total += t.Length;
+        }
+
+        byte[] data = new byte[total];
+        int[] bounds = new int[tokens.Count * 2];
+        int w = 0;
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            bounds[i * 2] = w;
+            bounds[(i * 2) + 1] = tokens[i].Length;
+            tokens[i].CopyTo(data, w);
+            w += tokens[i].Length;
+        }
+
+        return new Pointer(data, bounds);
+    }
+
+    /// <summary>Tells whether the first <paramref name="count"/> tokens of this pointer equal the first tokens of another.</summary>
+    /// <param name="other">The other pointer.</param>
+    /// <param name="count">How many tokens to compare.</param>
+    /// <returns><see langword="true"/> if both have at least that many tokens and they are equal.</returns>
+    public bool StartsWith(in Pointer other, int count)
+    {
+        if (Count < count || other.Count < count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            if (!this[i].SequenceEqual(other[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Reads a token as a sequence index: no sign, no leading zero, within the int range.</summary>
@@ -334,6 +384,46 @@ internal static class PointerOps
 
                 return Editor.InsertItem(s, limits, container, position, v);
         }
+    }
+
+    /// <summary>Works out where a write at a pointer would put its text, without writing.</summary>
+    /// <param name="s">The state.</param>
+    /// <param name="limits">The limits for alias budgets.</param>
+    /// <param name="document">The document index.</param>
+    /// <param name="p">The pointer.</param>
+    /// <param name="mode">The write mode.</param>
+    /// <returns>The offset and the nodes that the write replaces.</returns>
+    /// <exception cref="YamlException">The write would be refused.</exception>
+    public static Destination Locate(DocState s, YamlLimits limits, int document, in Pointer p, Mode mode)
+    {
+        CheckDocument(s, document);
+        if (p.Count == 0)
+        {
+            int r = s.Doc(document).Root;
+            return new Destination(s.PropStart(r), r, r + s.Node(r).Size);
+        }
+
+        int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
+        var budget = new AliasBudget(s, limits);
+        int container = Descend(s, ref budget, cur, ref viaAlias);
+        if (viaAlias)
+        {
+            throw Path(s, YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", cur);
+        }
+
+        int child = FindChild(s, container, p[p.Count - 1], out int position);
+        bool replaces = child >= 0 && (s.Node(container).Kind == NodeKind.Mapping || mode != Mode.Add);
+        if (replaces)
+        {
+            return new Destination(s.PropStart(child), child, child + s.Node(child).Size);
+        }
+
+        if (s.Node(container).Kind == NodeKind.Sequence && position >= 0 && position < s.Node(container).Count)
+        {
+            return new Destination(s.PropStart(s.ChildAt(container, position)), -1, -1);
+        }
+
+        return new Destination(s.Node(container).End, -1, -1);
     }
 
     /// <summary>Removes the entry a pointer names.</summary>

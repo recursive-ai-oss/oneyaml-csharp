@@ -20,8 +20,9 @@ internal sealed partial class DocState : IDisposable
     private DocInfo[] _docs;
     private int[] _comments;
 
-    private DocState(byte[] buf, int length, YamlEncoding encoding, bool hasBom)
+    private DocState(byte[] buf, int length, YamlEncoding encoding, bool hasBom, bool allowDuplicateKeys)
     {
+        AllowDuplicateKeys = allowDuplicateKeys;
         _buf = buf;
         Length = length;
         Encoding = encoding;
@@ -31,6 +32,9 @@ internal sealed partial class DocState : IDisposable
         _docs = [];
         _comments = [];
     }
+
+    /// <summary>Whether a mapping may hold the same key twice.</summary>
+    public bool AllowDuplicateKeys { get; }
 
     /// <summary>The number of bytes of text.</summary>
     public int Length { get; }
@@ -146,12 +150,13 @@ internal sealed partial class DocState : IDisposable
     /// <param name="encoding">The encoding the stream was read in.</param>
     /// <param name="hasBom">Whether the stream had a byte order mark.</param>
     /// <param name="limits">The limits to enforce.</param>
+    /// <param name="allowDuplicateKeys">Whether a mapping may hold the same key twice.</param>
     /// <returns>The new state.</returns>
-    public static DocState Build(ReadOnlySpan<byte> utf8, YamlEncoding encoding, bool hasBom, YamlLimits limits)
+    public static DocState Build(ReadOnlySpan<byte> utf8, YamlEncoding encoding, bool hasBom, YamlLimits limits, bool allowDuplicateKeys)
     {
         byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(utf8.Length, 1));
         utf8.CopyTo(buf);
-        var state = new DocState(buf, utf8.Length, encoding, hasBom);
+        var state = new DocState(buf, utf8.Length, encoding, hasBom, allowDuplicateKeys);
         try
         {
             state.Parse(limits);
@@ -364,6 +369,11 @@ internal sealed partial class DocState : IDisposable
                             {
                                 int last = openLast[open];
                                 n.End = last >= 0 ? _nodes[last].End : n.Start;
+                            }
+
+                            if (!AllowDuplicateKeys && n.Kind == NodeKind.Mapping && n.Count > 2)
+                            {
+                                CheckDuplicateKeys(idx);
                             }
 
                             break;

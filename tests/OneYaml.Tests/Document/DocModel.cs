@@ -280,6 +280,238 @@ internal sealed class Model
         return docs;
     }
 
+    /// <summary>The model as indented text, for failure messages.</summary>
+    public string Dump()
+    {
+        var sb = new StringBuilder();
+        var stack = new Stack<(Model M, int Depth)>();
+        stack.Push((this, 0));
+        while (stack.Count > 0)
+        {
+            (Model m, int depth) = stack.Pop();
+            sb.Append(' ', depth * 2).Append(m.Kind).Append(' ').Append(m.Style).Append(m.Anchor is null ? string.Empty : " &" + m.Anchor).Append(m.Tag is null ? string.Empty : " " + m.Tag).Append(m.Wild ? " wild" : string.Empty);
+            sb.Append(m.Kind is "scalar" or "alias" ? " " + m.Type + ":" + m.Text : string.Empty).AppendLine();
+            for (int i = m.Kids.Count - 1; i >= 0; i--)
+            {
+                stack.Push((m.Kids[i], depth + 1));
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The value a copy writes: the node (aliases at its top followed), without anchors or tags. Returns
+    /// null when the value holds an alias, because the document may keep it as an alias or write it out.
+    /// </summary>
+    public static Model? CopyValue(Model root, string path)
+    {
+        Model? found = Find(root, path);
+        if (found is null)
+        {
+            return null;
+        }
+
+        Model copy = found.Clone();
+        var stack = new Stack<Model>();
+        stack.Push(copy);
+        while (stack.Count > 0)
+        {
+            Model m = stack.Pop();
+            if (m.Kind == "alias")
+            {
+                return null;
+            }
+
+            m.Anchor = null;
+            m.Tag = null;
+            if (m.Kind == "scalar" && m.Type == "null" && m.Raw.Length == 0)
+            {
+                // A null left out in the source is written out when it is copied.
+                m.Raw = "null";
+            }
+
+            foreach (Model k in m.Kids)
+            {
+                stack.Push(k);
+            }
+        }
+
+        return copy;
+    }
+
+    /// <summary>A deep copy.</summary>
+    public Model Clone()
+    {
+        var m = (Model)MemberwiseClone();
+        m.Kids = Kids.Select(k => k.Clone()).ToList();
+        return m;
+    }
+
+    /// <summary>
+    /// The value with every alias replaced by what it stands for, and styles, tags and anchors ignored:
+    /// the YAML data model, for comparing a patched document that may have written aliases out.
+    /// </summary>
+    public static Model Expand(Model root)
+    {
+        var anchors = new Dictionary<string, Model>();
+        return ExpandNode(root, anchors);
+    }
+
+    private static Model ExpandNode(Model m, Dictionary<string, Model> anchors)
+    {
+        if (m.Kind == "alias")
+        {
+            return anchors[m.Text].Clone();
+        }
+
+        Model copy = (Model)m.MemberwiseClone();
+        copy.Wild = true;
+        copy.Anchor = null;
+        copy.Tag = null;
+        copy.Kids = m.Kids.Select(k => ExpandNode(k, anchors)).ToList();
+        if (m.Anchor is not null)
+        {
+            anchors[m.Anchor] = copy;
+        }
+
+        return copy;
+    }
+
+    /// <summary>The node a pointer names in the expected model, aliases followed, or null.</summary>
+    public static Model? Find(Model root, string path)
+    {
+        Model? cur = root;
+        string[] tokens = path.Length == 0 ? [] : path[1..].Split('/').Select(t => t.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)).ToArray();
+        foreach (string token in tokens)
+        {
+            cur = Child(Resolve(root, cur!), token);
+            if (cur is null)
+            {
+                return null;
+            }
+        }
+
+        return Resolve(root, cur!);
+    }
+
+    // An alias means the latest anchor of its name that comes before it in document order.
+    private static Model Resolve(Model root, Model m)
+    {
+        while (m.Kind == "alias")
+        {
+            var anchors = new Dictionary<string, Model>();
+            Model? found = null;
+            var stack = new Stack<Model>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                Model cur = stack.Pop();
+                if (ReferenceEquals(cur, m))
+                {
+                    found = anchors[m.Text];
+                    break;
+                }
+
+                if (cur.Anchor is not null)
+                {
+                    anchors[cur.Anchor] = cur;
+                }
+
+                for (int i = cur.Kids.Count - 1; i >= 0; i--)
+                {
+                    stack.Push(cur.Kids[i]);
+                }
+            }
+
+            m = found!;
+        }
+
+        return m;
+    }
+
+    /// <summary>Applies an add, replace or remove with a model value.</summary>
+    public static void ApplyModel(Model root, string op, string path, Model value) => Apply(root, op, path, () => value.Clone());
+
+    private static void Become(Model target, Model n)
+    {
+        target.Kind = n.Kind;
+        target.Type = n.Type;
+        target.Text = n.Text;
+        target.Raw = n.Raw;
+        target.Kids = n.Kids;
+        target.Style = n.Style;
+        target.Wild = true;
+    }
+
+    /// <summary>Applies an RFC 7396 merge patch to the expected model.</summary>
+    public static void Merge(Model target, JsonElement patch)
+    {
+        if (patch.ValueKind != JsonValueKind.Object)
+        {
+            Become(target, FromJson(patch));
+            return;
+        }
+
+        if (target.Kind != "map")
+        {
+            Become(target, new Model { Kind = "map", Style = "block" });
+        }
+
+        target.Wild = true;
+        var deletes = new List<string>();
+        foreach (JsonProperty p in patch.EnumerateObject())
+        {
+            if (p.Value.ValueKind == JsonValueKind.Null)
+            {
+                deletes.Add(p.Name);
+                continue;
+            }
+
+            int at = IndexOfKey(target, p.Name);
+            if (at < 0)
+            {
+                Model key = Str(p.Name);
+                key.Raw = p.Name;
+                key.Wild = true;
+                var fresh = new Model { Kind = "map", Style = "block", Wild = true };
+                target.Kids.Add(key);
+                target.Kids.Add(fresh);
+                at = target.Kids.Count - 2;
+                if (p.Value.ValueKind != JsonValueKind.Object)
+                {
+                    Become(fresh, FromJson(p.Value));
+                    continue;
+                }
+            }
+
+            Merge(target.Kids[at + 1], p.Value);
+        }
+
+        foreach (string name in deletes)
+        {
+            int at = IndexOfKey(target, name);
+            if (at >= 0)
+            {
+                target.Kids.RemoveRange(at, 2);
+                Emptied(target);
+            }
+        }
+    }
+
+    private static int IndexOfKey(Model map, string name)
+    {
+        for (int i = 0; i < map.Kids.Count; i += 2)
+        {
+            if (map.Kids[i].Kind == "scalar" && map.Kids[i].Raw == name)
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
     /// <summary>Applies an add, replace or remove to the expected model.</summary>
     public static void ApplyTo(Model root, string op, string path, JsonElement value) => Apply(root, op, path, () => FromJson(value));
 

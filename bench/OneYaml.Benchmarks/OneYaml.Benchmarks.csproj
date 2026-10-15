@@ -15,6 +15,8 @@
     <PackageReference Include="VYaml" />
     <PackageReference Include="SharpYaml" />
     <PackageReference Include="YamlDotNet" />
+    <PackageReference Include="Yaml2JsonNode" />
+    <PackageReference Include="JsonPatch.Net" />
   </ItemGroup>
 
   <ItemGroup>

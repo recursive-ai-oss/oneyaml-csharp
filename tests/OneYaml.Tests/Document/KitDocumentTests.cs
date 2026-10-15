@@ -133,7 +133,8 @@ public class KitDocumentTests
             return;
         }
 
-        using YamlDocument doc = YamlDocument.Parse(input);
+        // Some valid suite inputs repeat a key (an empty one, say); lossless editing allows that on request.
+        using YamlDocument doc = YamlDocument.Parse(input, new YamlDocumentOptions { AllowDuplicateKeys = true });
         AssertEqualBytes(input, doc.ToBytes(), "round trip");
         AssertSameModel(input, doc);
     }
@@ -199,51 +200,101 @@ public class KitDocumentTests
         using JsonDocument caseDoc = Corpus.ReadJson(Path.Combine(dir, "case.json"));
         JsonElement root = caseDoc.RootElement;
         JsonElement operation = root.GetProperty("operation");
-        if (operation.TryGetProperty("format", out _) || operation.GetProperty("patch").ValueKind != JsonValueKind.Array)
-        {
-            Assert.Skip("a merge patch: RFC 7396 belongs to the patch layer");
-        }
-
-        List<JsonElement> ops = operation.GetProperty("patch").EnumerateArray().ToList();
-        string[] known = ["add", "remove", "replace"];
-        if (ops.Any(o => !known.Contains(o.GetProperty("op").GetString())))
-        {
-            Assert.Skip("needs test, move or copy: RFC 6902 operations beyond add, remove and replace belong to the patch layer");
-        }
-
+        bool merge = operation.TryGetProperty("format", out JsonElement format) && format.GetString() == "merge-patch";
+        JsonElement patch = operation.GetProperty("patch");
         int index = operation.TryGetProperty("document", out JsonElement di) ? di.GetInt32() : 0;
         byte[] input = File.ReadAllBytes(Path.Combine(dir, "input.yaml"));
         JsonElement expect = root.GetProperty("expect");
         string kind = expect.GetProperty("kind").GetString()!;
-        using YamlDocument doc = YamlDocument.Parse(input);
-        List<Model> model = Model.FromReader(input);
-        for (int i = 0; i < ops.Count; i++)
+        var options = new YamlDocumentOptions { AllowDuplicateKeys = true };
+
+        // The same patch in every form the document accepts must give the same result.
+        var forms = new List<Action<YamlDocument>>
         {
-            byte[] before = doc.ToBytes();
-            try
-            {
-                ApplyOp(doc, model, ops[i], index);
-            }
-            catch (YamlException ex) when (kind == "error")
-            {
-                Assert.Equal(CategoryOf(expect.GetProperty("category").GetString()!), ex.Category);
-
-                // The failing operation changed nothing. Atomicity across operations is the patch layer's.
-                AssertEqualBytes(before, doc.ToBytes(), "document after the failed operation");
-                if (ops.Count == 1)
-                {
-                    AssertEqualBytes(input, doc.ToBytes(), "document after the failed patch");
-                }
-
-                return;
-            }
+            d => Apply(d, patch.GetRawText(), merge, index),
+            d => Apply(d, Encoding.UTF8.GetBytes(patch.GetRawText()), merge, index),
+            d => Apply(d, System.Text.Json.Nodes.JsonNode.Parse(patch.GetRawText()), merge, index),
+        };
+        if (!merge)
+        {
+            forms.Add(d => d.ApplyPatch(YamlPatch.Parse(patch.GetRawText()), index));
         }
 
-        Assert.True(kind == "bytes", "an error was expected");
-        byte[] expected = File.ReadAllBytes(Path.Combine(dir, expect.GetProperty("file").GetString()!));
-        AssertEqualBytes(expected, doc.ToBytes(), "edited document");
-        AssertStructure(model, doc.ToBytes());
-        AssertSameModel(doc.ToBytes(), doc);
+        byte[]? first = null;
+        foreach (Action<YamlDocument> run in forms)
+        {
+            using YamlDocument doc = YamlDocument.Parse(input, options);
+            if (kind == "error")
+            {
+                var ex = Assert.Throws<YamlException>(() => run(doc));
+                Assert.Equal(CategoryOf(expect.GetProperty("category").GetString()!), ex.Category);
+                if (!merge && patch.ValueKind == JsonValueKind.Array && patch.GetArrayLength() > 0 && index < doc.Documents.Count)
+                {
+                    Assert.NotNull(ex.OperationIndex);
+                    Assert.True(ex.OperationIndex < patch.GetArrayLength());
+                    if (patch.GetArrayLength() == 1)
+                    {
+                        Assert.Equal(0, ex.OperationIndex);
+                    }
+                }
+
+                // A failed patch leaves the whole stream as it was, and the views still work.
+                AssertEqualBytes(input, doc.ToBytes(), "document after the failed patch");
+                AssertSameModel(input, doc);
+                _ = doc.Root.Kind;
+                continue;
+            }
+
+            run(doc);
+            byte[] expected = File.ReadAllBytes(Path.Combine(dir, expect.GetProperty("file").GetString()!));
+            byte[] actual = doc.ToBytes();
+            AssertEqualBytes(expected, actual, "patched document");
+            first ??= actual;
+            AssertEqualBytes(first, actual, "the patch in another form");
+            AssertSameModel(actual, doc);
+            if (ReferenceEquals(run, forms[0]))
+            {
+                List<Model> model = Model.FromReader(input);
+                PatchOracle.Apply(model, index, patch, merge);
+                AssertStructure(model, actual, expand: PatchOracle.NeedsExpansion(patch, merge));
+            }
+        }
+    }
+
+    private static void Apply(YamlDocument doc, string json, bool merge, int index)
+    {
+        if (merge)
+        {
+            doc.ApplyMergePatch(json, index);
+        }
+        else
+        {
+            doc.ApplyPatch(json, index);
+        }
+    }
+
+    private static void Apply(YamlDocument doc, byte[] json, bool merge, int index)
+    {
+        if (merge)
+        {
+            doc.ApplyMergePatch(json, index);
+        }
+        else
+        {
+            doc.ApplyPatch(json, index);
+        }
+    }
+
+    private static void Apply(YamlDocument doc, System.Text.Json.Nodes.JsonNode? json, bool merge, int index)
+    {
+        if (merge)
+        {
+            doc.ApplyMergePatch(json, index);
+        }
+        else
+        {
+            doc.ApplyPatch(json, index);
+        }
     }
 
     private static YamlErrorCategory CategoryOf(string name) => name switch
@@ -256,13 +307,14 @@ public class KitDocumentTests
         _ => throw new InvalidOperationException(name),
     };
 
-    private static void AssertStructure(List<Model> expected, byte[] output)
+    private static void AssertStructure(List<Model> expected, byte[] output, bool expand = false)
     {
         List<Model> actual = Model.FromReader(output);
         Assert.Equal(expected.Count, actual.Count);
         for (int i = 0; i < expected.Count; i++)
         {
-            string? diff = Model.Diff(expected[i], actual[i]);
+            // Expanding aliases compares the data model: a copy may keep an alias or write the value out.
+            string? diff = expand ? Model.Diff(Model.Expand(expected[i]), Model.Expand(actual[i])) : Model.Diff(expected[i], actual[i]);
             Assert.True(diff is null, $"document {i} differs from the expected model: {diff}");
         }
     }

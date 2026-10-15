@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using OneYaml.Emitting;
 using OneYaml.Schema;
 
@@ -14,6 +16,9 @@ internal enum VKind : byte
     Scalar,
     Mapping,
     Sequence,
+
+    /// <summary>An alias to an anchor that stays in the document; <see cref="VNode.Text"/> is the anchor name.</summary>
+    Alias,
 }
 
 /// <summary>One node of a value to be written, in document order.</summary>
@@ -269,13 +274,257 @@ internal sealed class ValueTree
         return buf.WrittenSpan.ToArray();
     }
 
+    // ---- From JSON ----
+
+    private sealed class JsonFrame
+    {
+        public IEnumerator<KeyValuePair<string, JsonNode?>>? Properties;
+        public IEnumerator<JsonNode?>? Items;
+        public int Node;
+        public bool DropNulls;
+    }
+
+    private static YamlException JsonProblem(string message) => new(message, YamlErrorCategory.PatchInvalid, 0, 0, -1);
+
+    /// <summary>Flattens a JSON value. A number is an integer unless it has a fraction or an exponent.</summary>
+    /// <param name="value">The value; <see langword="null"/> is JSON null.</param>
+    /// <param name="maxDepth">How deeply the value may nest.</param>
+    /// <param name="dropNulls">Leave out object members that are null, at every level reached through objects only (the merge patch rule for a missing target).</param>
+    /// <returns>The tree.</returns>
+    /// <exception cref="YamlException">The value nests too deeply or holds a value with no YAML form (<see cref="YamlErrorCategory.PatchInvalid"/>).</exception>
+    public static ValueTree FromJsonNode(JsonNode? value, int maxDepth, bool dropNulls = false)
+    {
+        var tree = new ValueTree();
+        var stack = new List<JsonFrame>();
+        tree.AddJson(value, stack, maxDepth, dropNulls);
+        while (stack.Count > 0)
+        {
+            JsonFrame f = stack[^1];
+            if (f.Properties is not null)
+            {
+                JsonNode? child = null;
+                string key = string.Empty;
+                bool found = false;
+                while (f.Properties.MoveNext())
+                {
+                    if (f.DropNulls && IsJsonNull(f.Properties.Current.Value))
+                    {
+                        continue;
+                    }
+
+                    key = f.Properties.Current.Key;
+                    child = f.Properties.Current.Value;
+                    found = true;
+                    break;
+                }
+
+                if (!found)
+                {
+                    tree._nodes[f.Node].Size = tree.Count - f.Node;
+                    stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+
+                tree.Add(Make(ScalarKind.String, JsonUtf8(key)));
+                tree._nodes[f.Node].Count += 2;
+                tree.AddJson(child, stack, maxDepth, f.DropNulls);
+            }
+            else
+            {
+                if (!f.Items!.MoveNext())
+                {
+                    tree._nodes[f.Node].Size = tree.Count - f.Node;
+                    stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+
+                tree._nodes[f.Node].Count++;
+                tree.AddJson(f.Items.Current, stack, maxDepth, false);
+            }
+        }
+
+        return tree;
+    }
+
+    private static bool IsJsonNull(JsonNode? node) => node is null || (node is JsonValue v && v.GetValueKind() == JsonValueKind.Null);
+
+    private static byte[] JsonUtf8(string text)
+    {
+        try
+        {
+            return StrictUtf8.GetBytes(text);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw JsonProblem("A JSON string contains an unpaired surrogate.");
+        }
+    }
+
+    private void AddJson(JsonNode? value, List<JsonFrame> stack, int maxDepth, bool dropNulls)
+    {
+        switch (value)
+        {
+            case JsonObject obj:
+                PushJson(stack, maxDepth, new JsonFrame { Properties = ((IEnumerable<KeyValuePair<string, JsonNode?>>)obj).GetEnumerator(), DropNulls = dropNulls }, VKind.Mapping);
+                return;
+            case JsonArray arr:
+                PushJson(stack, maxDepth, new JsonFrame { Items = ((IEnumerable<JsonNode?>)arr).GetEnumerator() }, VKind.Sequence);
+                return;
+            case null:
+                Add(Make(ScalarKind.Null, "null"u8.ToArray()));
+                return;
+            default:
+                Add(JsonScalar((JsonValue)value));
+                return;
+        }
+    }
+
+    private void PushJson(List<JsonFrame> stack, int maxDepth, JsonFrame frame, VKind kind)
+    {
+        if (stack.Count >= maxDepth)
+        {
+            throw new YamlException("The value nests deeper than the configured limit.", YamlErrorCategory.Limit, 0, 0, -1);
+        }
+
+        frame.Node = Add(new VNode { Kind = kind, Size = 1 });
+        stack.Add(frame);
+    }
+
+    private static VNode JsonScalar(JsonValue v)
+    {
+        if (v.TryGetValue(out JsonElement e))
+        {
+            switch (e.ValueKind)
+            {
+                case JsonValueKind.String:
+                    string? str = e.GetString();
+                    return Make(ScalarKind.String, JsonUtf8(str ?? string.Empty));
+                case JsonValueKind.True:
+                    return Make(ScalarKind.Bool, "true"u8.ToArray());
+                case JsonValueKind.False:
+                    return Make(ScalarKind.Bool, "false"u8.ToArray());
+                case JsonValueKind.Number:
+                    return JsonNumber(e.GetRawText());
+                case JsonValueKind.Null:
+                    return Make(ScalarKind.Null, "null"u8.ToArray());
+                default:
+                    throw JsonProblem("A JSON value is not a scalar, object or array.");
+            }
+        }
+
+        // A value built in code carries its CLR type, which says whether a number is an integer.
+        if (v.TryGetValue(out string? text))
+        {
+            return Make(ScalarKind.String, JsonUtf8(text));
+        }
+
+        if (v.TryGetValue(out bool flag))
+        {
+            return Make(ScalarKind.Bool, flag ? "true"u8.ToArray() : "false"u8.ToArray());
+        }
+
+        if (v.TryGetValue(out char ch))
+        {
+            return Make(ScalarKind.String, JsonUtf8(ch.ToString()));
+        }
+
+        if (v.TryGetValue(out long l))
+        {
+            return Make(ScalarKind.Int, Ascii(l.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out int i))
+        {
+            return Make(ScalarKind.Int, Ascii(i.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out ulong ul))
+        {
+            return Make(ScalarKind.Int, Ascii(ul.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out uint ui))
+        {
+            return Make(ScalarKind.Int, Ascii(ui.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out short sh))
+        {
+            return Make(ScalarKind.Int, Ascii(sh.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out ushort ush))
+        {
+            return Make(ScalarKind.Int, Ascii(ush.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out byte by))
+        {
+            return Make(ScalarKind.Int, Ascii(by.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out sbyte sb))
+        {
+            return Make(ScalarKind.Int, Ascii(sb.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (v.TryGetValue(out double d))
+        {
+            return FiniteFloat(d, single: false);
+        }
+
+        if (v.TryGetValue(out float f))
+        {
+            return FiniteFloat(f, single: true);
+        }
+
+        if (v.TryGetValue(out decimal m))
+        {
+            string t = m.ToString(CultureInfo.InvariantCulture);
+            return Make(ScalarKind.Float, Ascii(t.Contains('.') ? t : t + ".0"));
+        }
+
+        throw JsonProblem("A JSON value has a type with no YAML form.");
+    }
+
+    private static VNode FiniteFloat(double d, bool single)
+    {
+        if (!double.IsFinite(d))
+        {
+            throw JsonProblem("A JSON number must be finite.");
+        }
+
+        return Make(ScalarKind.Float, FloatText(d, single));
+    }
+
+    private static VNode JsonNumber(string raw)
+    {
+        if (raw.AsSpan().IndexOfAny('.', 'e', 'E') >= 0)
+        {
+            if (!double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
+            {
+                throw JsonProblem("A JSON number cannot be read.");
+            }
+
+            return FiniteFloat(d, single: false);
+        }
+
+        if (!BigInteger.TryParse(raw, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out BigInteger big))
+        {
+            throw JsonProblem("A JSON number cannot be read.");
+        }
+
+        return Make(ScalarKind.Int, Ascii(big.ToString(CultureInfo.InvariantCulture)));
+    }
+
     // ---- From a node of a document ----
 
     /// <summary>Appends the value of a node of a document, aliases expanded.</summary>
     /// <param name="state">The document.</param>
     /// <param name="node">The node.</param>
     /// <param name="budget">What aliases may expand to.</param>
-    public void AppendFrom(DocState state, int node, ref AliasBudget budget)
+    /// <param name="policy">Decides which aliases may stay aliases; <see langword="null"/> writes all of them out.</param>
+    public void AppendFrom(DocState state, int node, ref AliasBudget budget, AliasPolicy? policy = null)
     {
         int first = Count;
         var ranges = new List<(int Cur, int End)> { (node, node + state.Node(node).Size) };
@@ -293,6 +542,13 @@ internal sealed class ValueTree
             if (n.Kind == NodeKind.Alias)
             {
                 int target = n.Aux;
+                if (policy is not null && (n.Flags & NodeFlags.IsKey) == 0 && policy.Keeps(target))
+                {
+                    ranges[top] = (cur + 1, end);
+                    Add(new VNode { Kind = VKind.Alias, Size = 1, Text = state.AnchorName(target).ToArray() });
+                    continue;
+                }
+
                 budget.Charge(state, cur, target);
                 ranges[top] = (cur + 1, end);
                 ranges.Add((target, target + state.Node(target).Size));
@@ -314,7 +570,7 @@ internal sealed class ValueTree
         // Sizes come from the child counts, back to front.
         for (int i = Count - 1; i >= first; i--)
         {
-            if (_nodes[i].Kind == VKind.Scalar)
+            if (_nodes[i].Kind is VKind.Scalar or VKind.Alias)
             {
                 _nodes[i].Size = 1;
                 continue;

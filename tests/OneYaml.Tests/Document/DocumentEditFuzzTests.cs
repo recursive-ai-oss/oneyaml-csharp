@@ -25,7 +25,7 @@ public class DocumentEditFuzzTests
 
     private static readonly string[] Keys = ["k", "", "a b", "k: v", "yes", "1", "é", "- d", "#h", "z"];
 
-    private static object? RandomValue(Random r, int depth)
+    internal static object? RandomValue(Random r, int depth)
     {
         switch (r.Next(depth > 1 ? 8 : 11))
         {
@@ -65,10 +65,10 @@ public class DocumentEditFuzzTests
         }
     }
 
-    private sealed record Target(string Path, Model Node, Model? Parent, Model? Key);
+    internal sealed record Target(string Path, Model Node, Model? Parent, Model? Key);
 
     // Every node reachable by a pointer that does not go through an alias, with unique keys only.
-    private static List<Target> Paths(Model root)
+    internal static List<Target> Paths(Model root)
     {
         var result = new List<Target>();
         var stack = new Stack<(string Path, Model Node, Model? Parent, Model? Key)>();
@@ -102,13 +102,10 @@ public class DocumentEditFuzzTests
         return result;
     }
 
-    private static string Escape(string token) => token.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
+    internal static string Escape(string token) => token.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 
-    public static IEnumerable<object[]> Seeds() => Enumerable.Range(0, 12).Select(i => new object[] { i });
-
-    [Theory]
-    [MemberData(nameof(Seeds))]
-    public void Random_edits_give_exactly_the_expected_structure_or_leave_the_bytes_alone(int seed)
+    /// <summary>The parseable inputs of the suite, the kit's edit and round-trip cases and the small workloads.</summary>
+    internal static List<byte[]> LoadInputs()
     {
         string? yts = Corpus.SuiteDirectory;
         if (yts is null)
@@ -155,12 +152,23 @@ public class DocumentEditFuzzTests
             }
         }
 
+        return inputs;
+    }
+
+    public static IEnumerable<object[]> Seeds() => Enumerable.Range(0, 12).Select(i => new object[] { i });
+
+    [Theory]
+    [MemberData(nameof(Seeds))]
+    public void Random_edits_give_exactly_the_expected_structure_or_leave_the_bytes_alone(int seed)
+    {
+        List<byte[]> inputs = LoadInputs();
+
         var rng = new Random((seed * 7919) + 1 + (int.TryParse(Environment.GetEnvironmentVariable("ONEYAML_FUZZ_SALT"), out int salt) ? salt * 104729 : 0));
         int applied = 0;
         int refused = 0;
         foreach (byte[] input in inputs.Where((_, i) => i % 12 == seed))
         {
-            using YamlDocument doc = YamlDocument.Parse(input);
+            using YamlDocument doc = YamlDocument.Parse(input, new YamlDocumentOptions { AllowDuplicateKeys = true });
             List<Model> models = Model.FromReader(input);
             if (models.Count == 0)
             {
