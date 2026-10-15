@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using OneYaml.Compat.YamlDotNet.Core;
 using OneYaml.Compat.YamlDotNet.Core.Events;
 using OneYaml.Compat.YamlDotNet.Serialization;
@@ -51,12 +52,18 @@ internal sealed class GraphWriter
         _depth--;
     }
 
-    private void WriteCore(object? value, Type? declared, ScalarStyle memberStyle, bool isKey)
+    // Everything before the walk into a collection or an object: null, converters, scalars and aliases. It is a method of
+    // its own so that the frame of the method that recurses stays small, since a deeply nested value costs one such frame
+    // per level.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool WriteFirst(object? value, Type? declared, ScalarStyle memberStyle, bool isKey, out TypeModel? model, out string? tag)
     {
+        model = null;
+        tag = null;
         if (value is null)
         {
-            _buffer.Add(new Ev { Kind = EvKind.Scalar, Text = string.Empty, Style = ScalarStyle.Plain });
-            return;
+            AddNull();
+            return true;
         }
 
         Type type = declared is not null && declared.IsInstanceOfType(value) ? (declared.IsInterface || declared.IsAbstract || declared == typeof(object) ? value.GetType() : declared) : value.GetType();
@@ -65,27 +72,27 @@ internal sealed class GraphWriter
             if (converter.Accepts(type))
             {
                 converter.WriteYaml(_emitter!, value, type, Nested);
-                return;
+                return true;
             }
         }
 
-        TypeModel model = _models.Get(type);
+        model = _models.Get(type);
         if (model.AttributeConverter is { } attributed)
         {
             attributed.WriteYaml(_emitter!, value, type, Nested);
-            return;
+            return true;
         }
 
-        string? tag = _settings.TypeToTag.Count > 0 && _settings.TypeToTag.TryGetValue(type, out TagName mapped) ? mapped.Value : null;
+        tag = _settings.TypeToTag.Count > 0 && _settings.TypeToTag.TryGetValue(type, out TagName mapped) ? mapped.Value : null;
         switch (model.Kind)
         {
             case TypeKind.Scalar:
             case TypeKind.Enum:
                 WriteScalar(value, model, tag, memberStyle, isKey);
-                return;
+                return true;
             case TypeKind.Convertible:
                 ((IYamlConvertible)value).Write(_emitter!, Nested);
-                return;
+                return true;
         }
 
         // Reference types that can be reached twice are written once and aliased afterwards.
@@ -94,38 +101,69 @@ internal sealed class GraphWriter
         {
             if (_seen.TryGetValue(value, out int first))
             {
-                _buffer[first].NeedsAnchor = true;
-                _buffer.Add(new Ev { Kind = EvKind.Alias, Target = first });
-                return;
+                AddAlias(first);
+                return true;
             }
 
             _seen[value] = start;
         }
 
-        switch (model.Kind)
+        return false;
+    }
+
+    private void WriteCore(object? value, Type? declared, ScalarStyle memberStyle, bool isKey)
+    {
+        if (WriteFirst(value, declared, memberStyle, isKey, out TypeModel? model, out string? tag))
+        {
+            return;
+        }
+
+        object graph = value!;
+        switch (model!.Kind)
         {
             case TypeKind.Array:
             case TypeKind.Collection:
-                _buffer.Add(new Ev { Kind = EvKind.SequenceStart, Tag = tag, Target = -1 });
-                foreach (object? item in (IEnumerable)value)
+                AddStart(EvKind.SequenceStart, tag);
+                foreach (object? item in (IEnumerable)graph)
                 {
                     WriteValue(item, model.Element, memberStyle, isKey: false);
                 }
 
-                _buffer.Add(new Ev { Kind = EvKind.SequenceEnd });
+                AddEnd(EvKind.SequenceEnd);
                 return;
             case TypeKind.Dictionary:
-                WriteDictionary(value, model, tag);
+                WriteDictionary(graph, model, tag);
                 return;
             default:
-                WritePoco(value, model, tag);
+                WritePoco(graph, model, tag);
                 return;
         }
     }
 
+    // Each event is made in a method of its own. The methods that recurse once per level of nesting would otherwise keep
+    // a slot for every event they build, and the frames of a deeply nested value add up.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddNull() => _buffer.Add(new Ev { Kind = EvKind.Scalar, Text = string.Empty, Style = ScalarStyle.Plain });
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddAlias(int first)
+    {
+        _buffer[first].NeedsAnchor = true;
+        _buffer.Add(new Ev { Kind = EvKind.Alias, Target = first });
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddStart(EvKind kind, string? tag) => _buffer.Add(new Ev { Kind = kind, Tag = tag, Target = -1 });
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddEnd(EvKind kind) => _buffer.Add(new Ev { Kind = kind });
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AddKey(string key) => _buffer.Add(new Ev { Kind = EvKind.Scalar, Text = key, IsString = true, Target = -1 });
+
     private void WriteDictionary(object value, TypeModel model, string? tag)
     {
-        _buffer.Add(new Ev { Kind = EvKind.MappingStart, Tag = tag, Target = -1 });
+        AddStart(EvKind.MappingStart, tag);
         if (value is IDictionary dictionary)
         {
             IDictionaryEnumerator entries = dictionary.GetEnumerator();
@@ -145,12 +183,12 @@ internal sealed class GraphWriter
             }
         }
 
-        _buffer.Add(new Ev { Kind = EvKind.MappingEnd });
+        AddEnd(EvKind.MappingEnd);
     }
 
     private void WritePoco(object value, TypeModel model, string? tag)
     {
-        _buffer.Add(new Ev { Kind = EvKind.MappingStart, Tag = tag, Target = -1 });
+        AddStart(EvKind.MappingStart, tag);
         foreach (MemberModel member in model.Members)
         {
             object? memberValue = member.Get(value);
@@ -159,11 +197,11 @@ internal sealed class GraphWriter
                 continue;
             }
 
-            _buffer.Add(new Ev { Kind = EvKind.Scalar, Text = member.Key, IsString = true, Target = -1 });
+            AddKey(member.Key);
             WriteValue(memberValue, member.SerializeAs, member.Style, isKey: false);
         }
 
-        _buffer.Add(new Ev { Kind = EvKind.MappingEnd });
+        AddEnd(EvKind.MappingEnd);
     }
 
     private bool ShouldWrite(MemberModel member, object? value)

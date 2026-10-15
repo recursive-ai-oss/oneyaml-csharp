@@ -84,7 +84,9 @@ public abstract class YamlVisitorBase : IYamlVisitor
             _bytes = 0;
         }
 
-        if (++_depth > YamlNode.MaxDepth || ++_visits > YamlNode.MaxVisits || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        // The stream and the document above the root take two levels of their own: a document whose nesting is at the
+        // limit loads, and a walk over it has to reach its deepest node.
+        if (++_depth > YamlNode.MaxDepth + 2 || ++_visits > YamlNode.MaxVisits || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             _depth = 0;
             throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
@@ -430,7 +432,9 @@ public abstract class YamlNode
 
     internal static void Guard(int depth, ref int visits)
     {
-        if (depth > MaxDepth || ++visits > MaxVisits)
+        // The walks that call this recurse once per level, so the runtime is asked about the stack now and then as well:
+        // a thread with less stack than the depth limit assumes must end in an exception, not in a crash.
+        if (depth > MaxDepth || ++visits > MaxVisits || ((depth & 7) == 0 && !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack()))
         {
             throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
         }

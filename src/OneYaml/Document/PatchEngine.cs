@@ -707,8 +707,7 @@ internal static class PatchEngine
         // Anything else replaces what is there (or fills in what is missing), without the null members.
         ValueTree value = ValueTree.FromJsonNode(patch, limits.MaxDepth, dropNulls: true, maxIntegerDigits: limits.MaxIntegerDigits);
         Pointer p = Pointer.FromTokens(tokens);
-        // Set, not Add: a merge fills in an empty root, since RFC 7396 treats a non-object target as an empty object.
-        Swap(ref cur, original, PointerOps.Write(cur, limits, document, p, value, PointerOps.Mode.Set));
+        Swap(ref cur, original, PointerOps.Write(cur, limits, document, p, value, PointerOps.Mode.Add));
         Finish(tokens, popToken);
     }
 

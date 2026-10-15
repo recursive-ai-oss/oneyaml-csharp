@@ -80,26 +80,87 @@ internal sealed class PooledBufferWriter : IBufferWriter<byte>, IDisposable
             return Encoding.UTF8.GetString(_buffer.AsSpan(0, _written));
         }
 
-        // A segment may end inside a character, so the segments go through one decoder.
-        Decoder decoder = Encoding.UTF8.GetDecoder();
+        // A segment may end inside a character, so the count and the decode both carry the unfinished bytes over.
+        int chars = Decode(default);
+        return string.Create(chars, this, static (span, self) => self.Decode(span));
+    }
+
+    // Decodes all segments in order. With an empty destination it only counts. A character split between two
+    // segments is put together from its pieces, so the result is that of decoding the whole text in one go, whatever
+    // the bytes are.
+    private int Decode(Span<char> destination)
+    {
+        Span<byte> carry = stackalloc byte[4];
+        int carried = 0;
         int chars = 0;
-        foreach ((byte[] segment, int count) in _full)
+        if (_full is not null)
         {
-            chars += decoder.GetCharCount(segment.AsSpan(0, count), flush: false);
+            foreach ((byte[] segment, int count) in _full)
+            {
+                chars += DecodeSegment(segment.AsSpan(0, count), destination, chars, carry, ref carried);
+            }
         }
 
-        chars += decoder.GetCharCount(_buffer.AsSpan(0, _written), flush: true);
-        return string.Create(chars, this, static (span, self) =>
+        chars += DecodeSegment(_buffer.AsSpan(0, _written), destination, chars, carry, ref carried);
+        if (carried > 0)
         {
-            Decoder d = Encoding.UTF8.GetDecoder();
-            int at = 0;
-            foreach ((byte[] segment, int count) in self._full!)
+            // The text ends inside a character: the decoder reports what is left as replacement characters.
+            chars += Emit(carry[..carried], destination, chars);
+        }
+
+        return chars;
+    }
+
+    private static int DecodeSegment(ReadOnlySpan<byte> bytes, Span<char> destination, int at, Span<byte> carry, ref int carried)
+    {
+        int chars = 0;
+        if (carried > 0)
+        {
+            int need = SequenceLength(carry[0]) - carried;
+            while (need > 0 && !bytes.IsEmpty && (bytes[0] & 0xC0) == 0x80)
             {
-                at += d.GetChars(segment.AsSpan(0, count), span[at..], flush: false);
+                carry[carried++] = bytes[0];
+                bytes = bytes[1..];
+                need--;
             }
 
-            d.GetChars(self._buffer.AsSpan(0, self._written), span[at..], flush: true);
-        });
+            if (need > 0 && bytes.IsEmpty)
+            {
+                // The segment ended before the character did.
+                return 0;
+            }
+
+            chars += Emit(carry[..carried], destination, at);
+            carried = 0;
+        }
+
+        int tail = IncompleteTail(bytes);
+        chars += Emit(bytes[..^tail], destination, at + chars);
+        bytes[^tail..].CopyTo(carry);
+        carried = tail;
+        return chars;
+    }
+
+    private static int Emit(ReadOnlySpan<byte> bytes, Span<char> destination, int at) =>
+        destination.IsEmpty ? Encoding.UTF8.GetCharCount(bytes) : Encoding.UTF8.GetChars(bytes, destination[at..]);
+
+    private static int SequenceLength(byte lead) => lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
+
+    // The number of bytes at the end that start a multi-byte character the segment does not finish.
+    private static int IncompleteTail(ReadOnlySpan<byte> bytes)
+    {
+        for (int back = 1; back <= 3 && back <= bytes.Length; back++)
+        {
+            byte b = bytes[^back];
+            if ((b & 0xC0) == 0x80)
+            {
+                continue;
+            }
+
+            return b >= 0xC0 && b < 0xF8 && SequenceLength(b) > back ? back : 0;
+        }
+
+        return 0;
     }
 
     public void WriteTo(Stream stream)

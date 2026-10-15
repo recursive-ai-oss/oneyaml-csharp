@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Text;
 using OneYaml.Parsing;
 
@@ -144,37 +145,43 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         YamlTypeInfo<T> info = _info;
         if (!info.CanCreate)
         {
-            throw reader.CreateException($"{ConverterGuards.DescribeType(typeof(T))} cannot be created: it has no public constructor to bind through.");
+            throw NotCreatable(in reader);
         }
 
         info.EnsureConfigured();
         int start = reader.Start;
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);
-        T instance;
         if (info.UsesConstructor)
         {
-            object?[] slots = info.NewArguments();
-            instance = default!;
-            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: false);
-            CheckRequired(in reader, start, ref seen, ref merged);
-            instance = info.CreateWith(slots);
-            foreach (YamlPropertyInfo<T> p in info.Props)
-            {
-                if (p.ParameterIndex < 0 && (seen.Contains(p.Index) || merged.Contains(p.Index)))
-                {
-                    p.Assign(ref instance, slots[p.Slot]);
-                }
-            }
-
-            return instance;
+            return ReadThroughConstructor(ref reader, options, info, start, ref seen, ref merged);
         }
 
-        instance = info.CreateInstance();
+        T instance = info.CreateInstance();
         ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, merging: false);
         if (info.RequiredCount > 0)
         {
             CheckRequired(in reader, start, ref seen, ref merged);
+        }
+
+        return instance;
+    }
+
+    // Kept apart from Read so that the frame of the common case, which every level of a nested document passes through,
+    // holds only what that case needs.
+    private T? ReadThroughConstructor(ref Utf8YamlReader reader, YamlSerializerOptions options, YamlTypeInfo<T> info, int start, ref MemberSet seen, ref MemberSet merged)
+    {
+        object?[] slots = info.NewArguments();
+        T instance = default!;
+        ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: false);
+        CheckRequired(in reader, start, ref seen, ref merged);
+        instance = info.CreateWith(slots);
+        foreach (YamlPropertyInfo<T> p in info.Props)
+        {
+            if (p.ParameterIndex < 0 && (seen.Contains(p.Index) || merged.Contains(p.Index)))
+            {
+                p.Assign(ref instance, slots[p.Slot]);
+            }
         }
 
         return instance;
@@ -195,7 +202,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         {
             if (reader.Type != YamlTokenType.Scalar)
             {
-                throw reader.CreateException($"This mapping key is a collection; {ConverterGuards.DescribeType(typeof(T))} binds scalar keys only. Read documents with complex keys through YamlDocument.");
+                throw CollectionKey(in reader);
             }
 
             if (ConverterGuards.IsMergeKey(in reader))
@@ -211,47 +218,20 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
             int keyStart = reader.Start;
             int index = FindMember(ref reader, info);
-            SkipKey skippedKey = index < 0 ? SkippedKeys.Capture(ref reader) : default;
+            if (index < 0)
+            {
+                SkipUnmapped(ref reader, options, ref skipped, keyStart);
+                continue;
+            }
+
             if (!reader.Read())
             {
                 throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
             }
 
-            if (index < 0)
+            if (!Claim(ref reader, ref seen, ref merged, index, merging, keyStart))
             {
-                if (options.UnmappedMemberHandling == YamlUnmappedMemberHandling.Disallow)
-                {
-                    throw YamlException.At(YamlErrorCategory.Binding, $"The key is not a member of {ConverterGuards.DescribeType(typeof(T))}.", reader.Source, keyStart);
-                }
-
-                if (!skipped.Add(skippedKey, reader.Source))
-                {
-                    throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
-                }
-
-                reader.Skip();
                 continue;
-            }
-
-            if (merging)
-            {
-                // A merged entry never replaces an explicit key or an entry merged before it.
-                if (seen.Contains(index) || merged.Contains(index))
-                {
-                    reader.Skip();
-                    continue;
-                }
-
-                merged.Add(index);
-            }
-            else
-            {
-                if (seen.Contains(index))
-                {
-                    throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
-                }
-
-                seen.Add(index);
             }
 
             YamlPropertyInfo<T> p = info.Props[index];
@@ -266,6 +246,56 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
 
         skipped.Release();
+    }
+
+    // The bookkeeping of a key no member takes, out of line like the other rare cases of ReadMembers: its frame is
+    // there once for every level of a nested document.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void SkipUnmapped(ref Utf8YamlReader reader, YamlSerializerOptions options, ref SkippedKeys skipped, int keyStart)
+    {
+        SkipKey skippedKey = SkippedKeys.Capture(ref reader);
+        if (!reader.Read())
+        {
+            throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+        }
+
+        if (options.UnmappedMemberHandling == YamlUnmappedMemberHandling.Disallow)
+        {
+            throw UnmappedKey(in reader, keyStart);
+        }
+
+        if (!skipped.Add(skippedKey, reader.Source))
+        {
+            throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
+        }
+
+        reader.Skip();
+    }
+
+    // Records that a member got a value, or says the value is to be skipped because an earlier one wins. Small enough for
+    // the optimised code to inline; the code compiled first does not inline, and keeps the frame of ReadMembers small.
+    private static bool Claim(ref Utf8YamlReader reader, ref MemberSet seen, ref MemberSet merged, int index, bool merging, int keyStart)
+    {
+        if (merging)
+        {
+            // A merged entry never replaces an explicit key or an entry merged before it.
+            if (seen.Contains(index) || merged.Contains(index))
+            {
+                reader.Skip();
+                return false;
+            }
+
+            merged.Add(index);
+            return true;
+        }
+
+        if (seen.Contains(index))
+        {
+            throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
+        }
+
+        seen.Add(index);
+        return true;
     }
 
     private void ReadMerge(
@@ -299,6 +329,20 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             throw reader.CreateException("A merge key needs a mapping or a sequence of mappings.");
         }
     }
+
+    // The messages are built out of line: a message builder in the reading methods would enlarge their frames, and the
+    // frames of the levels above add up on a deeply nested input.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static YamlException NotCreatable(in Utf8YamlReader reader) =>
+        reader.CreateException($"{ConverterGuards.DescribeType(typeof(T))} cannot be created: it has no public constructor to bind through.");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static YamlException CollectionKey(in Utf8YamlReader reader) =>
+        reader.CreateException($"This mapping key is a collection; {ConverterGuards.DescribeType(typeof(T))} binds scalar keys only. Read documents with complex keys through YamlDocument.");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static YamlException UnmappedKey(in Utf8YamlReader reader, int keyStart) =>
+        YamlException.At(YamlErrorCategory.Binding, $"The key is not a member of {ConverterGuards.DescribeType(typeof(T))}.", reader.Source, keyStart);
 
     private static int FindMember(ref Utf8YamlReader reader, YamlTypeInfo<T> info)
     {

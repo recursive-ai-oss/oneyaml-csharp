@@ -161,6 +161,34 @@ public class WorkingMemoryTests
     }
 
     [Fact]
+    public void Line_breaks_colons_and_commas_inside_a_scalar_do_not_reserve_node_storage()
+    {
+        // A block of comma-separated numbers: a megabyte of line breaks and commas, and three nodes.
+        var csv = new StringBuilder("data: |\n");
+        while (csv.Length < 1_000_000)
+        {
+            csv.Append("  1,2,3,4,5,6,7,8\n");
+        }
+
+        byte[] bytes = Encoding.UTF8.GetBytes(csv.ToString());
+        using (var rents = new PoolRents())
+        {
+            using DocState state = DocState.Build(bytes, YamlEncoding.Utf8, false, YamlLimits.Default, false);
+            Assert.Equal(3, state.NodeCount);
+            Assert.True(state.NodeCapacity <= 4_096, "the array holds " + state.NodeCapacity + " nodes");
+            // Next to the text, the first node array follows the lines (about 60,000) and not the commas, which would
+            // have reserved the 262,144 that a sixth of the text size rounds up to.
+            Assert.True(rents.Sizes.Where(size => size < 1 << 20).All(size => size <= 65_536), string.Join(", ", rents.Sizes));
+        }
+
+        // Minified JSON in a quoted scalar has flow punctuation, so the guess counts it, but the array is trimmed.
+        string json = "k: '[" + string.Join(",", Enumerable.Range(0, 100_000).Select(i => "{\"a\":" + i + "}")).Replace("'", "''") + "]'\n";
+        using DocState quoted = DocState.Build(Encoding.UTF8.GetBytes(json), YamlEncoding.Utf8, false, YamlLimits.Default, false);
+        Assert.Equal(3, quoted.NodeCount);
+        Assert.True(quoted.NodeCapacity <= 4_096, "the array holds " + quoted.NodeCapacity + " nodes");
+    }
+
+    [Fact]
     public void A_document_of_dense_flow_entries_is_counted_without_a_second_node_array()
     {
         // Every comma is an entry, so the first guess has to count them or the array is copied while it grows.
@@ -245,6 +273,91 @@ public class WorkingMemoryTests
                     reader.Dispose();
                 }
             }
+        }
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(16)]
+    [InlineData(100)]
+    [InlineData(1_000)]
+    public void A_run_of_separator_escapes_fits_the_decoded_length_bound_exactly_sized(int pairs)
+    {
+        // \L and \P are two bytes in the text and three in the value, the only escapes that grow, so a run of
+        // them is where a bound that forgets the escapes runs out first.
+        string document = "k: \"" + string.Concat(Enumerable.Repeat("\\L\\P", pairs)) + "\"\n";
+        using var reader = new YamlReader(Encoding.UTF8.GetBytes(document));
+        while (reader.Read() && !(reader.TokenType == YamlTokenType.Scalar && reader.ValueIsEscapedOrFolded))
+        {
+        }
+
+        int bound = reader.MaxDecodedLength;
+        byte[] exact = new byte[bound];
+        int written = reader.DecodeScalar(exact);
+        Assert.Equal(pairs * 6, written);
+        Assert.True(bound >= written, "the bound " + bound + " is below the " + written + " bytes of the value");
+        Assert.Equal(string.Concat(Enumerable.Repeat("\u2028\u2029", pairs)), Encoding.UTF8.GetString(exact, 0, written));
+    }
+
+    // Writes the prefix so that the first segment has room for exactly `inFirst` more bytes, then the character's bytes
+    // across the segment boundary.
+    private static PooledBufferWriter SplitAt(byte[] character, int inFirst)
+    {
+        var writer = new PooledBufferWriter();
+        int room = writer.GetSpan(1).Length;
+        writer.GetSpan(1)[..(room - inFirst)].Fill((byte)'a');
+        writer.Advance(room - inFirst);
+        character.AsSpan(0, inFirst).CopyTo(writer.GetSpan(1));
+        writer.Advance(inFirst);
+        int rest = character.Length - inFirst;
+        character.AsSpan(inFirst).CopyTo(writer.GetSpan(rest));
+        writer.Advance(rest);
+        return writer;
+    }
+
+    [Theory]
+    [InlineData("\u00e9")]
+    [InlineData("\u4e2d")]
+    [InlineData("\U0001F642")]
+    public void A_character_split_between_segments_is_decoded_whole_at_every_offset(string character)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(character);
+        for (int inFirst = 1; inFirst < bytes.Length; inFirst++)
+        {
+            using PooledBufferWriter writer = SplitAt(bytes, inFirst);
+            string expected = Encoding.UTF8.GetString(writer.ToArray());
+            Assert.Equal(expected, writer.ToUtf8String());
+            Assert.EndsWith(character, expected, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Bytes_written_in_random_pieces_decode_as_the_whole_text_does_even_when_they_are_not_valid_text()
+    {
+        var random = new Random(20261015);
+        byte[][] pieces =
+        [
+            "a"u8.ToArray(), "\u00e9"u8.ToArray(), "\u4e2d"u8.ToArray(), "\U0001F642"u8.ToArray(),
+            [0xE4, 0xB8], [0x80], [0xF0, 0x9F], [0xC3], [0xFF], [0xE0, 0x80, 0xA0], [0xF0, 0x9F, 0x99, 0xF0],
+        ];
+        for (int round = 0; round < 300; round++)
+        {
+            using var writer = new PooledBufferWriter();
+            int count = random.Next(1, 700);
+            for (int i = 0; i < count; i++)
+            {
+                byte[] piece = pieces[random.Next(pieces.Length)];
+                // Pieces are written in two parts at random so that segment ends fall inside characters.
+                int firstPart = random.Next(piece.Length + 1);
+                piece.AsSpan(0, firstPart).CopyTo(writer.GetSpan(Math.Max(firstPart, 1)));
+                writer.Advance(firstPart);
+                piece.AsSpan(firstPart).CopyTo(writer.GetSpan(Math.Max(piece.Length - firstPart, 1)));
+                writer.Advance(piece.Length - firstPart);
+            }
+
+            Assert.Equal(Encoding.UTF8.GetString(writer.ToArray()), writer.ToUtf8String());
         }
     }
 

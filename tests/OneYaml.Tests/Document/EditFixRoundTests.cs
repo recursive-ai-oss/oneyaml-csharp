@@ -178,6 +178,10 @@ public class EditFixRoundTests
     [InlineData("--- !!seq # c\n...\n", "--- # c\na: 1\n...\n")]
     [InlineData("--- &a !!seq # c\n", "--- &a # c\na: 1\n")]
     [InlineData("--- &a !!seq\n", "--- &a\na: 1\n")]
+    [InlineData("--- !!seq\t# c\n", "--- # c\na: 1\n")]
+    [InlineData("--- !!seq   # c\n", "--- # c\na: 1\n")]
+    [InlineData("--- &a !!seq\t# c\n", "--- &a # c\na: 1\n")]
+    [InlineData("--- !!seq \t \t# c\n", "--- # c\na: 1\n")]
     public void A_merge_patch_on_a_marker_whose_tag_does_not_fit_keeps_the_comment_on_the_marker_line(string yaml, string expected)
     {
         Assert.Equal(expected, Edit(yaml, d => d.ApplyMergePatch("{\"a\":1}")));

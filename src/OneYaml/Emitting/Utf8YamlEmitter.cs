@@ -43,6 +43,9 @@ public sealed partial class Utf8YamlEmitter
     private ArrayBufferWriter<byte>? _scratch;
     private byte[]? _smallBuffer;
 
+    // Set while the generic writer walks collections for this emitter, so that a nested walk starts with no frame storage.
+    internal bool GenericWalkActive;
+
     // Where the root value of this emitter sits when it is not a document of its own but the value of an entry
     // in text that is already written: the caller has written "key:" (AfterKey) or "- " (AfterDash).
     internal enum Embedding : byte

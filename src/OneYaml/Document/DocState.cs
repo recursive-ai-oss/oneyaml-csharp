@@ -207,6 +207,7 @@ internal sealed partial class DocState : IDisposable
     }
 
     private const int MaxFirstNodeGuess = 1 << 20;
+    private const int MinTrimmedNodeArray = 1 << 14;
 
     private int AddNode()
     {
@@ -225,11 +226,19 @@ internal sealed partial class DocState : IDisposable
         // Guess the node count from the text so the array rarely has to grow, and so a text of comments or
         // long scalars does not hold storage it will never fill (a document keeps this array for as long as
         // the caller holds it). Lines, colons and commas track the nodes closely: a block entry is a line,
-        // a mapping entry is a key and a value, a flow entry is a comma. Half the text size bounds it (a
-        // node takes a byte, bar the empty ones), and the cap keeps a huge text of newlines from reserving
-        // more than a node array of a million. The array grows if the guess is short.
-        int estimate = src.Count((byte)'\n') + src.Count((byte)':') + (2 * src.Count((byte)','));
-        estimate = Math.Min(estimate, (src.Length >> 1) + 16);
+        // a mapping entry is a key and a value, a flow entry is a comma. Those bytes also occur inside scalars,
+        // where they say nothing about the nodes: commas only count when the text has a flow collection at all,
+        // and a third of the text size bounds the guess (a flow entry of one character and a separator is the
+        // densest thing that is common). A text of denser nodes makes the array grow once or twice. The cap keeps
+        // a huge text of newlines from reserving more than a node array of a million, and whatever is left over
+        // when the parse ends is trimmed.
+        int estimate = src.Count((byte)'\n') + src.Count((byte)':');
+        if (src.IndexOfAny((byte)'[', (byte)'{') >= 0)
+        {
+            estimate += 2 * src.Count((byte)',');
+        }
+
+        estimate = Math.Min(estimate, src.Length / 3);
         _nodes = ArrayPool<CstNode>.Shared.Rent(Math.Clamp(estimate + 16, 16, MaxFirstNodeGuess));
         _docs = ArrayPool<DocInfo>.Shared.Rent(4);
         var anchors = new AnchorMap();
@@ -453,6 +462,23 @@ internal sealed partial class DocState : IDisposable
                 for (int i = 0; i < CommentCount; i++)
                 {
                     (_comments[i * 2], _comments[(i * 2) + 1]) = reader.GetComment(i);
+                }
+            }
+
+            if (_nodes.Length >= MinTrimmedNodeArray && _nodes.Length > 4 * NodeCount)
+            {
+                // The guess was far too high for this text. Keep only what the nodes need. Small arrays stay as they
+                // are: the pool keeps the one given back, and a second one would cost more than the slack.
+                CstNode[] fitted = ArrayPool<CstNode>.Shared.Rent(NodeCount);
+                if (fitted.Length < _nodes.Length)
+                {
+                    Array.Copy(_nodes, fitted, NodeCount);
+                    ArrayPool<CstNode>.Shared.Return(_nodes);
+                    _nodes = fitted;
+                }
+                else
+                {
+                    ArrayPool<CstNode>.Shared.Return(fitted);
                 }
             }
         }

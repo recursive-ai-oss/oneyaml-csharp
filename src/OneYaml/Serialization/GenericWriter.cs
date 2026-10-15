@@ -61,7 +61,7 @@ internal static class GenericWriter
         {
             if (Count == _items.Length)
             {
-                Frame[] bigger = ArrayPool<Frame>.Shared.Rent(_items.Length * 2);
+                Frame[] bigger = ArrayPool<Frame>.Shared.Rent(Math.Max(4, _items.Length * 2));
                 _items[..Count].CopyTo(bigger);
                 _items[..Count].Clear();
                 Release();
@@ -90,10 +90,85 @@ internal static class GenericWriter
         }
     }
 
+    // This is re-entered once per level when plain objects sit under members of type object, so its frame stays small:
+    // a value with no collection to walk is written here without any frame storage, and only the outermost walk of a
+    // write keeps room for the first open collections on the stack.
     public static void Write(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
     {
+        YamlTypeInfo? info = WriteLeaf(writer, value, options, out bool done);
+        if (info is not null)
+        {
+            // Straight to the converter: each call between here and the next level of an object chain is a frame on the stack.
+            info.ConverterBase.WriteBoxed(writer, value, info.Options);
+            return;
+        }
+
+        if (done)
+        {
+            return;
+        }
+
+        if (writer.GenericWalkActive)
+        {
+            Walk(writer, value, options, default);
+        }
+        else
+        {
+            WalkOutermost(writer, value, options);
+        }
+    }
+
+    // Writes null and the scalars. For an object that is no collection it returns the metadata to write it with, and for
+    // a collection (or a type with a custom converter that needs the walk) it writes nothing.
+    private static YamlTypeInfo? WriteLeaf(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, out bool done)
+    {
+        done = true;
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return null;
+        }
+
+        Type type = value.GetType();
+        if (type == typeof(Dictionary<string, object?>) || type == typeof(List<object?>))
+        {
+            done = false;
+            return null;
+        }
+
+        if (TryWriteScalar(writer, value, options))
+        {
+            return null;
+        }
+
+        if (!HasCustomConverter(options, type) && value is not IDictionary && value is not IEnumerable)
+        {
+            return options.GetTypeInfo(type);
+        }
+
+        done = false;
+        return null;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void WalkOutermost(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
+    {
         InlineFrames inline = default;
-        var stack = new FrameStack(inline);
+        writer.GenericWalkActive = true;
+        try
+        {
+            Walk(writer, value, options, inline);
+        }
+        finally
+        {
+            writer.GenericWalkActive = false;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Walk(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, Span<Frame> initial)
+    {
+        var stack = new FrameStack(initial);
         // Custom converters may claim any type, even string, so they turn the shortcuts off.
         bool plain = options.Converters.Count == 0;
         try
@@ -284,7 +359,7 @@ internal static class GenericWriter
             }
             else
             {
-                options.GetTypeInfo(type).WriteBoxed(writer, value);
+                options.GetTypeInfo(type).ConverterBase.WriteBoxed(writer, value, options);
                 return;
             }
 
@@ -293,7 +368,7 @@ internal static class GenericWriter
             return;
         }
 
-        options.GetTypeInfo(type).WriteBoxed(writer, value);
+        options.GetTypeInfo(type).ConverterBase.WriteBoxed(writer, value, options);
     }
 
     private static void WriteKey(Utf8YamlEmitter writer, object? key, YamlSerializerOptions options)

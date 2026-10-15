@@ -78,13 +78,27 @@ public abstract class YamlConverter<T> : YamlConverter
 
     internal override void WriteBoxed(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
     {
-        if (value is null && s_nonNullableValueType)
+        if (value is null)
         {
-            throw Utf8YamlEmitter.Misuse($"A null cannot be written as {typeof(T).Name}.");
+            if (s_nonNullableValueType)
+            {
+                throw NullNotWritable();
+            }
+
+            if (!HandleNull)
+            {
+                writer.WriteNullValue();
+                return;
+            }
         }
 
-        WriteValue(writer, (T?)value, options);
+        // The body of WriteValue, repeated: this runs once for every level of an object chain, and the runtime does not
+        // inline calls in code it has only just compiled.
+        Write(writer, (T)value!, options);
     }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static YamlException NullNotWritable() => Utf8YamlEmitter.Misuse($"A null cannot be written as {typeof(T).Name}.");
 
     // The call every caller uses: null handling first, then the converter.
     internal T? ReadValue(ref Utf8YamlReader reader, YamlSerializerOptions options)
@@ -93,7 +107,7 @@ public abstract class YamlConverter<T> : YamlConverter
         {
             if (s_nonNullableValueType)
             {
-                throw reader.CreateException($"Null cannot be read as {typeof(T).Name}.");
+                throw NullNotAllowed(in reader);
             }
 
             return default;
@@ -101,6 +115,11 @@ public abstract class YamlConverter<T> : YamlConverter
 
         return Read(ref reader, typeof(T), options);
     }
+
+    // The message is built out of line: ReadValue is on the call stack once for every level of a nested document.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static YamlException NullNotAllowed(in Utf8YamlReader reader) =>
+        reader.CreateException($"Null cannot be read as {typeof(T).Name}.");
 }
 
 /// <summary>Makes converters for types that a single <see cref="YamlConverter{T}"/> cannot cover, such as open generics.</summary>
