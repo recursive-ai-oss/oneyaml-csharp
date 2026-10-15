@@ -171,10 +171,35 @@ internal sealed partial class DocState
     /// <returns>The child's node index.</returns>
     public int ChildAt(int collection, int index)
     {
+        if (index > 0 && index == _nodes[collection].Count - 1)
+        {
+            return LastChildOf(collection);
+        }
+
         int c = collection + 1;
         for (int i = 0; i < index; i++)
         {
             c += _nodes[c].Size;
+        }
+
+        return c;
+    }
+
+    /// <summary>The last child of a collection, or -1 when it has none.</summary>
+    /// <param name="collection">A collection.</param>
+    /// <returns>The child's node index.</returns>
+    public int LastChildOf(int collection)
+    {
+        if (_nodes[collection].Count == 0)
+        {
+            return -1;
+        }
+
+        // The last node of the subtree is the last of its last child's subtree.
+        int c = collection + _nodes[collection].Size - 1;
+        while (_nodes[c].Parent != collection)
+        {
+            c = _nodes[c].Parent;
         }
 
         return c;
@@ -291,7 +316,24 @@ internal sealed partial class DocState
     public string BreakNear(int pos)
     {
         ReadOnlySpan<byte> src = Text;
-        int b = LineBreakAt(Math.Min(pos, Length));
+        int from = Math.Min(pos, Length);
+        int b;
+        if (ReferenceEquals(s_breakOwner, this) && s_breakFrom <= from && from <= s_breakAt)
+        {
+            // The same line as last time: nothing between the two positions is a line break.
+            b = s_breakAt;
+        }
+        else
+        {
+            b = LineBreakAt(from);
+            if (b < src.Length)
+            {
+                s_breakOwner = this;
+                s_breakFrom = from;
+                s_breakAt = b;
+            }
+        }
+
         if (b < src.Length)
         {
             return BreakText(b);

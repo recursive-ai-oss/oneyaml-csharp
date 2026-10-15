@@ -277,10 +277,14 @@ internal static class PatchEngine
                     }
 
                     cur = next;
+
+                    // From here on the state is ours alone, so the next operation may edit it in place.
+                    cur.Exclusive = true;
                 }
             }
 
             done = true;
+            cur.Exclusive = false;
             return cur;
         }
         catch (YamlException ex) when (ex.OperationIndex is null)
@@ -600,6 +604,7 @@ internal static class PatchEngine
             }
 
             done = true;
+            cur.Exclusive = false;
             return cur;
         }
         finally
@@ -633,6 +638,7 @@ internal static class PatchEngine
             }
 
             cur = next;
+            cur.Exclusive = true;
         }
     }
 

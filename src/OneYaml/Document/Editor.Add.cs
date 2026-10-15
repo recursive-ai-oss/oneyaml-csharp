@@ -39,6 +39,11 @@ internal static partial class Editor
         return new Layout(nl, step, seqOff);
     }
 
+    // A flow collection takes only the line break from its surroundings, so the document is not searched
+    // for indentation it would not use.
+    private static Layout FlowOrDetect(DocState s, int near)
+        => s.Node(near).IsFlow ? new Layout(s.BreakNear(s.Node(near).Start), 2, 2) : DetectLayout(s, near);
+
     // Looks at the entries of one block mapping for a nested block collection on its own lines.
     private static void Probe(DocState s, int map, ref int step, ref int seqOff)
     {
@@ -67,18 +72,7 @@ internal static partial class Editor
         }
     }
 
-    private static int LastChild(DocState s, int collection)
-    {
-        int c = collection + 1;
-        int last = -1;
-        for (int i = 0; i < s.Node(collection).Count; i++)
-        {
-            last = c;
-            c += s.Node(c).Size;
-        }
-
-        return last;
-    }
+    private static int LastChild(DocState s, int collection) => s.LastChildOf(collection);
 
     private static DocState InsertAt(DocState s, YamlLimits limits, int pos, ByteBuffer text, string nl)
     {
@@ -121,7 +115,7 @@ internal static partial class Editor
             throw Fail(YamlErrorCategory.PatchPath, "A key cannot be added to a pair inside a flow sequence.", s, map);
         }
 
-        Layout lay = DetectLayout(s, map);
+        Layout lay = FlowOrDetect(s, map);
         int lastVal = m.Count > 0 ? LastChild(s, map) : -1;
         int lastKey = lastVal >= 0 ? s.PrevSibling(lastVal) : -1;
         ScalarWriteStyle keyPref = SiblingStyle(s, lastKey);
@@ -159,7 +153,7 @@ internal static partial class Editor
             throw Fail(YamlErrorCategory.PatchPath, "An item cannot be added to a pair inside a flow sequence.", s, seq);
         }
 
-        Layout lay = DetectLayout(s, seq);
+        Layout lay = FlowOrDetect(s, seq);
         if (q.IsFlow)
         {
             return AddFlow(s, limits, seq, lay, null, v, ScalarWriteStyle.Plain, index > 0 && v.IsScalar ? SiblingStyle(s, s.ChildAt(seq, index - 1)) : (count > 0 && v.IsScalar ? SiblingStyle(s, seq + 1) : ScalarWriteStyle.Plain), index);

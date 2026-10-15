@@ -27,7 +27,7 @@ public class PatchBenchmarks
     private YamlPatch _patch = new();
     private JsonPatch _jsonPatch = null!;
 
-    [Params("reference-a", "reference-b", "compose-wordpress", "gha-workflow", "records-4k", "records-64k", "openapi-100k-many-ops")]
+    [Params("reference-a", "reference-b", "compose-wordpress", "gha-workflow", "records-4k", "records-64k", "openapi-100k-many-ops", "records-64k-many-ops", "flow-appends-1k")]
     public string Workload { get; set; } = string.Empty;
 
     /// <summary>The size of the input, to turn allocated bytes into a multiple of it.</summary>
@@ -38,12 +38,13 @@ public class PatchBenchmarks
     {
         string dir = Environment.GetEnvironmentVariable("ONEYAML_WORKLOADS")
             ?? throw new InvalidOperationException("Set ONEYAML_WORKLOADS to the directory holding the workload files.");
-        bool many = Workload.EndsWith("-many-ops", StringComparison.Ordinal);
-        string name = many ? Workload[..^"-many-ops".Length] : Workload;
-        string folder = Path.Combine(dir, "workloads", name);
-        _bytes = File.ReadAllBytes(Path.Combine(folder, "input.yaml"));
+        bool appends = Workload == "flow-appends-1k";
+        bool many = Workload.EndsWith("-many-ops", StringComparison.Ordinal) || appends;
+        string name = Workload.EndsWith("-many-ops", StringComparison.Ordinal) ? Workload[..^"-many-ops".Length] : Workload;
+        string folder = Path.Combine(dir, "workloads", appends ? "reference-a" : name);
+        _bytes = appends ? Encoding.UTF8.GetBytes("a: 1\nv: " + new string('x', 240) + "\n") : File.ReadAllBytes(Path.Combine(folder, "input.yaml"));
         _text = Encoding.UTF8.GetString(_bytes);
-        JsonArray ops = many ? ManyOps() : (JsonArray)JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "patch.json")))!["ops"]!;
+        JsonArray ops = appends ? Appends() : many ? ManyOps() : (JsonArray)JsonNode.Parse(File.ReadAllText(Path.Combine(folder, "patch.json")))!["ops"]!;
         _patchText = ops.ToJsonString();
         _patch = YamlPatch.Parse(_patchText);
         _jsonPatch = JsonSerializer.Deserialize<JsonPatch>(_patchText)!;
@@ -55,6 +56,18 @@ public class PatchBenchmarks
                 throw new InvalidOperationException("The patch does not give the kit's expected bytes for " + Workload);
             }
         }
+    }
+
+    // One empty sequence, then a thousand copies of a long string appended to it.
+    private static JsonArray Appends()
+    {
+        var ops = new JsonArray { new JsonObject { ["op"] = "add", ["path"] = "/f", ["value"] = new JsonArray() } };
+        for (int i = 0; i < 1000; i++)
+        {
+            ops.Add(new JsonObject { ["op"] = "copy", ["from"] = "/v", ["path"] = "/f/-" });
+        }
+
+        return ops;
     }
 
     // Many small operations on one big document: replaces of scalars spread over the file.
