@@ -38,7 +38,7 @@ internal static class ScalarText
     private static readonly SearchValues<byte> Attention = SearchValues.Create(
         [.. MakeRange(0x00, 0x1F), 0x7F, 0xC2, 0xE2, 0xEF]);
 
-    // The plain text that needs no analysis: it starts with a letter or an underscore and holds only letters, digits,
+    // The plain text that needs no analysis: it starts with a letter and holds only letters, digits,
     // underscores, dots, slashes, hyphens and (for values) inner spaces. None of these can end a plain scalar early or
     // make a flow indicator, a comment, a number or a timestamp; the one thing left is a word that YAML 1.1 reads as
     // a boolean or a null (y, no, on, off, true, false, null...), which are five characters or fewer.
@@ -66,8 +66,10 @@ internal static class ScalarText
             return false;
         }
 
+        // A letter first: text that starts with an underscore, a digit, a sign or a dot may be a number once readers
+        // drop underscores or read the loose forms, so it takes the general path.
         char first = text[0];
-        if (!(char.IsAsciiLetter(first) || first == '_'))
+        if (!char.IsAsciiLetter(first))
         {
             return false;
         }

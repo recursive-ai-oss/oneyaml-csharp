@@ -86,5 +86,61 @@ internal static class DumpHash
         Console.WriteLine($"{name,-26} " + string.Join(" ", jobs.Select((job, k) => $"{job.Item1}={best[k]:F1}")));
     }
 
+    /// <summary>
+    /// Dumps a typed model again and again with OneYaml (reflection and generated), VYaml and SharpYaml in turn and prints
+    /// each one's best time of a batch and the bytes one dump allocates.
+    /// </summary>
+    public static void TypedLoop(string name, int seconds)
+    {
+        (byte[] bytes, _) = Workloads.Load(name);
+        bool records = name.StartsWith("records", StringComparison.Ordinal);
+        object model = records ? YamlSerializer.Deserialize<List<OneYamlKit.Bench.Models.Record>>(bytes)! : YamlSerializer.Deserialize<OneYamlKit.Bench.Models.Workflow>(bytes)!;
+
+        (string, Func<object>)[] jobs = records
+            ?
+            [
+                ("oneyaml", () => YamlSerializer.SerializeToUtf8Bytes((List<OneYamlKit.Bench.Models.Record>)model)),
+                ("oneyaml-gen", () => YamlSerializer.SerializeToUtf8Bytes((List<OneYamlKit.Bench.Models.Record>)model, OneYamlContext.Default.ListRecord)),
+                ("vyaml", () => VYaml.Serialization.YamlSerializer.Serialize((List<OneYamlKit.Bench.Models.Record>)model)),
+                ("sharpyaml", () => System.Text.Encoding.UTF8.GetBytes(SharpYaml.YamlSerializer.Serialize((List<OneYamlKit.Bench.Models.Record>)model, OneYamlKit.Bench.Models.SharpYamlContext.Default.ListRecord))),
+            ]
+            :
+            [
+                ("oneyaml", () => YamlSerializer.SerializeToUtf8Bytes((OneYamlKit.Bench.Models.Workflow)model)),
+                ("oneyaml-gen", () => YamlSerializer.SerializeToUtf8Bytes((OneYamlKit.Bench.Models.Workflow)model, OneYamlContext.Default.Workflow)),
+                ("vyaml", () => VYaml.Serialization.YamlSerializer.Serialize((OneYamlKit.Bench.Models.Workflow)model)),
+                ("sharpyaml", () => System.Text.Encoding.UTF8.GetBytes(SharpYaml.YamlSerializer.Serialize((OneYamlKit.Bench.Models.Workflow)model, OneYamlKit.Bench.Models.SharpYamlContext.Default.Workflow))),
+            ];
+
+        var best = new double[jobs.Length];
+        var alloc = new long[jobs.Length];
+        Array.Fill(best, double.MaxValue);
+        for (int j = 0; j < jobs.Length; j++)
+        {
+            jobs[j].Item2();
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            jobs[j].Item2();
+            alloc[j] = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (clock.Elapsed.TotalSeconds < seconds)
+        {
+            for (int j = 0; j < jobs.Length; j++)
+            {
+                Func<object> run = jobs[j].Item2;
+                long start = System.Diagnostics.Stopwatch.GetTimestamp();
+                for (int i = 0; i < 10; i++)
+                {
+                    run();
+                }
+
+                best[j] = Math.Min(best[j], System.Diagnostics.Stopwatch.GetElapsedTime(start).TotalMilliseconds * 100);
+            }
+        }
+
+        Console.WriteLine($"{name,-14} " + string.Join(" ", jobs.Select((job, k) => $"{job.Item1}={best[k]:F1}us/{alloc[k] / 1024}K")));
+    }
+
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes))[..16];
 }

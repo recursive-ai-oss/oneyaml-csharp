@@ -20,7 +20,7 @@ internal enum ScalarWriteStyle : byte
     Folded,
 
     /// <summary>
-    /// Not a style to write with: the key is longer than 1,024 characters in every style that
+    /// Not a style to write with: the key is longer than 1,024 UTF-16 code units in every style that
     /// could hold it, so it cannot be an implicit key. Nothing was written; the caller writes
     /// <c>? </c> and the key in double quotes (or a block scalar) and puts <c>:</c> on the next line.
     /// </summary>
