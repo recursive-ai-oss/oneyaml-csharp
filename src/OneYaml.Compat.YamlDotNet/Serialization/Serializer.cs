@@ -57,7 +57,7 @@ public sealed class Serializer : ISerializer
         var renderer = new TextRenderer(_settings);
         renderer.Document(buffer, 0, buffer.Count, false);
         string text = Encoding.UTF8.GetString(renderer.Written);
-        return _settings.NewLine == "\n" ? text : text.Replace("\n", _settings.NewLine, StringComparison.Ordinal);
+        return _settings.WithNewLine(text);
     }
 
     /// <inheritdoc/>

@@ -56,7 +56,7 @@ public class Emitter : IEmitter
         _inDocument = false;
         var renderer = new TextRenderer(_settings);
         renderer.Document(_buffer, 0, _buffer.Count, _explicitStart || _wroteDocument);
-        _output.Write(Encoding.UTF8.GetString(renderer.Written));
+        _output.Write(_settings.WithNewLine(Encoding.UTF8.GetString(renderer.Written)));
         _wroteDocument = true;
     }
 }

@@ -5,6 +5,7 @@ using Xunit;
 namespace OneYaml.Tests;
 
 /// <summary>Runs the kit's parse, safety and diagnostics cases that ask for events.</summary>
+[Collection(TimingGroup.Name)]
 public class KitCaseTests
 {
     public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: false), Corpus.KitVariable);
@@ -109,11 +110,12 @@ public class KitCaseTests
         double seconds = expect.GetProperty("time_seconds").GetDouble();
         double megabytes = expect.GetProperty("memory_mb").GetDouble();
         long before = GC.GetAllocatedBytesForCurrentThread();
-        var clock = Stopwatch.StartNew();
+        var clock = CpuClock.Start();
         EventText.Result result = EventText.Read(input);
-        clock.Stop();
+        TimeSpan cpu = clock.Elapsed;
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-        Assert.True(clock.Elapsed.TotalSeconds <= seconds, $"took {clock.Elapsed.TotalSeconds:F2} s, bound {seconds} s");
+        // Processor time, not wall-clock: shared runners run several test processes at once.
+        Assert.True(cpu.TotalSeconds <= seconds, $"used {cpu.TotalSeconds:F2} s of processor time, bound {seconds} s");
         Assert.True(allocated <= megabytes * 1024 * 1024, $"allocated {allocated} bytes, bound {megabytes} MB");
 
         if (result.Error is not null)

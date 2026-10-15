@@ -332,7 +332,7 @@ public sealed class SerializerBuilder : BuilderSkeleton<SerializerBuilder>
         return this;
     }
 
-    /// <summary>Sets the line break the output uses.</summary>
+    /// <summary>Sets the line break the output uses; the default is the platform's, as in the real library.</summary>
     /// <param name="newLine">The line break.</param>
     /// <returns>This builder.</returns>
     public SerializerBuilder WithNewLine(string newLine)

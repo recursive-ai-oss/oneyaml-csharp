@@ -6,6 +6,7 @@ using Xunit;
 namespace OneYaml.Tests;
 
 /// <summary>Behaviour of the reader and the input layer on small, named inputs.</summary>
+[Collection(TimingGroup.Name)]
 public class ReaderBehaviorTests
 {
     private static EventText.Result Read(string yaml, YamlLimits? limits = null)
@@ -456,11 +457,11 @@ public class ReaderBehaviorTests
         };
         foreach ((string name, string yaml) in shapes)
         {
-            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var clock = CpuClock.Start();
             EventText.Result r = Read(yaml, YamlLimits.None);
-            clock.Stop();
+            TimeSpan cpu = clock.Elapsed;
             Assert.True(r.Error is null, name + ": " + r.Error?.Message);
-            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"{name} took {clock.Elapsed.TotalSeconds:F1} s");
+            Assert.True(cpu < TimeSpan.FromSeconds(8), $"{name} used {cpu.TotalSeconds:F1} s of processor time");
         }
     }
 

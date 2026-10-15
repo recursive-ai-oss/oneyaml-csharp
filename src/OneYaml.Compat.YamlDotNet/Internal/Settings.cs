@@ -63,7 +63,11 @@ internal sealed class Settings
 
     public DefaultValuesHandling Defaults { get; set; }
 
-    public string NewLine { get; set; } = "\n";
+    // The real library writes the platform line break unless told otherwise.
+    public string NewLine { get; set; } = Environment.NewLine;
+
+    public string WithNewLine(string text) =>
+        NewLine == "\n" ? text : text.Replace("\n", NewLine, StringComparison.Ordinal);
 
     public Settings Clone()
     {

@@ -187,7 +187,7 @@ public class RepresentationTests
         var viaReal = new Rl.YamlStream();
         viaReal.Load(new StringReader(rw.ToString()));
         Assert.Equal(Shape(viaReal), Shape(viaCompat));
-        Assert.Equal(rw.ToString(), cw.ToString().TrimEnd() + "\n...\n");
+        Assert.Equal(rw.ToString(), cw.ToString().TrimEnd() + Environment.NewLine + "..." + Environment.NewLine);
     }
 
     [Fact]
