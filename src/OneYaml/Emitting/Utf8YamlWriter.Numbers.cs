@@ -103,6 +103,26 @@ internal readonly partial struct Utf8YamlWriter
         }
     }
 
+    // The text of WriteDouble into a span of at least 40 bytes, for callers that fuse it with the bytes around it.
+    internal static int FormatDouble(double value, Span<byte> dst)
+    {
+        if (double.IsNaN(value))
+        {
+            ".nan"u8.CopyTo(dst);
+            return 4;
+        }
+
+        if (double.IsInfinity(value))
+        {
+            ReadOnlySpan<byte> inf = value > 0 ? ".inf"u8 : "-.inf"u8;
+            inf.CopyTo(dst);
+            return inf.Length;
+        }
+
+        value.TryFormat(dst, out int written, default, CultureInfo.InvariantCulture);
+        return AddPointIfNeeded(dst, written);
+    }
+
     private static int AddPointIfNeeded(Span<byte> dst, int written)
     {
         // "1", "-0" and "100" would read back as integers, and "1E+17" as a string under YAML 1.1,

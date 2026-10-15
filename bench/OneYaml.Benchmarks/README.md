@@ -50,13 +50,22 @@ ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter 
 
 `TypedDumpBenchmarks` writes the gha-workflow, records-4k and records-64k models with the OneYaml
 reflection and generated paths (to a string and to UTF-8 bytes), VYaml and SharpYaml through generated code,
-and YamlDotNet through reflection. `GenericDumpBenchmarks` writes six untyped trees; each library writes the
-tree its own reader produced. The model or tree is loaded in setup, so only the writing is timed. Both read
-the `ONEYAML_WORKLOADS` directory; the Helm file is `helm-values-64k`, made by the kit's generator.
+and YamlDotNet through reflection. `GenericDumpBenchmarks` writes ten untyped trees, the task of the kit's
+`dump` rows: OneYaml writes its generic tree through the reflection options and through generated metadata
+for `object`, to a string and to UTF-8 bytes; VYaml and SharpYaml write the tree their own reader produced
+(SharpYaml reads with references preserved and writes with default options, then encodes to UTF-8, as the
+kit does). The model or tree is loaded in setup, so only the writing is timed. Both read the
+`ONEYAML_WORKLOADS` directory; the Helm file is `helm-values-64k`, made by the kit's generator.
+`ONEYAML_DUMP_WORKLOADS` (comma separated names) narrows the untyped run to some of the files.
 
 ```
 ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter '*DumpBenchmarks*' --artifacts "$DIR/bdn"
 ```
+
+Two helpers compare builds without BenchmarkDotNet. `--dump-hash [name...]` prints a hash of what the
+untyped dump writes for each workload, so two builds can be checked for identical output. `--dump-loop name
+seconds` dumps one tree repeatedly and prints the best time of a batch, for a quick before/after on a
+busy machine.
 
 ## Scalar benchmarks
 
