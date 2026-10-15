@@ -9,7 +9,7 @@ namespace OneYaml;
 /// </summary>
 public class YamlException : Exception
 {
-    /// <summary>Creates an exception with no message and no position.</summary>
+    /// <summary>Creates an exception with a default message and no position.</summary>
     public YamlException()
         : this("A YAML error occurred.", YamlErrorCategory.Syntax, 0, 0, -1)
     {
@@ -67,7 +67,10 @@ public class YamlException : Exception
     /// <summary>The 1-based column of the error in decoded characters (a byte order mark is not counted), or 0.</summary>
     public int Column { get; }
 
-    /// <summary>The byte offset of the error in the UTF-8 text the parser read, or -1 when unknown.</summary>
+    /// <summary>
+    /// The byte offset of the error, or -1 when unknown. For text errors it counts bytes of the UTF-8
+    /// text the parser read; for a malformed UTF-16 or UTF-32 input it counts bytes of the original input.
+    /// </summary>
     public long Offset { get; }
 
     /// <summary>For a patch, the zero-based index of the operation that failed; otherwise <see langword="null"/>.</summary>

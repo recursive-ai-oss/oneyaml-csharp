@@ -16,7 +16,7 @@ internal sealed class Mutator
         ">"u8.ToArray(), "|2-\n"u8.ToArray(), ">+\n"u8.ToArray(), "#"u8.ToArray(), " #c\n"u8.ToArray(), "\t"u8.ToArray(),
         "\r\n"u8.ToArray(), "\r"u8.ToArray(), "\n"u8.ToArray(), "  "u8.ToArray(), "%YAML 1.2\n"u8.ToArray(),
         "%TAG !e! tag:x,1:\n"u8.ToArray(), "\\x41"u8.ToArray(), "\\u00e9"u8.ToArray(), "\\U0001F600"u8.ToArray(), "\\\n"u8.ToArray(),
-        "\\q"u8.ToArray(), [0xEF, 0xBB, 0xBF], [0xC2, 0x85], [0xC2, 0x80], [0xEF, 0xBF, 0xBE], [0xE2, 0x80, 0xA8],
+        "\\q"u8.ToArray(), [0xEF, 0xBB, 0xBF], [0xC2, 0x85], [0xC2, 0x80], [0x7F], [0xEF, 0xBF, 0xBE], [0xE2, 0x80, 0xA8],
         [0xF0, 0x9F, 0x98, 0x80], [0xFF], [0x80], [0xC0, 0xAF], [0xED, 0xA0, 0x80], [0x00], [0x07], [0x7F],
         "<<: *a\n"u8.ToArray(), "key: value\n"u8.ToArray(), "- - - - "u8.ToArray(), "[[[[ "u8.ToArray(), "{{{{ "u8.ToArray(),
     ];

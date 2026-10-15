@@ -65,6 +65,9 @@ internal ref partial struct YamlReader
     private int _tagSuffixEnd;
     private int _tagPrefix;
 
+    // The error that ended reading, kept so that a later Read reports it again.
+    private YamlException? _failure;
+
     // Scalar details of the current event.
     private int _contentStart;
     private int _contentEnd;
@@ -98,6 +101,29 @@ internal ref partial struct YamlReader
         if (utf8.Length > _limits.MaxInputBytes)
         {
             throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+
+        _hasNonPrintable = ContainsNonPrintable(utf8);
+    }
+
+    private static bool ContainsNonPrintable(ReadOnlySpan<byte> s)
+    {
+        int i = 0;
+        while (true)
+        {
+            int rel = s[i..].IndexOfAny(s_nonPrintableLead);
+            if (rel < 0)
+            {
+                return false;
+            }
+
+            i += rel;
+            if (IsNonPrintableAt(s, i, out _))
+            {
+                return true;
+            }
+
+            i++;
         }
     }
 
@@ -210,6 +236,13 @@ internal ref partial struct YamlReader
             return false;
         }
 
+        if (_failure is not null)
+        {
+            // A reader that has failed has no valid position to go on from: it keeps reporting
+            // the same error rather than guessing.
+            throw _failure;
+        }
+
         _anchorLength = 0;
         _tagLength = 0;
         _escapedOrFolded = false;
@@ -223,7 +256,13 @@ internal ref partial struct YamlReader
         catch (YamlException ex) when (_deferred is not null && !ReferenceEquals(ex, _deferred) && ex.Offset >= _deferredFrom)
         {
             // The scanner read ahead and found the real problem; the parser tripped over its effect.
+            _failure = _deferred;
             throw _deferred;
+        }
+        catch (YamlException ex)
+        {
+            _failure = ex;
+            throw;
         }
 
         return true;
@@ -306,9 +345,27 @@ internal ref partial struct YamlReader
 
     private State PopState() => _states[--_stateCount];
 
-    private static void Grow<T>(ref T[] array, int count)
+    // The size to grow an array of this length to: double, but never past the largest array, and
+    // -1 when it cannot grow. Doubling an int would overflow near 2^30 elements.
+    internal static int NextCapacity(int length)
     {
-        T[] bigger = ArrayPool<T>.Shared.Rent(Math.Max(array.Length * 2, 16));
+        if (length >= Array.MaxLength)
+        {
+            return -1;
+        }
+
+        return length > Array.MaxLength / 2 ? Array.MaxLength : Math.Max(length * 2, 16);
+    }
+
+    private readonly void Grow<T>(ref T[] array, int count)
+    {
+        int wanted = NextCapacity(array.Length);
+        if (wanted < 0)
+        {
+            throw LimitError("The input needs more working memory than an array can hold.", _src.Length);
+        }
+
+        T[] bigger = ArrayPool<T>.Shared.Rent(wanted);
         Array.Copy(array, bigger, count);
         ArrayPool<T>.Shared.Return(array);
         array = bigger;

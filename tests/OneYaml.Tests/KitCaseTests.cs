@@ -99,8 +99,22 @@ public class KitCaseTests
 
         if (result.Error is not null)
         {
-            string allowed = expect.TryGetProperty("error", out JsonElement e) ? e.GetString()! : "none";
-            Assert.True(allowed == "limit" && result.Error.Category == YamlErrorCategory.Limit,
+            // The allowed errors are one category name or an array of names.
+            var allowed = new List<string>();
+            if (expect.TryGetProperty("error", out JsonElement e))
+            {
+                if (e.ValueKind == JsonValueKind.Array)
+                {
+                    allowed.AddRange(e.EnumerateArray().Select(x => x.GetString()!));
+                }
+                else
+                {
+                    allowed.Add(e.GetString()!);
+                }
+            }
+
+            string got = result.Error.Category == YamlErrorCategory.Limit ? "limit" : result.Error.Category == YamlErrorCategory.Syntax ? "syntax" : result.Error.Category.ToString();
+            Assert.True(allowed.Contains(got),
                 $"error {result.Error.Category} ({result.Error.Message}) is not an allowed outcome");
             return;
         }

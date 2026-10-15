@@ -22,13 +22,13 @@ internal enum YamlEncoding : byte
 /// </summary>
 internal ref struct YamlInput
 {
-    // Control characters other than tab, line feed and carriage return, DEL, and the lead
-    // bytes of the few code points YAML does not allow (C1 controls, U+FFFE and U+FFFF).
-    private static readonly SearchValues<byte> s_suspect = SearchValues.Create(
+    // The C0 control characters other than tab, line feed and carriage return are not allowed
+    // anywhere, quoted scalars included. DEL, the C1 controls, U+FFFE, U+FFFF and the byte order
+    // mark depend on where they stand (quoted scalars may hold them), so the reader checks those.
+    private static readonly SearchValues<byte> s_control = SearchValues.Create(
         [
             0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0B, 0x0C, 0x0E, 0x0F,
             0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F,
-            0x7F, 0xC2, 0xEF,
         ]);
 
     private byte[]? _rented;
@@ -148,8 +148,24 @@ internal ref struct YamlInput
     /// <exception cref="YamlException">The text has an unpaired surrogate or is too large.</exception>
     public static YamlInput FromChars(ReadOnlySpan<char> text, YamlLimits limits)
     {
-        int max = checked((text.Length * 3) + 3);
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(max);
+        // A string that starts with U+FEFF carries a byte order mark; keep it out of the text so
+        // that positions match the ones reported for the same text as bytes.
+        bool bom = false;
+        if (text.Length > 0 && text[0] == '﻿')
+        {
+            text = text[1..];
+            bom = true;
+        }
+
+        // Size the buffer from the text itself and compare with the limit before renting it, so a
+        // huge string cannot make the request overflow or allocate more than the limit allows.
+        long size = CountUtf8(text);
+        if (size > limits.MaxInputBytes)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent((int)Math.Max(size, 1));
         try
         {
             OperationStatus status = Utf8.FromUtf16(text, buffer, out int read, out int written, replaceInvalidSequences: false, isFinalBlock: true);
@@ -158,21 +174,8 @@ internal ref struct YamlInput
                 throw YamlException.At(YamlErrorCategory.Encoding, "The text contains an unpaired surrogate.", text, read);
             }
 
-            if (written > limits.MaxInputBytes)
-            {
-                throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
-            }
-
             ReadOnlySpan<byte> utf8 = buffer.AsSpan(0, written);
-            bool bom = false;
-            if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
-            {
-                // A string that starts with U+FEFF carries a byte order mark; keep it out of the text.
-                utf8 = utf8[3..];
-                bom = true;
-            }
-
-            CheckPrintable(utf8);
+            CheckControls(utf8);
             return new YamlInput(utf8, buffer, YamlEncoding.Utf8, bom);
         }
         catch
@@ -192,6 +195,33 @@ internal ref struct YamlInput
         {
             ArrayPool<byte>.Shared.Return(rented);
         }
+    }
+
+    // The UTF-8 length of text, counting an unpaired surrogate as the three bytes of its
+    // replacement character (an upper bound for it). The sum is a long and never overflows.
+    private static long CountUtf8(ReadOnlySpan<char> text)
+    {
+        const int Chunk = 1 << 24;
+        if (text.Length <= Chunk)
+        {
+            return System.Text.Encoding.UTF8.GetByteCount(text);
+        }
+
+        long total = 0;
+        while (!text.IsEmpty)
+        {
+            int n = Math.Min(text.Length, Chunk);
+            if (n < text.Length && char.IsHighSurrogate(text[n - 1]))
+            {
+                // Keep a surrogate pair together.
+                n--;
+            }
+
+            total += System.Text.Encoding.UTF8.GetByteCount(text[..n]);
+            text = text[n..];
+        }
+
+        return total;
     }
 
     private static YamlInput Transcode(ReadOnlySpan<byte> bytes, YamlEncoding encoding, int mark, YamlLimits limits)
@@ -219,19 +249,20 @@ internal ref struct YamlInput
                 throw EncodingError(body, mark, bigEndian, wide, ex.Index);
             }
 
-            utf8 = ArrayPool<byte>.Shared.Rent(checked((charCount * 3) + 3));
+            long size = CountUtf8(chars.AsSpan(0, charCount));
+            if (size > limits.MaxInputBytes)
+            {
+                throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            }
+
+            utf8 = ArrayPool<byte>.Shared.Rent((int)Math.Max(size, 1));
             OperationStatus status = Utf8.FromUtf16(chars.AsSpan(0, charCount), utf8, out int read, out int written, replaceInvalidSequences: false, isFinalBlock: true);
             if (status != OperationStatus.Done)
             {
                 throw EncodingError(body, mark, bigEndian, wide, read * (wide ? 4 : 2));
             }
 
-            if (written > limits.MaxInputBytes)
-            {
-                throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
-            }
-
-            CheckPrintable(utf8.AsSpan(0, written));
+            CheckControls(utf8.AsSpan(0, written));
             byte[] result = utf8;
             utf8 = null;
             return new YamlInput(result.AsSpan(0, written), result, encoding, mark != 0);
@@ -254,7 +285,7 @@ internal ref struct YamlInput
     {
         // Work out the position from the characters that did decode.
         int unit = wide ? 4 : 2;
-        int good = Math.Min(index, body.Length) / unit * unit;
+        int good = Math.Clamp(index, 0, body.Length) / unit * unit;
         Encoding lenient = wide ? new UTF32Encoding(bigEndian, false, false) : new UnicodeEncoding(bigEndian, false, false);
         string prefix = lenient.GetString(body[..good]);
         YamlException at = YamlException.At(YamlErrorCategory.Encoding, wide ? "Malformed UTF-32 input." : "Malformed UTF-16 input.", prefix, prefix.Length);
@@ -269,7 +300,7 @@ internal ref struct YamlInput
             throw YamlException.At(YamlErrorCategory.Encoding, "The input is not valid UTF-8.", text, bad);
         }
 
-        CheckPrintable(text);
+        CheckControls(text);
     }
 
     private static int FindInvalidUtf8(ReadOnlySpan<byte> text)
@@ -289,42 +320,12 @@ internal ref struct YamlInput
         return text.Length;
     }
 
-    // YAML allows tab, line feed, carriage return, and the printable characters only.
-    private static void CheckPrintable(ReadOnlySpan<byte> text)
+    private static void CheckControls(ReadOnlySpan<byte> text)
     {
-        int from = 0;
-        while (true)
+        int i = text.IndexOfAny(s_control);
+        if (i >= 0)
         {
-            int rel = text[from..].IndexOfAny(s_suspect);
-            if (rel < 0)
-            {
-                return;
-            }
-
-            int i = from + rel;
-            byte b = text[i];
-            bool bad;
-            if (b == 0xC2)
-            {
-                // U+0080..U+009F except U+0085.
-                bad = i + 1 < text.Length && text[i + 1] is >= 0x80 and <= 0x9F and not 0x85;
-            }
-            else if (b == 0xEF)
-            {
-                // U+FFFE and U+FFFF.
-                bad = i + 2 < text.Length && text[i + 1] == 0xBF && text[i + 2] is 0xBE or 0xBF;
-            }
-            else
-            {
-                bad = true;
-            }
-
-            if (bad)
-            {
-                throw YamlException.At(YamlErrorCategory.Syntax, "The input contains a character YAML does not allow.", text, i);
-            }
-
-            from = i + 1;
+            throw YamlException.At(YamlErrorCategory.Syntax, "The input contains a control character YAML does not allow.", text, i);
         }
     }
 }

@@ -39,7 +39,7 @@ public sealed record YamlLimits
     /// <summary>The deepest nesting of collections allowed.</summary>
     public int MaxDepth { get; init; } = 1_000;
 
-    /// <summary>The largest input, in bytes of UTF-8 text.</summary>
+    /// <summary>The largest input, in bytes. The limit is checked against the input as given and again against its UTF-8 form.</summary>
     public long MaxInputBytes { get; init; } = long.MaxValue;
 
     /// <summary>The largest scalar, in bytes of its source text.</summary>

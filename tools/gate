@@ -31,6 +31,12 @@ fi
 failed=()
 start=$SECONDS
 
+# Say which tree this log covers: the revision, and a hash of the uncommitted changes (tracked
+# diff plus the content of untracked files) so a log can be matched to the files it ran on.
+revision=$(git rev-parse HEAD 2>/dev/null || echo none)
+changes=$( { git diff HEAD 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null | sort | xargs -r sha256sum; } | sha256sum | cut -c1-16)
+echo "== revision: $revision, uncommitted changes: $(git status --short 2>/dev/null | wc -l) paths, content hash $changes"
+
 step() { # step <name> <command...>
 	local name=$1 t0=$SECONDS
 	shift
