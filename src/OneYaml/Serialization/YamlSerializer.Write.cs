@@ -272,34 +272,34 @@ public static partial class YamlSerializer
     {
         using var buffer = new PooledBufferWriter();
         WriteCore(buffer, value, info);
-        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+        return buffer.ToUtf8String();
     }
 
     private static string WriteBoxedString(object? value, YamlTypeInfo info)
     {
         using var buffer = new PooledBufferWriter();
         WriteBoxedCore(buffer, value, info);
-        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+        return buffer.ToUtf8String();
     }
 
     private static byte[] WriteBytes<T>(T value, YamlTypeInfo<T> info)
     {
         using var buffer = new PooledBufferWriter();
         WriteCore(buffer, value, info);
-        return buffer.WrittenSpan.ToArray();
+        return buffer.ToArray();
     }
 
     private static void WriteStream<T>(Stream stream, T value, YamlTypeInfo<T> info)
     {
         using var buffer = new PooledBufferWriter();
         WriteCore(buffer, value, info);
-        stream.Write(buffer.WrittenSpan);
+        buffer.WriteTo(stream);
     }
 
     private static async Task WriteStreamAsync<T>(Stream stream, T value, YamlTypeInfo<T> info, CancellationToken cancellationToken)
     {
         using var buffer = new PooledBufferWriter();
         WriteCore(buffer, value, info);
-        await stream.WriteAsync(buffer.WrittenMemory, cancellationToken).ConfigureAwait(false);
+        await buffer.WriteToAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 }

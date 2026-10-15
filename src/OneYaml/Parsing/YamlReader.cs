@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -13,7 +14,7 @@ namespace OneYaml.Parsing;
 [StructLayout(LayoutKind.Auto)]
 internal ref partial struct YamlReader
 {
-    private enum State : byte
+    internal enum State : byte
     {
         StreamStart,
         DocumentStart,
@@ -46,7 +47,8 @@ internal ref partial struct YamlReader
 
     // Parser state.
     private State _state;
-    private State[] _states;
+    private Span<State> _states;
+    private State[]? _statesRented;
     private int _stateCount;
     private int _depth;
     private int _documents;
@@ -86,15 +88,45 @@ internal ref partial struct YamlReader
     /// <param name="utf8">The text, without a byte order mark. It must already be validated UTF-8.</param>
     /// <param name="options">Reader options.</param>
     public YamlReader(ReadOnlySpan<byte> utf8, YamlReaderOptions options)
+        : this(utf8, options, default(Common))
+    {
+        _statesRented = ArrayPool<State>.Shared.Rent(16);
+        _states = _statesRented;
+        _indentsRented = ArrayPool<int>.Shared.Rent(16);
+        _indents = _indentsRented;
+        _keysRented = ArrayPool<SimpleKey>.Shared.Rent(16);
+        _keys = _keysRented;
+        _queueRented = ArrayPool<Token>.Shared.Rent(16);
+        _queue = _queueRented;
+        _flowKindsRented = ArrayPool<byte>.Shared.Rent(16);
+        _flowKinds = _flowKindsRented;
+    }
+
+    // Marks the constructor that sets up everything but the working arrays.
+    private readonly struct Common;
+
+    /// <summary>
+    /// Creates a reader whose first working space is in the caller's stack frame, so that reading a small
+    /// text takes nothing from the array pool. The space moves to pooled arrays if the text needs more.
+    /// </summary>
+    /// <param name="utf8">The text, without a byte order mark. It must already be validated UTF-8.</param>
+    /// <param name="options">Reader options.</param>
+    /// <param name="scratch">Stack space that outlives the reader.</param>
+    internal YamlReader(ReadOnlySpan<byte> utf8, YamlReaderOptions options, ref Scratch scratch)
+        : this(utf8, options, default(Common))
+    {
+        _states = scratch.States;
+        _indents = scratch.Indents;
+        _keys = scratch.Keys;
+        _queue = scratch.Queue;
+        _flowKinds = scratch.FlowKinds;
+    }
+
+    private YamlReader(ReadOnlySpan<byte> utf8, YamlReaderOptions options, Common _)
     {
         _src = utf8;
         _limits = options.Limits ?? YamlLimits.Default;
         _recordComments = options.RecordComments;
-        _states = ArrayPool<State>.Shared.Rent(32);
-        _indents = ArrayPool<int>.Shared.Rent(32);
-        _keys = ArrayPool<SimpleKey>.Shared.Rent(16);
-        _queue = ArrayPool<Token>.Shared.Rent(64);
-        _flowKinds = ArrayPool<byte>.Shared.Rent(32);
         _comments = null;
         _afterExplicitEnd = true;
         _indent = -1;
@@ -104,6 +136,48 @@ internal ref partial struct YamlReader
         }
 
         _hasNonPrintable = ContainsNonPrintable(utf8);
+    }
+
+    private const int ScratchSize = 16;
+
+    [InlineArray(ScratchSize)]
+    internal struct StateBuffer
+    {
+        private State _first;
+    }
+
+    [InlineArray(ScratchSize)]
+    internal struct IntBuffer
+    {
+        private int _first;
+    }
+
+    [InlineArray(ScratchSize)]
+    internal struct KeyBuffer
+    {
+        private SimpleKey _first;
+    }
+
+    [InlineArray(ScratchSize)]
+    internal struct TokenBuffer
+    {
+        private Token _first;
+    }
+
+    [InlineArray(ScratchSize)]
+    internal struct ByteBuffer
+    {
+        private byte _first;
+    }
+
+    /// <summary>The first working space of a reader, to be kept in a local of the method that owns the reader.</summary>
+    internal struct Scratch
+    {
+        public StateBuffer States;
+        public IntBuffer Indents;
+        public KeyBuffer Keys;
+        public TokenBuffer Queue;
+        public ByteBuffer FlowKinds;
     }
 
     private static bool ContainsNonPrintable(ReadOnlySpan<byte> s)
@@ -201,11 +275,16 @@ internal ref partial struct YamlReader
     /// <summary>Returns pooled buffers. Call it when the reader is no longer used.</summary>
     public void Dispose()
     {
-        Return(ref _states);
-        Return(ref _indents);
-        Return(ref _keys);
-        Return(ref _queue);
-        Return(ref _flowKinds);
+        Return(ref _statesRented);
+        Return(ref _indentsRented);
+        Return(ref _keysRented);
+        Return(ref _queueRented);
+        Return(ref _flowKindsRented);
+        _states = default;
+        _indents = default;
+        _keys = default;
+        _queue = default;
+        _flowKinds = default;
         if (_comments is not null)
         {
             ArrayPool<int>.Shared.Return(_comments);
@@ -221,11 +300,11 @@ internal ref partial struct YamlReader
         _state = State.End;
     }
 
-    private static void Return<T>(ref T[] array)
+    private static void Return<T>(ref T[]? array)
     {
-        T[] a = array;
-        array = [];
-        if (a.Length != 0)
+        T[]? a = array;
+        array = null;
+        if (a is not null)
         {
             ArrayPool<T>.Shared.Return(a);
         }
@@ -343,7 +422,7 @@ internal ref partial struct YamlReader
     {
         if (_stateCount == _states.Length)
         {
-            Grow(ref _states, _stateCount);
+            Grow(ref _states, ref _statesRented, _stateCount);
         }
 
         _states[_stateCount++] = s;
@@ -375,6 +454,25 @@ internal ref partial struct YamlReader
         Array.Copy(array, bigger, count);
         ArrayPool<T>.Shared.Return(array);
         array = bigger;
+    }
+
+    private readonly void Grow<T>(ref Span<T> items, ref T[]? rented, int count)
+    {
+        int wanted = NextCapacity(items.Length);
+        if (wanted < 0)
+        {
+            throw LimitError("The input needs more working memory than an array can hold.", _src.Length);
+        }
+
+        T[] bigger = ArrayPool<T>.Shared.Rent(wanted);
+        items[..count].CopyTo(bigger);
+        if (rented is not null)
+        {
+            ArrayPool<T>.Shared.Return(rented);
+        }
+
+        rented = bigger;
+        items = bigger;
     }
 
     // ---- Events ----

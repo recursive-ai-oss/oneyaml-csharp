@@ -49,6 +49,9 @@ internal sealed partial class DocState : IDisposable
 
     public int NodeCount { get; private set; }
 
+    /// <summary>The length of the node array, which is what the state holds on to for nodes.</summary>
+    internal int NodeCapacity => _nodes.Length;
+
     public int DocCount { get; private set; }
 
     /// <summary>Whether the stream holds no document and <see cref="DocCount"/> counts the empty one made up for edits.</summary>
@@ -219,16 +222,23 @@ internal sealed partial class DocState : IDisposable
     private void Parse(YamlLimits limits)
     {
         ReadOnlySpan<byte> src = Text;
-        // About one node per six bytes is typical; the cap keeps a huge text with few nodes (long scalars)
-        // from reserving more node storage than it will ever fill. The array grows if the guess is short.
-        _nodes = ArrayPool<CstNode>.Shared.Rent(Math.Min((src.Length / 6) + 16, MaxFirstNodeGuess));
+        // Guess the node count from the text so the array rarely has to grow, and so a text of comments or
+        // long scalars does not hold storage it will never fill (a document keeps this array for as long as
+        // the caller holds it). Lines, colons and commas track the nodes closely: a block entry is a line,
+        // a mapping entry is a key and a value, a flow entry is a comma. Half the text size bounds it (a
+        // node takes a byte, bar the empty ones), and the cap keeps a huge text of newlines from reserving
+        // more than a node array of a million. The array grows if the guess is short.
+        int estimate = src.Count((byte)'\n') + src.Count((byte)':') + (2 * src.Count((byte)','));
+        estimate = Math.Min(estimate, (src.Length >> 1) + 16);
+        _nodes = ArrayPool<CstNode>.Shared.Rent(Math.Clamp(estimate + 16, 16, MaxFirstNodeGuess));
         _docs = ArrayPool<DocInfo>.Shared.Rent(4);
         var anchors = new AnchorMap();
         int[] openNode = ArrayPool<int>.Shared.Rent(32);
         int[] openLast = ArrayPool<int>.Shared.Rent(32);
         int open = 0;
         bool inDocument = false;
-        var reader = new YamlReader(src, new YamlReaderOptions { Limits = limits, RecordComments = true });
+        YamlReader.Scratch scratch = default;
+        var reader = new YamlReader(src, new YamlReaderOptions { Limits = limits, RecordComments = true }, ref scratch);
         try
         {
             while (reader.Read())

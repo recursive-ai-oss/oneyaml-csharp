@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 
 namespace OneYaml;
 
@@ -32,10 +33,67 @@ internal static class GenericWriter
         public FrameKind Kind;
     }
 
+    // Room for the first levels of nesting on the stack, so that an ordinary value never rents a frame array.
+    [InlineArray(8)]
+    private struct InlineFrames
+    {
+        private Frame _first;
+    }
+
+    // The open collections. It starts in the caller's stack space and moves to a pooled array when it runs out.
+    private ref struct FrameStack
+    {
+        private Span<Frame> _items;
+        private Frame[]? _rented;
+
+        public FrameStack(Span<Frame> initial)
+        {
+            _items = initial;
+            _rented = null;
+            Count = 0;
+        }
+
+        public int Count;
+
+        public ref Frame Top => ref _items[Count - 1];
+
+        public ref Frame Push()
+        {
+            if (Count == _items.Length)
+            {
+                Frame[] bigger = ArrayPool<Frame>.Shared.Rent(_items.Length * 2);
+                _items[..Count].CopyTo(bigger);
+                _items[..Count].Clear();
+                Release();
+                _rented = bigger;
+                _items = bigger;
+            }
+
+            return ref _items[Count++];
+        }
+
+        public void DisposeOpen()
+        {
+            for (int i = 0; i < Count; i++)
+            {
+                (_items[i].Items as IDisposable)?.Dispose();
+            }
+        }
+
+        public void Release()
+        {
+            if (_rented is not null)
+            {
+                ArrayPool<Frame>.Shared.Return(_rented, clearArray: true);
+                _rented = null;
+            }
+        }
+    }
+
     public static void Write(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
     {
-        Frame[]? stack = null;
-        int sp = 0;
+        InlineFrames inline = default;
+        var stack = new FrameStack(inline);
         // Custom converters may claim any type, even string, so they turn the shortcuts off.
         bool plain = options.Converters.Count == 0;
         try
@@ -47,15 +105,15 @@ internal static class GenericWriter
                 if (pending)
                 {
                     pending = false;
-                    Push(writer, current, options, plain, ref stack, ref sp);
+                    Push(writer, current, options, plain, ref stack);
                 }
 
-                if (sp == 0)
+                if (stack.Count == 0)
                 {
                     return;
                 }
 
-                ref Frame top = ref stack![sp - 1];
+                ref Frame top = ref stack.Top;
                 switch (top.Kind)
                 {
                     case FrameKind.Dictionary:
@@ -78,7 +136,7 @@ internal static class GenericWriter
                         {
                             writer.WriteEndMapping();
                             top = default;
-                            sp--;
+                            stack.Count--;
                         }
 
                         break;
@@ -92,7 +150,7 @@ internal static class GenericWriter
                         {
                             writer.WriteEndSequence();
                             top = default;
-                            sp--;
+                            stack.Count--;
                         }
 
                         break;
@@ -109,7 +167,7 @@ internal static class GenericWriter
                             {
                                 writer.WriteEndMapping();
                                 top = default;
-                                sp--;
+                                stack.Count--;
                             }
 
                             break;
@@ -126,7 +184,7 @@ internal static class GenericWriter
                             writer.WriteEndSequence();
                             (top.Items as IDisposable)?.Dispose();
                             top = default;
-                            sp--;
+                            stack.Count--;
                         }
 
                         break;
@@ -135,20 +193,13 @@ internal static class GenericWriter
         }
         finally
         {
-            if (stack is not null)
-            {
-                for (int i = 0; i < sp; i++)
-                {
-                    (stack[i].Items as IDisposable)?.Dispose();
-                }
-
-                ArrayPool<Frame>.Shared.Return(stack, clearArray: true);
-            }
+            stack.DisposeOpen();
+            stack.Release();
         }
     }
 
     // Writes a scalar, or starts a collection and pushes its enumerator.
-    private static void Push(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, bool plain, ref Frame[]? stack, ref int sp)
+    private static void Push(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, bool plain, ref FrameStack stack)
     {
         if (value is null)
         {
@@ -170,7 +221,7 @@ internal static class GenericWriter
             {
                 var dictionary = (Dictionary<string, object?>)value;
                 writer.Begin(isMapping: true, value);
-                ref Frame frame = ref PushFrame(ref stack, ref sp);
+                ref Frame frame = ref stack.Push();
                 frame.Dictionary = dictionary.GetEnumerator();
                 frame.Kind = FrameKind.Dictionary;
                 return;
@@ -180,7 +231,7 @@ internal static class GenericWriter
             {
                 var list = (List<object?>)value;
                 writer.Begin(isMapping: false, value);
-                ref Frame frame = ref PushFrame(ref stack, ref sp);
+                ref Frame frame = ref stack.Push();
                 frame.List = list.GetEnumerator();
                 frame.Kind = FrameKind.List;
                 return;
@@ -205,28 +256,10 @@ internal static class GenericWriter
             }
         }
 
-        PushGeneral(writer, value, options, ref stack, ref sp);
+        PushGeneral(writer, value, options, ref stack);
     }
 
-    private static ref Frame PushFrame(ref Frame[]? stack, ref int sp)
-    {
-        if (stack is null)
-        {
-            stack = ArrayPool<Frame>.Shared.Rent(16);
-        }
-        else if (sp == stack.Length)
-        {
-            Frame[] bigger = ArrayPool<Frame>.Shared.Rent(stack.Length * 2);
-            Array.Copy(stack, bigger, sp);
-            Array.Clear(stack, 0, sp);
-            ArrayPool<Frame>.Shared.Return(stack);
-            stack = bigger;
-        }
-
-        return ref stack[sp++];
-    }
-
-    private static void PushGeneral(Utf8YamlEmitter writer, object value, YamlSerializerOptions options, ref Frame[]? stack, ref int sp)
+    private static void PushGeneral(Utf8YamlEmitter writer, object value, YamlSerializerOptions options, ref FrameStack stack)
     {
         if (TryWriteScalar(writer, value, options))
         {
@@ -256,7 +289,7 @@ internal static class GenericWriter
             }
 
             writer.Begin(map, value);
-            PushFrame(ref stack, ref sp) = frame;
+            stack.Push() = frame;
             return;
         }
 

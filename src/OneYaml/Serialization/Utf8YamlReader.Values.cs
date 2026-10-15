@@ -20,6 +20,11 @@ public ref partial struct Utf8YamlReader
 {
     private const int ScratchSize = 128;
 
+    // Strings are the common case of an escaped or folded scalar, and a description of a screenful is common
+    // enough that renting a buffer for it would be the usual cost. The frame is a leaf, so the stack is only
+    // used for the length of the call.
+    private const int StringScratchSize = 2048;
+
     /// <summary>Whether the current token is a null scalar: empty, <c>~</c> or a Core spelling of null.</summary>
     public readonly bool IsNull
     {
@@ -53,7 +58,7 @@ public ref partial struct Utf8YamlReader
             return raw;
         }
 
-        int max = ScalarDecoder.MaxDecodedLength(raw.Length);
+        int max = ScalarDecoder.MaxDecodedLength(raw, Style);
         Span<byte> dest;
         if (max <= scratch.Length)
         {
@@ -112,7 +117,7 @@ public ref partial struct Utf8YamlReader
         byte[]? rented = null;
         try
         {
-            Span<byte> scratch = stackalloc byte[ScratchSize];
+            Span<byte> scratch = stackalloc byte[StringScratchSize];
             ReadOnlySpan<byte> text = Text(scratch, ref rented);
             return text.IsEmpty ? string.Empty : Encoding.UTF8.GetString(text);
         }

@@ -325,7 +325,10 @@ public sealed partial class Utf8YamlEmitter
         }
         else
         {
-            rented = ArrayPool<byte>.Shared.Rent(max);
+            // Three bytes a character is the worst case; most text needs far fewer, and the pool rounds up
+            // to a power of two, so count what this text needs instead of reserving the worst case.
+            // Unpaired surrogates count as three bytes here and are refused below.
+            rented = ArrayPool<byte>.Shared.Rent(Encoding.UTF8.GetByteCount(chars));
             buffer = rented;
         }
 

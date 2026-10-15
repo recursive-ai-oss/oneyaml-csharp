@@ -49,7 +49,7 @@ internal sealed partial class DocState
         }
 
         ref readonly CstNode n = ref _nodes[node];
-        buffer = ArrayPool<byte>.Shared.Rent(ScalarDecoder.MaxDecodedLength(raw.Length));
+        buffer = ArrayPool<byte>.Shared.Rent(ScalarDecoder.MaxDecodedLength(raw, (ScalarStyle)n.Style));
         int len = ScalarDecoder.Decode(raw, (ScalarStyle)n.Style, n.Aux, (Chomping)n.Chomp, buffer);
         return buffer.AsSpan(0, len);
     }
