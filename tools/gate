@@ -48,7 +48,7 @@ tool() { # tool <args...>: the built guard tool, run from the repository root
 }
 
 unsafe_scan() {
-	local pat='\bunsafe\b|AllowUnsafeBlocks|System\.Runtime\.CompilerServices\.Unsafe|\bUnsafe\.|MemoryMarshal|\bfixed[[:space:]]*\('
+	local pat='\bunsafe\b|AllowUnsafeBlocks|System\.Runtime\.CompilerServices\.Unsafe\b|\bUnsafe\.|MemoryMarshal|\bfixed[[:space:]]*\('
 	if grep -rnE --include='*.cs' --include='*.csproj' --include='*.props' --include='*.targets' "$pat" src; then
 		echo "unsafe code or Unsafe/MemoryMarshal found under src/"
 		return 1

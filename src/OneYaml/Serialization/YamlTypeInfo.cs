@@ -536,6 +536,137 @@ public static class YamlMetadataServices
         return new YamlTypeInfo<Dictionary<TKey, TValue>>(options, new DictionaryConverter<TKey, TValue>(keyInfo, valueInfo));
     }
 
+    /// <summary>Describes an enum type, read by name or number.</summary>
+    /// <typeparam name="TEnum">The enum type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<TEnum> CreateEnumInfo<TEnum>(YamlSerializerOptions options)
+        where TEnum : struct, Enum
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return new YamlTypeInfo<TEnum>(options, new EnumConverter<TEnum>(options));
+    }
+
+    /// <summary>Describes <see cref="Nullable{T}"/>.</summary>
+    /// <typeparam name="T">The underlying value type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="underlyingInfo">Metadata for the underlying type.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<T?> CreateNullableInfo<T>(YamlSerializerOptions options, YamlTypeInfo<T> underlyingInfo)
+        where T : struct
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(underlyingInfo);
+        return new YamlTypeInfo<T?>(options, new NullableConverter<T>(underlyingInfo.Converter));
+    }
+
+    /// <summary>Describes <see cref="HashSet{T}"/>.</summary>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="elementInfo">Metadata for the elements.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<HashSet<TElement>> CreateHashSetInfo<TElement>(YamlSerializerOptions options, YamlTypeInfo<TElement> elementInfo)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(elementInfo);
+        return new YamlTypeInfo<HashSet<TElement>>(options, new CollectionConverter<HashSet<TElement>, TElement>(elementInfo, static l => [.. l]));
+    }
+
+    /// <summary>Describes a collection or dictionary interface such as <see cref="IList{T}"/>, read as a concrete type that implements it.</summary>
+    /// <typeparam name="TInterface">The interface type.</typeparam>
+    /// <typeparam name="TImplementation">The concrete type that is made, such as <see cref="List{T}"/>.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="implementationInfo">Metadata for the concrete type.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<TInterface> CreateInterfaceInfo<TInterface, TImplementation>(YamlSerializerOptions options, YamlTypeInfo<TImplementation> implementationInfo)
+        where TInterface : class
+        where TImplementation : class, TInterface
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(implementationInfo);
+        return new YamlTypeInfo<TInterface>(options, new AdaptedConverter<TInterface, TImplementation>(implementationInfo.Converter));
+    }
+
+    /// <summary>Describes a dictionary type other than <see cref="Dictionary{TKey, TValue}"/>, made through its parameterless constructor.</summary>
+    /// <typeparam name="TDictionary">The dictionary type.</typeparam>
+    /// <typeparam name="TKey">The key type.</typeparam>
+    /// <typeparam name="TValue">The value type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="keyInfo">Metadata for the keys.</param>
+    /// <param name="valueInfo">Metadata for the values.</param>
+    /// <param name="create">Makes an empty dictionary.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<TDictionary> CreateCustomDictionaryInfo<TDictionary, TKey, TValue>(
+        YamlSerializerOptions options,
+        YamlTypeInfo<TKey> keyInfo,
+        YamlTypeInfo<TValue> valueInfo,
+        Func<TDictionary> create)
+        where TDictionary : class, IDictionary<TKey, TValue>
+        where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(keyInfo);
+        ArgumentNullException.ThrowIfNull(valueInfo);
+        ArgumentNullException.ThrowIfNull(create);
+        return new YamlTypeInfo<TDictionary>(options, new GeneralDictionaryConverter<TDictionary, TKey, TValue>(keyInfo, valueInfo, create));
+    }
+
+    /// <summary>Describes a collection type other than <see cref="List{T}"/>, made through its parameterless constructor.</summary>
+    /// <typeparam name="TCollection">The collection type.</typeparam>
+    /// <typeparam name="TElement">The element type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="elementInfo">Metadata for the elements.</param>
+    /// <param name="create">Makes an empty collection.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<TCollection> CreateCustomCollectionInfo<TCollection, TElement>(
+        YamlSerializerOptions options,
+        YamlTypeInfo<TElement> elementInfo,
+        Func<TCollection> create)
+        where TCollection : class, ICollection<TElement>
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(elementInfo);
+        ArgumentNullException.ThrowIfNull(create);
+        return new YamlTypeInfo<TCollection>(options, new CollectionConverter<TCollection, TElement>(elementInfo, list =>
+        {
+            TCollection collection = create();
+            foreach (TElement item in list)
+            {
+                collection.Add(item);
+            }
+
+            return collection;
+        }));
+    }
+
+    /// <summary>Finds a converter in <see cref="YamlSerializerOptions.Converters"/> that handles the type, which takes precedence over generated metadata.</summary>
+    /// <typeparam name="T">The type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <returns>The metadata for the converter, or <see langword="null"/> when no custom converter handles the type.</returns>
+    public static YamlTypeInfo<T>? TryCreateCustomConverterInfo<T>(YamlSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        foreach (YamlConverter c in options.Converters)
+        {
+            if (!c.CanConvert(typeof(T)))
+            {
+                continue;
+            }
+
+            YamlConverter? chosen = c is YamlConverterFactory factory ? factory.CreateConverter(typeof(T), options) : c;
+            if (chosen is null)
+            {
+                continue;
+            }
+
+            return chosen is YamlConverter<T> typed
+                ? new YamlTypeInfo<T>(options, typed)
+                : throw new InvalidOperationException($"The converter {chosen.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
+        }
+
+        return null;
+    }
+
     /// <summary>Gets the built-in converter of a type such as <see cref="int"/>, <see cref="string"/>, <see cref="Guid"/> or an enum.</summary>
     /// <typeparam name="T">The type.</typeparam>
     /// <param name="options">The options the converter will be used with.</param>

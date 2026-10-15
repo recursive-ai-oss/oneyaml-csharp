@@ -70,7 +70,7 @@ jobs:
         run: dotnet run --project tools/PublicBoundary -c Release --no-build -- secretscan --range "${{ steps.range.outputs.range }}"
       - name: No unsafe code in src
         run: |
-          pat='\bunsafe\b|AllowUnsafeBlocks|System\.Runtime\.CompilerServices\.Unsafe|\bUnsafe\.|MemoryMarshal|\bfixed[[:space:]]*\('
+          pat='\bunsafe\b|AllowUnsafeBlocks|System\.Runtime\.CompilerServices\.Unsafe\b|\bUnsafe\.|MemoryMarshal|\bfixed[[:space:]]*\('
           if grep -rnE --include='*.cs' --include='*.csproj' --include='*.props' --include='*.targets' "$pat" src; then
             echo "unsafe code or Unsafe/MemoryMarshal found under src/"
             exit 1

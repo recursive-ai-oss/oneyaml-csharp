@@ -27,6 +27,22 @@
     <PackageTags>yaml;yaml-1.2;serializer;parser</PackageTags>
   </PropertyGroup>
 
+  <!-- The source generator is built first and shipped in the package as an analyzer, so adding the
+       package is all it takes. It is a build-time tool: it adds no dependency to the package. -->
+  <ItemGroup>
+    <ProjectReference Include="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="IncludeGeneratorInPackage" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" Targets="Build" />
+    <MSBuild Projects="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" Targets="GetTargetPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_GeneratorAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <None Include="@(_GeneratorAssembly)" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
     <InternalsVisibleTo Include="OneYaml.Tests" />
