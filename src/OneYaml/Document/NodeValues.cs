@@ -13,8 +13,10 @@ internal static class NodeValues
     /// <param name="node">A scalar node (aliases already followed).</param>
     /// <param name="value">The value.</param>
     /// <param name="problem">Why the scalar cannot be that type.</param>
+    /// <param name="maxIntegerDigits">The most digits an integer may have before it is read as a number of any size.</param>
     /// <returns>Whether the scalar holds a value of the type.</returns>
-    public static bool TryGet<T>(DocState s, int node, out T value, out string? problem)
+    /// <exception cref="YamlException">The integer has more digits than <paramref name="maxIntegerDigits"/> (<see cref="YamlErrorCategory.Limit"/>).</exception>
+    public static bool TryGet<T>(DocState s, int node, out T value, out string? problem, int maxIntegerDigits = int.MaxValue)
     {
         value = default!;
         problem = null;
@@ -45,7 +47,7 @@ internal static class NodeValues
 
         if (typeof(T) == typeof(object))
         {
-            return TryObject(s, node, kind, out value, out problem);
+            return TryObject(s, node, kind, out value, out problem, maxIntegerDigits);
         }
 
         if (kind == ScalarKind.Null)
@@ -63,7 +65,7 @@ internal static class NodeValues
         ReadOnlySpan<byte> text = s.DecodedScalar(node, out byte[]? rented);
         try
         {
-            return TryTyped(text, kind, out value, out problem);
+            return TryTyped(s, node, text, kind, out value, out problem, maxIntegerDigits);
         }
         finally
         {
@@ -71,9 +73,18 @@ internal static class NodeValues
         }
     }
 
+    // Refuse a very long integer before parsing it: converting one takes more than linear time.
+    private static void CheckDigits(DocState s, int node, ReadOnlySpan<byte> text, int maxIntegerDigits)
+    {
+        if (!CoreSchema.IsWithinIntegerDigits(text, maxIntegerDigits))
+        {
+            throw YamlException.At(YamlErrorCategory.Limit, "The integer has more digits than the configured limit.", s.Text, s.Node(node).Start);
+        }
+    }
+
     private static Parsing.ScalarStyle ScalarStyleOf(DocState s, int node) => (Parsing.ScalarStyle)s.Node(node).Style;
 
-    private static bool TryObject<T>(DocState s, int node, ScalarKind kind, out T value, out string? problem)
+    private static bool TryObject<T>(DocState s, int node, ScalarKind kind, out T value, out string? problem, int maxIntegerDigits)
     {
         problem = null;
         value = default!;
@@ -106,6 +117,7 @@ internal static class NodeValues
                         return true;
                     }
 
+                    CheckDigits(s, node, text, maxIntegerDigits);
                     if (CoreSchema.TryParseBigInteger(text, out BigInteger big))
                     {
                         value = (T)(object)big;
@@ -131,7 +143,7 @@ internal static class NodeValues
         }
     }
 
-    private static bool TryTyped<T>(ReadOnlySpan<byte> text, ScalarKind kind, out T value, out string? problem)
+    private static bool TryTyped<T>(DocState s, int node, ReadOnlySpan<byte> text, ScalarKind kind, out T value, out string? problem, int maxIntegerDigits)
     {
         value = default!;
         problem = null;
@@ -151,6 +163,7 @@ internal static class NodeValues
         {
             if (typeof(T) == typeof(BigInteger) || typeof(T) == typeof(BigInteger?))
             {
+                CheckDigits(s, node, text, maxIntegerDigits);
                 if (CoreSchema.TryParseBigInteger(text, out BigInteger big))
                 {
                     value = (T)(object)big;
@@ -164,6 +177,7 @@ internal static class NodeValues
             if (!CoreSchema.TryParseInt64(text, out long l))
             {
                 // Beyond 64 bits: only unsigned 64-bit, floating-point and decimal can still hold it.
+                CheckDigits(s, node, text, maxIntegerDigits);
                 if (!CoreSchema.TryParseBigInteger(text, out BigInteger huge))
                 {
                     problem = "The integer cannot be read.";

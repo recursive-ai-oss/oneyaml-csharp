@@ -51,8 +51,8 @@ internal enum CoreTag : byte
 /// <summary>
 /// The YAML 1.2 Core schema (section 10.3.2) over UTF-8 text: which plain scalars are null,
 /// booleans, integers or floats, and exact parsers for the values. Everything is a pure
-/// function of its input and none of it allocates, except that a big integer allocates the
-/// number it returns.
+/// function of its input. Resolving and number parsing allocate nothing after warm-up on net8
+/// and net10 (measured); <see cref="TryParseBigInteger"/> returns an allocated value.
 /// </summary>
 internal static class CoreSchema
 {
@@ -214,6 +214,29 @@ internal static class CoreSchema
         return true;
     }
 
+    /// <summary>
+    /// Tells whether an integer literal is short enough to parse: decimal digits are counted as
+    /// they are, and hexadecimal and octal digits as the same number of decimal digits would
+    /// need. Readers call this before <see cref="TryParseBigInteger"/>, whose cost grows faster
+    /// than the length.
+    /// </summary>
+    /// <param name="text">The scalar's text (an integer literal; anything else passes).</param>
+    /// <param name="maxDigits">The most decimal digits allowed, <see cref="YamlLimits.MaxIntegerDigits"/>.</param>
+    /// <returns><see langword="false"/> when the literal has more digits than allowed.</returns>
+    public static bool IsWithinIntegerDigits(ReadOnlySpan<byte> text, int maxDigits)
+    {
+        if (text.Length > 2 && text[0] == (byte)'0' && (text[1] == (byte)'x' || text[1] == (byte)'o'))
+        {
+            // A hexadecimal digit carries 4 bits and an octal digit 3; a decimal digit about 3.32.
+            long bitsAllowed = maxDigits * 332L / 100;
+            long digits = text.Length - 2;
+            return digits * (text[1] == (byte)'x' ? 4 : 3) <= bitsAllowed;
+        }
+
+        int start = text.Length > 0 && text[0] is (byte)'+' or (byte)'-' ? 1 : 0;
+        return text.Length - start <= maxDigits;
+    }
+
     /// <summary>Parses a Core integer of any size exactly; nothing is rounded.</summary>
     /// <param name="text">The scalar's text.</param>
     /// <param name="value">The value on success.</param>
@@ -300,30 +323,35 @@ internal static class CoreSchema
         return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
     }
 
-    /// <summary>Finds the Core scalar tag for a resolved or shorthand tag.</summary>
+    /// <summary>
+    /// Finds the Core scalar tag for a tag as written, where <c>!!</c> is taken to be the default
+    /// handle. A document can redefine <c>!!</c> with <c>%TAG</c>, so a caller that has the resolved
+    /// tag must use <see cref="ParseResolvedTag"/> instead.
+    /// </summary>
     /// <param name="tag">The tag as <c>tag:yaml.org,2002:int</c>, <c>!!int</c> or the non-specific <c>!</c>.</param>
     /// <returns>The tag, or <see cref="CoreTag.Unknown"/>.</returns>
-    public static CoreTag ParseTag(ReadOnlySpan<byte> tag)
+    public static CoreTag ParseTag(ReadOnlySpan<byte> tag) =>
+        tag.StartsWith("!!"u8) ? ParseName(tag.Slice(2)) : ParseResolvedTag(tag);
+
+    /// <summary>
+    /// Finds the Core scalar tag for a tag whose handle is already resolved. The shorthand
+    /// <c>!!int</c> is not accepted, because it may name a different tag in a document that
+    /// redefines the handle.
+    /// </summary>
+    /// <param name="tag">The resolved tag, such as <c>tag:yaml.org,2002:int</c>, or the non-specific <c>!</c>.</param>
+    /// <returns>The tag, or <see cref="CoreTag.Unknown"/>.</returns>
+    public static CoreTag ParseResolvedTag(ReadOnlySpan<byte> tag)
     {
         if (tag.Length == 1 && tag[0] == (byte)'!')
         {
             return CoreTag.Str;
         }
 
-        ReadOnlySpan<byte> name;
-        if (tag.StartsWith("!!"u8))
-        {
-            name = tag.Slice(2);
-        }
-        else if (tag.StartsWith("tag:yaml.org,2002:"u8))
-        {
-            name = tag.Slice(TagPrefix.Length);
-        }
-        else
-        {
-            return CoreTag.Unknown;
-        }
+        return tag.StartsWith("tag:yaml.org,2002:"u8) ? ParseName(tag.Slice(TagPrefix.Length)) : CoreTag.Unknown;
+    }
 
+    private static CoreTag ParseName(ReadOnlySpan<byte> name)
+    {
         if (name.SequenceEqual("str"u8))
         {
             return CoreTag.Str;

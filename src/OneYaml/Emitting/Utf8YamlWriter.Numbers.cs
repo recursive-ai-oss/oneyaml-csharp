@@ -61,7 +61,7 @@ internal readonly partial struct Utf8YamlWriter
 
     /// <summary>
     /// Writes a double in its shortest form that reads back as the same number, always with a
-    /// <c>.</c> or an exponent so it is never an integer: <c>1.0</c>, <c>1E+16</c>, <c>.inf</c>,
+    /// <c>.</c> in the digits so it is never an integer: <c>1.0</c>, <c>1.0E+17</c>, <c>.inf</c>,
     /// <c>-.inf</c>, <c>.nan</c>.
     /// </summary>
     /// <param name="value">The value.</param>
@@ -105,14 +105,26 @@ internal readonly partial struct Utf8YamlWriter
 
     private static int AddPointIfNeeded(Span<byte> dst, int written)
     {
-        // "1", "-0" and "100" would read back as integers; a float always shows a point or an exponent.
-        if (dst.Slice(0, written).IndexOfAny((byte)'.', (byte)'E') >= 0)
+        // "1", "-0" and "100" would read back as integers, and "1E+17" as a string under YAML 1.1,
+        // whose float needs a point in the digits. So a float always shows a point.
+        Span<byte> text = dst.Slice(0, written);
+        if (text.IndexOf((byte)'.') >= 0)
         {
             return written;
         }
 
-        dst[written] = (byte)'.';
-        dst[written + 1] = (byte)'0';
+        int e = text.IndexOf((byte)'E');
+        if (e < 0)
+        {
+            dst[written] = (byte)'.';
+            dst[written + 1] = (byte)'0';
+            return written + 2;
+        }
+
+        // Digits and exponent: 5E-324 becomes 5.0E-324.
+        text.Slice(e).CopyTo(dst.Slice(e + 2));
+        dst[e] = (byte)'.';
+        dst[e + 1] = (byte)'0';
         return written + 2;
     }
 }

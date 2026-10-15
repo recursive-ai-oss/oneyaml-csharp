@@ -365,7 +365,7 @@ public sealed class YamlDocument : IDisposable
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
         int node = PointerOps.Find(s, _limits, document, p);
-        if (node >= 0 && NodeValues.TryGet(s, node, out value, out _))
+        if (node >= 0 && NodeValues.TryGet(s, node, out value, out _, _limits.MaxIntegerDigits))
         {
             return true;
         }

@@ -175,7 +175,8 @@ public sealed class ScalarWriterTests
     }
 
     [Theory]
-    [InlineData(-1, 1)]
+    [InlineData(-2, 1)]
+    [InlineData(-1, 0)]
     [InlineData(0, 0)]
     [InlineData(0, 10)]
     [InlineData(3, 2)]
@@ -277,7 +278,11 @@ public sealed class ScalarWriterTests
     [InlineData(1.5e-7, "1.5E-07")]
     [InlineData(6.02e23, "6.02E+23")]
     [InlineData(double.MaxValue, "1.7976931348623157E+308")]
-    [InlineData(double.Epsilon, "5E-324")]
+    [InlineData(double.Epsilon, "5.0E-324")]
+    [InlineData(-double.Epsilon, "-5.0E-324")]
+    [InlineData(1e17, "1.0E+17")]
+    [InlineData(1e-5, "1.0E-05")]
+    [InlineData(-1e300, "-1.0E+300")]
     [InlineData(double.PositiveInfinity, ".inf")]
     [InlineData(double.NegativeInfinity, "-.inf")]
     [InlineData(double.NaN, ".nan")]
@@ -288,10 +293,46 @@ public sealed class ScalarWriterTests
     [InlineData(1f, "1.0")]
     [InlineData(0.1f, "0.1")]
     [InlineData(-3.5f, "-3.5")]
+    [InlineData(1e10f, "1.0E+10")]
+    [InlineData(float.Epsilon, "1.0E-45")]
     [InlineData(float.PositiveInfinity, ".inf")]
     [InlineData(float.NaN, ".nan")]
     public void Single_is_written_like_a_double(float value, string expected) =>
         Assert.Equal(expected, Write(w => w.WriteSingle(value)));
+
+    // The YAML 1.1 float pattern (PyYAML's spelling): digits, a point, and an exponent with a sign.
+    private static readonly System.Text.RegularExpressions.Regex Float11 = new(
+        @"^([-+]?([0-9][0-9_]*)\.[0-9_]*([eE][-+][0-9]+)?|\.[0-9_]+([eE][-+][0-9]+)?|[-+]?\.(inf|Inf|INF)|\.(nan|NaN|NAN))$");
+
+    private static void AssertReadsAsFloatEverywhere(string text)
+    {
+        Assert.Equal(ScalarKind.Float, CoreSchema.ResolvePlain(U8(text)));
+        Assert.True(Float11.IsMatch(text), "YAML 1.1 would not read this as a float: " + text);
+    }
+
+    [Fact]
+    public void Floats_with_one_digit_and_an_exponent_still_show_a_point_for_every_reader()
+    {
+        var values = new List<double> { double.Epsilon, -double.Epsilon, double.MaxValue, double.MinValue, 1e15, 1e16, 1e17, 2e22, 1e-5, 1e-7, 5e-324 };
+        for (int e = -320; e <= 308; e += 7)
+        {
+            values.Add(Math.Pow(10, e));
+            values.Add(-3 * Math.Pow(10, e));
+        }
+
+        foreach (double d in values)
+        {
+            AssertReadsAsFloatEverywhere(Write(w => w.WriteDouble(d)));
+        }
+
+        foreach (float f in new[] { 1e10f, 1e-10f, float.Epsilon, float.MaxValue, 1e20f, 3e-5f })
+        {
+            string text = Write(w => w.WriteSingle(f));
+            AssertReadsAsFloatEverywhere(text);
+            Assert.True(CoreSchema.TryParseDouble(U8(text), out double back));
+            Assert.Equal(f, (float)back);
+        }
+    }
 
     [Fact]
     public void Written_numbers_resolve_back_to_the_same_value()
@@ -305,6 +346,7 @@ public sealed class ScalarWriterTests
             double d = n % 3 == 0 ? rnd.NextDouble() * 1000 - 500 : BitConverter.Int64BitsToDouble(BitConverter.ToInt64(bits));
             string text = Write(w => w.WriteDouble(d));
             byte[] b = U8(text);
+            AssertReadsAsFloatEverywhere(text);
             Assert.Equal(ScalarKind.Float, CoreSchema.ResolvePlain(b));
             Assert.True(CoreSchema.TryParseDouble(b, out double back), text);
             if (double.IsNaN(d))
@@ -337,7 +379,7 @@ public sealed class ScalarWriterTests
     {
         var buffer = new ArrayBufferWriter<byte>(1 << 16);
         var writer = new Utf8YamlWriter(buffer);
-        byte[][] values = [U8("hello"), U8("yes"), U8("it's"), U8("a\nb\n"), U8("x: y"), U8("日本\U0001F600"), U8("  lead\n"), U8("tab\there"), U8("\"q\" \\ \u0001")];
+        byte[][] values = [U8("hello"), U8("yes"), U8("it's"), U8("a\nb\n"), U8("x: y"), U8("日本\U0001F600"), U8("  lead\n"), U8("tab\there"), U8("\"q\" \\ \u0001"), U8("+_1"), U8("1_000"), U8(new string('k', 400))];
         void RunAll()
         {
             buffer.Clear();
@@ -347,12 +389,17 @@ public sealed class ScalarWriterTests
                 {
                     writer.WriteString(v, ScalarWriteStyle.Plain, EmitContext.BlockValue, mode);
                     writer.WriteString(v, ScalarWriteStyle.Folded, EmitContext.BlockValue, mode);
+                    writer.WriteString(v, ScalarWriteStyle.Literal, EmitContext.BlockValue, mode, 0, 2, new BlockHeader(BlockChomping.Keep, 2));
+                    writer.WriteString(v, ScalarWriteStyle.Literal, EmitContext.BlockValue, mode, -1, 2);
+                    writer.WriteString(v, ScalarWriteStyle.Plain, EmitContext.BlockKey, mode);
                 }
             }
 
             writer.WriteInt64(-123456789);
             writer.WriteDouble(12345.678);
             writer.WriteDouble(double.NaN);
+            writer.WriteDouble(1e17);
+            writer.WriteDouble(double.Epsilon);
             writer.WriteBool(true);
             writer.WriteNull();
         }
@@ -369,5 +416,108 @@ public sealed class ScalarWriterTests
         }
 
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    [Theory]
+    [InlineData("new\n", "Keep", 0, "|+\n  new\n")]
+    [InlineData("new\n", "Clip", 0, "|\n  new\n")]
+    [InlineData("new\n", "Strip", 0, "|\n  new\n")]
+    [InlineData("new", "Keep", 0, "|-\n  new\n")]
+    [InlineData("new", "Clip", 0, "|-\n  new\n")]
+    [InlineData("new\n\n", "Clip", 0, "|+\n  new\n\n")]
+    [InlineData("new\n\n", "Strip", 0, "|+\n  new\n\n")]
+    [InlineData("new\n", "Keep", 2, "|2+\n  new\n")]
+    [InlineData("new\n", "Clip", 2, "|2\n  new\n")]
+    [InlineData("new\n", "Clip", 3, "|\n  new\n")]
+    [InlineData(" new\n", "Clip", 3, "|2\n   new\n")]
+    [InlineData(" new", "Strip", 0, "|2-\n   new\n")]
+    public void A_block_header_is_kept_while_the_value_reads_back_and_changed_only_as_far_as_it_needs(string value, string chomping, int indicator, string expected)
+    {
+        // The content sits two columns in, whatever the old indicator said.
+        var header = new BlockHeader(Enum.Parse<BlockChomping>(chomping), indicator);
+        string text = Write(w => Assert.True(w.WriteLiteral(U8(value), 0, 2, header)));
+        Assert.Equal(expected, text);
+    }
+
+    [Fact]
+    public void Folded_and_WriteString_take_the_existing_header_too()
+    {
+        var keep = new BlockHeader(BlockChomping.Keep, 0);
+        Assert.Equal(">+\n  new\n", Write(w => Assert.True(w.WriteFolded(U8("new\n"), 0, 2, keep))));
+        Assert.Equal("|+\n  new\n", Write(w => w.WriteString(U8("new\n"), ScalarWriteStyle.Literal, EmitContext.BlockValue, StyleMode.Edit, 0, 2, keep)));
+        Assert.Equal(new BlockHeader(BlockChomping.Keep, 0), Utf8YamlWriter.ResolveHeader(U8("new\n"), 0, 2, keep));
+        Assert.Equal(new BlockHeader(BlockChomping.Clip, 0), Utf8YamlWriter.ResolveHeader(U8("new\n"), 0, 2));
+    }
+
+    [Theory]
+    [InlineData("root\n", "|\n  root\n")]
+    [InlineData("root", "|-\n  root\n")]
+    [InlineData("a\nb\n\n", "|+\n  a\n  b\n\n")]
+    public void A_document_root_can_be_a_block_scalar(string value, string expected)
+    {
+        Assert.True(Utf8YamlWriter.CanWriteBlock(U8(value), -1, 2));
+        Assert.Equal(expected, Write(w => Assert.True(w.WriteLiteral(U8(value), -1, 2))));
+        Assert.Equal(ScalarWriteStyle.Literal, Scalar(value, ScalarWriteStyle.Literal, StyleMode.Edit, EmitContext.BlockValue, -1, 2).Style);
+    }
+
+    [Theory]
+    [InlineData(" lead\n", -1, 2)]
+    [InlineData("x\n", -1, 0)]
+    public void A_document_root_block_scalar_that_would_need_an_indicator_or_a_marker_column_stays_quoted(string value, int parent, int content)
+    {
+        Assert.False(Utf8YamlWriter.CanWriteBlock(U8(value), parent, content));
+        Assert.Equal(ScalarWriteStyle.DoubleQuoted, Scalar(value, ScalarWriteStyle.Literal, StyleMode.Edit, EmitContext.BlockValue, parent, content).Style);
+    }
+
+    [Theory]
+    [InlineData("BlockKey")]
+    [InlineData("FlowKey")]
+    public void A_key_longer_than_1024_characters_asks_for_the_explicit_form_and_writes_nothing(string context)
+    {
+        var ctx = Enum.Parse<EmitContext>(context);
+        foreach (StyleMode mode in Modes)
+        {
+            foreach (ScalarWriteStyle preferred in new[] { ScalarWriteStyle.Plain, ScalarWriteStyle.SingleQuoted, ScalarWriteStyle.DoubleQuoted })
+            {
+                (ScalarWriteStyle style, string text) = Scalar(new string('k', 1025), preferred, mode, ctx);
+                Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, style);
+                Assert.Equal(string.Empty, text);
+            }
+        }
+
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Utf8YamlWriter.ChooseStyle(U8(new string('k', 5000)), ScalarWriteStyle.Plain, ctx, StyleMode.Edit));
+        Assert.False(Utf8YamlWriter.CanBePlain(U8(new string('k', 1025)), ctx, StyleMode.Edit));
+        Assert.Equal(string.Empty, Write(w => Assert.False(w.WritePlain(U8(new string('k', 1025)), ctx, StyleMode.Edit))));
+    }
+
+    [Fact]
+    public void Key_length_counts_characters_quotes_and_escapes()
+    {
+        const EmitContext key = EmitContext.BlockKey;
+        // 1,024 plain characters fit; one more does not.
+        Assert.Equal(ScalarWriteStyle.Plain, Scalar(new string('k', 1024), ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Scalar(new string('k', 1025), ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+
+        // Multi-byte characters count once: 600 of them are 1,800 bytes but 600 characters.
+        Assert.Equal(ScalarWriteStyle.Plain, Scalar(new string('\u00E9', 600), ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Scalar(new string('\u00E9', 1025), ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+
+        // Single quotes add two characters and double each quote inside.
+        string quoted = " " + new string('k', 1020) + " ";
+        Assert.Equal(1022, quoted.Length);
+        Assert.Equal(ScalarWriteStyle.SingleQuoted, Scalar(quoted, ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Scalar(" " + new string('k', 1021) + " ", ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+        string withQuotes = new string('k', 990) + new string('\'', 20);
+        Assert.Equal(ScalarWriteStyle.Plain, Scalar(withQuotes, ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Scalar(withQuotes, ScalarWriteStyle.SingleQuoted, StyleMode.Edit, key).Style);
+
+        // Escapes count as written: each control character is four characters ("\x01") in double quotes.
+        (ScalarWriteStyle style, string text) = Scalar(new string('\u0001', 255), ScalarWriteStyle.Plain, StyleMode.Edit, key);
+        Assert.Equal(ScalarWriteStyle.DoubleQuoted, style);
+        Assert.Equal(1022, text.Length);
+        Assert.Equal(ScalarWriteStyle.ExplicitKeyRequired, Scalar(new string('\u0001', 256), ScalarWriteStyle.Plain, StyleMode.Edit, key).Style);
+
+        // The same text as a value has no such limit.
+        Assert.Equal(ScalarWriteStyle.Plain, Scalar(new string('k', 5000), ScalarWriteStyle.Plain, StyleMode.Edit).Style);
     }
 }
