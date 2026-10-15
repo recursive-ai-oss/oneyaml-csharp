@@ -321,7 +321,7 @@ internal static partial class Editor
                         if (commentEnd > propEnd)
                         {
                             edit.Write((byte)' ');
-                            edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim((byte)' '));
+                            edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim(" \t"u8));
                         }
 
                         regionEnd = Math.Max(regionEnd, commentEnd);
@@ -349,7 +349,7 @@ internal static partial class Editor
                         {
                             // The tag goes with the text around it, so the comment is written again where the tag was.
                             edit.Write((byte)' ');
-                            edit.Write(src.Slice(tagEnd, lineEnd - tagEnd).Trim((byte)' '));
+                            edit.Write(src.Slice(tagEnd, lineEnd - tagEnd).Trim(" \t"u8));
                         }
                     }
 

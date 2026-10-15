@@ -1,0 +1,203 @@
+using System.Text;
+using Xunit;
+
+namespace OneYaml.Tests;
+
+// The default depth limit has to be reachable on a 1 MB stack, the default of a Windows thread: every path that
+// recurses once per level on CLR frames is run one level below the limit on such a thread. A margin that shrinks
+// shows up here as a Limit error on the platform that has the least stack.
+
+internal sealed class ChainNode
+{
+    public ChainNode? C { get; set; }
+
+    public string? S { get; set; }
+}
+
+internal sealed class ObjectBox
+{
+    public object? Child { get; set; }
+}
+
+internal sealed class TreeNode
+{
+    public List<TreeNode> Children { get; set; } = [];
+}
+
+[YamlSerializable(typeof(ChainNode))]
+[YamlSerializable(typeof(ObjectBox))]
+[YamlSerializable(typeof(TreeNode))]
+[YamlSerializable(typeof(object))]
+internal sealed partial class HeadroomContext : YamlSerializerContext
+{
+}
+
+public class StackHeadroomTests
+{
+    private static int Levels => YamlLimits.Default.MaxDepth - 1;
+
+    private static YamlTypeInfo<T> Generated<T>() => (YamlTypeInfo<T>)new HeadroomContext().GetTypeInfo(typeof(T))!;
+
+    private static void OnMegabyteStack(Action run)
+    {
+        Exception? failure = null;
+        var thread = new Thread(
+            () =>
+            {
+                try
+                {
+                    run();
+                }
+                catch (Exception e)
+                {
+                    failure = e;
+                }
+            },
+            1024 * 1024);
+        thread.Start();
+        thread.Join();
+        Assert.Null(failure);
+    }
+
+    // A chain of mappings under "c:", ending in a mapping with an escaped string.
+    private static string BlockChain(int levels)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < levels; i++)
+        {
+            sb.Append(' ', i).Append("c:\n");
+        }
+
+        sb.Append(' ', levels).Append("s: \"a\\tb \\u00e9\"\n");
+        return sb.ToString();
+    }
+
+    private static ChainNode Chain(int levels)
+    {
+        var node = new ChainNode { S = "x" };
+        for (int i = 1; i < levels; i++)
+        {
+            node = new ChainNode { C = node };
+        }
+
+        return node;
+    }
+
+    private static int Length(ChainNode? node)
+    {
+        int n = 0;
+        for (; node is not null; node = node.C)
+        {
+            n++;
+        }
+
+        return n;
+    }
+
+    private static object? ObjectChain(int levels, bool alternate)
+    {
+        object? value = null;
+        for (int i = 0; i < levels; i++)
+        {
+            value = alternate && i % 2 == 1
+                ? new Dictionary<string, object?> { ["c"] = value }
+                : new ObjectBox { Child = value };
+        }
+
+        return value;
+    }
+
+    [Fact]
+    public void Typed_read_by_reflection_reaches_the_depth_limit()
+    {
+        string yaml = BlockChain(Levels);
+        OnMegabyteStack(() => Assert.Equal(Levels + 1, Length(YamlSerializer.Deserialize<ChainNode>(yaml))));
+    }
+
+    [Fact]
+    public void Typed_read_by_the_generator_reaches_the_depth_limit()
+    {
+        string yaml = BlockChain(Levels);
+        YamlTypeInfo<ChainNode> info = Generated<ChainNode>();
+        OnMegabyteStack(() => Assert.Equal(Levels + 1, Length(YamlSerializer.Deserialize(yaml, info))));
+    }
+
+    [Fact]
+    public void Typed_read_through_lists_reaches_the_depth_limit()
+    {
+        // Each tree node is a mapping and a sequence, two levels.
+        int nodes = Levels / 2;
+        string yaml = string.Concat(Enumerable.Repeat("{Children: [", nodes)) + string.Concat(Enumerable.Repeat("]}", nodes));
+        YamlTypeInfo<TreeNode> info = Generated<TreeNode>();
+        OnMegabyteStack(() =>
+        {
+            Assert.NotNull(YamlSerializer.Deserialize<TreeNode>(yaml));
+            Assert.NotNull(YamlSerializer.Deserialize(yaml, info));
+        });
+    }
+
+    [Fact]
+    public void Typed_write_reaches_the_depth_limit_by_both_paths()
+    {
+        ChainNode chain = Chain(Levels);
+        YamlTypeInfo<ChainNode> info = Generated<ChainNode>();
+        OnMegabyteStack(() =>
+        {
+            string reflected = YamlSerializer.Serialize(chain);
+            Assert.Equal(reflected, YamlSerializer.Serialize(chain, info));
+            Assert.Equal(Levels, Length(YamlSerializer.Deserialize<ChainNode>(reflected)));
+        });
+    }
+
+    [Fact]
+    public void Generic_read_and_write_reach_the_depth_limit()
+    {
+        string yaml = BlockChain(Levels);
+        OnMegabyteStack(() =>
+        {
+            object? value = YamlSerializer.Deserialize<object>(yaml);
+            string written = YamlSerializer.Serialize(value);
+            Assert.Equal(written, YamlSerializer.Serialize(YamlSerializer.Deserialize<object>(written)));
+        });
+    }
+
+    [Fact]
+    public void Plain_objects_under_object_members_reach_the_depth_limit()
+    {
+        object? value = ObjectChain(Levels, alternate: false);
+        YamlTypeInfo<object> info = Generated<object>();
+        OnMegabyteStack(() =>
+        {
+            string reflected = YamlSerializer.Serialize<object>(value!);
+            Assert.Equal(reflected, YamlSerializer.Serialize(value!, info));
+        });
+    }
+
+    [Fact]
+    public void Objects_and_dictionaries_alternating_under_object_members_reach_the_depth_limit()
+    {
+        object? value = ObjectChain(Levels, alternate: true);
+        YamlTypeInfo<object> info = Generated<object>();
+        OnMegabyteStack(() =>
+        {
+            string reflected = YamlSerializer.Serialize<object>(value!);
+            Assert.Equal(reflected, YamlSerializer.Serialize(value!, info));
+        });
+    }
+
+    [Fact]
+    public void A_document_reaches_the_depth_limit_in_parse_bind_edit_and_print()
+    {
+        string yaml = BlockChain(Levels);
+        string path = string.Concat(Enumerable.Repeat("/c", Levels)) + "/s";
+        OnMegabyteStack(() =>
+        {
+            using var doc = YamlDocument.Parse(yaml);
+            Assert.Equal(Levels + 1, Length(doc.Root.Deserialize<ChainNode>()));
+            Assert.NotNull(doc.Root.Deserialize<object>());
+            doc.Set(path, 2);
+            Assert.Equal(2, doc.Get<int>(path));
+            Assert.Contains("s: 2", doc.ToString(), StringComparison.Ordinal);
+        });
+    }
+}

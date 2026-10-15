@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using OneYaml.Compat.YamlDotNet.Core;
 using OneYaml.Compat.YamlDotNet.Serialization;
 using OneYaml.Documents;
@@ -59,15 +60,22 @@ internal sealed class NodeBinder
         return result;
     }
 
-    private object? BindCore(BindContext c, int node, Type type)
+    // Everything before the dispatch on the kind of type. It is a method of its own so that the frame of the method that
+    // recurses stays small: a deeply nested document costs one such frame per level.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private bool Prepare(BindContext c, ref int node, ref Type type, out TagName tag, out TypeModel? model, out object? value)
     {
+        model = null;
+        value = null;
+        tag = default;
         DocState s = c.S;
         if (s.Node(node).Kind == NodeKind.Alias)
         {
             int target = s.Node(node).Aux;
             if (c.Anchored.TryGetValue(target, out object? shared) && (shared is null ? !type.IsValueType : type.IsInstanceOfType(shared)))
             {
-                return shared;
+                value = shared;
+                return true;
             }
 
             try
@@ -84,7 +92,7 @@ internal sealed class NodeBinder
 
         ref readonly CstNode n = ref s.Node(node);
         ReadOnlySpan<byte> rawTag = s.RawTag(node);
-        TagName tag = rawTag.IsEmpty ? default : c.Source.TagOf(node);
+        tag = rawTag.IsEmpty ? default : c.Source.TagOf(node);
         if (!tag.IsEmpty && _settings.TagToType.TryGetValue(tag.Value!, out Type? tagged) && (type == typeof(object) || type.IsAssignableFrom(tagged)))
         {
             type = tagged;
@@ -99,7 +107,8 @@ internal sealed class NodeBinder
 
         if (isNull || (n.Kind == NodeKind.Scalar && tag.Value == Tags.Null && IsNullScalar(s, node)))
         {
-            return nullable is not null || !type.IsValueType ? null : Activator.CreateInstance(type);
+            value = nullable is not null || !type.IsValueType ? null : Activator.CreateInstance(type);
+            return true;
         }
 
         if (nullable is not null)
@@ -111,17 +120,29 @@ internal sealed class NodeBinder
         {
             if (converter.Accepts(type))
             {
-                return RunConverter(c, converter, node, type);
+                value = RunConverter(c, converter, node, type);
+                return true;
             }
         }
 
-        TypeModel model = _models.Get(type);
+        model = _models.Get(type);
         if (model.AttributeConverter is { } attributed)
         {
-            return RunConverter(c, attributed, node, type);
+            value = RunConverter(c, attributed, node, type);
+            return true;
         }
 
-        switch (model.Kind)
+        return false;
+    }
+
+    private object? BindCore(BindContext c, int node, Type type)
+    {
+        if (Prepare(c, ref node, ref type, out TagName tag, out TypeModel? model, out object? value))
+        {
+            return value;
+        }
+
+        switch (model!.Kind)
         {
             case TypeKind.Object:
                 return BindObject(c, node, tag);
@@ -216,33 +237,10 @@ internal sealed class NodeBinder
 
     private object? BindObject(BindContext c, int node, TagName tag)
     {
-        DocState s = c.S;
-        switch (s.Node(node).Kind)
+        switch (c.S.Node(node).Kind)
         {
             case NodeKind.Scalar:
-                {
-                    string text = s.ScalarString(node);
-                    if (!tag.IsEmpty)
-                    {
-                        if (tag.Value!.StartsWith(Tags.Prefix, StringComparison.Ordinal) && tag.Value is Tags.Str or Tags.Bool or Tags.Int or Tags.Float or Tags.Null)
-                        {
-                            try
-                            {
-                                return ScalarRules.FromCoreTag(tag.Value, text);
-                            }
-                            catch (Exception ex) when (ex is FormatException or OverflowException)
-                            {
-                                throw Error(c, node, "Exception during deserialization", ex);
-                            }
-                        }
-
-                        throw Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
-                    }
-
-                    bool plain = (Oy.Parsing.ScalarStyle)s.Node(node).Style == Oy.Parsing.ScalarStyle.Plain;
-                    return plain && _settings.UnquotedStringTypeDeserialization ? ScalarRules.Detect(text) : text;
-                }
-
+                return BindUntypedScalar(c, node, tag);
             case NodeKind.Mapping:
                 RequireCollectionTag(c, node, tag, Tags.Map);
                 return BindDictionary(c, node, _models.Get(typeof(Dictionary<object, object>)));
@@ -252,13 +250,43 @@ internal sealed class NodeBinder
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private object? BindUntypedScalar(BindContext c, int node, TagName tag)
+    {
+        DocState s = c.S;
+        string text = s.ScalarString(node);
+        if (!tag.IsEmpty)
+        {
+            if (tag.Value!.StartsWith(Tags.Prefix, StringComparison.Ordinal) && tag.Value is Tags.Str or Tags.Bool or Tags.Int or Tags.Float or Tags.Null)
+            {
+                try
+                {
+                    return ScalarRules.FromCoreTag(tag.Value, text);
+                }
+                catch (Exception ex) when (ex is FormatException or OverflowException)
+                {
+                    throw Error(c, node, "Exception during deserialization", ex);
+                }
+            }
+
+            throw Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
+        }
+
+        bool plain = (Oy.Parsing.ScalarStyle)s.Node(node).Style == Oy.Parsing.ScalarStyle.Plain;
+        return plain && _settings.UnquotedStringTypeDeserialization ? ScalarRules.Detect(text) : text;
+    }
+
     private static void RequireCollectionTag(BindContext c, int node, TagName tag, string expected)
     {
         if (!tag.IsEmpty && tag.Value != expected)
         {
-            throw Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
+            throw UnresolvedTag(c, node, tag);
         }
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Core.YamlException UnresolvedTag(BindContext c, int node, TagName tag) =>
+        Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
 
     private static object? BindScalar(BindContext c, int node, Type type, TagName tag)
     {
@@ -329,15 +357,20 @@ internal sealed class NodeBinder
         }
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Core.YamlException ExpectedCollection(BindContext c, int node, string expected, string got)
+    {
+        Mark at = c.Source.MarkAt(c.S.PropStart(node));
+        return new Core.YamlException(at, at, $"Expected '{expected}', got '{got}' (at {at}).");
+    }
+
     private object? BindSequence(BindContext c, int node, TypeModel model)
     {
         DocState s = c.S;
         ref readonly CstNode n = ref s.Node(node);
         if (n.Kind != NodeKind.Sequence)
         {
-            string got = n.Kind == NodeKind.Mapping ? "MappingStart" : "Scalar";
-            Mark at = c.Source.MarkAt(s.PropStart(node));
-            throw new Core.YamlException(at, at, $"Expected 'SequenceStart', got '{got}' (at {at}).");
+            throw ExpectedCollection(c, node, "SequenceStart", n.Kind == NodeKind.Mapping ? "MappingStart" : "Scalar");
         }
 
         Type element = model.Element!;
@@ -379,17 +412,24 @@ internal sealed class NodeBinder
         {
             object? item = Bind(c, pos, element);
             pos += s.Node(pos).Size;
-            if (model.IsList)
-            {
-                ((IList)list!).Add(item);
-            }
-            else
-            {
-                model.Add!.Invoke(list, [item]);
-            }
+            AddItem(list!, model, item);
         }
 
         return list;
+    }
+
+    // Out of line, with the other bookkeeping, so that the method that recurses keeps a small frame.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void AddItem(object list, TypeModel model, object? item)
+    {
+        if (model.IsList)
+        {
+            ((IList)list).Add(item);
+        }
+        else
+        {
+            model.Add!.Invoke(list, [item]);
+        }
     }
 
     private object? BindDictionary(BindContext c, int node, TypeModel model)
@@ -398,9 +438,7 @@ internal sealed class NodeBinder
         ref readonly CstNode n = ref s.Node(node);
         if (n.Kind != NodeKind.Mapping)
         {
-            string got = n.Kind == NodeKind.Sequence ? "SequenceStart" : "Scalar";
-            Mark at = c.Source.MarkAt(s.PropStart(node));
-            throw new Core.YamlException(at, at, $"Expected 'MappingStart', got '{got}' (at {at}).");
+            throw ExpectedCollection(c, node, "MappingStart", n.Kind == NodeKind.Sequence ? "SequenceStart" : "Scalar");
         }
 
         Type concrete = model.Concrete ?? model.Type;
@@ -419,34 +457,40 @@ internal sealed class NodeBinder
             pos = valueNode + s.Node(valueNode).Size;
             object? key = Bind(c, keyNode, model.KeyType!);
             object? value = Bind(c, valueNode, model.ValueType!);
-            try
-            {
-                if (key is null)
-                {
-                    throw Error(c, keyNode, "A mapping key cannot be null.");
-                }
-
-                if (_settings.DuplicateKeyChecking && ContainsKey(dictionary!, model, key))
-                {
-                    throw Error(c, keyNode, $"Encountered duplicate key {key}");
-                }
-
-                if (model.IsDictionary)
-                {
-                    ((IDictionary)dictionary!)[key] = value;
-                }
-                else
-                {
-                    model.Add!.Invoke(dictionary, [key, value]);
-                }
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidCastException or TargetInvocationException)
-            {
-                throw Error(c, keyNode, "Exception during deserialization", ex);
-            }
+            PutEntry(c, dictionary!, model, keyNode, key, value);
         }
 
         return dictionary;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void PutEntry(BindContext c, object dictionary, TypeModel model, int keyNode, object? key, object? value)
+    {
+        try
+        {
+            if (key is null)
+            {
+                throw Error(c, keyNode, "A mapping key cannot be null.");
+            }
+
+            if (_settings.DuplicateKeyChecking && ContainsKey(dictionary, model, key))
+            {
+                throw Error(c, keyNode, $"Encountered duplicate key {key}");
+            }
+
+            if (model.IsDictionary)
+            {
+                ((IDictionary)dictionary)[key] = value;
+            }
+            else
+            {
+                model.Add!.Invoke(dictionary, [key, value]);
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidCastException or TargetInvocationException)
+        {
+            throw Error(c, keyNode, "Exception during deserialization", ex);
+        }
     }
 
     private static bool ContainsKey(object dictionary, TypeModel model, object key) =>
@@ -458,13 +502,7 @@ internal sealed class NodeBinder
         ref readonly CstNode n = ref s.Node(node);
         if (n.Kind != NodeKind.Mapping)
         {
-            if (n.Kind == NodeKind.Sequence)
-            {
-                Mark at = c.Source.MarkAt(s.PropStart(node));
-                throw new Core.YamlException(at, at, $"No node deserializer was able to deserialize the node into type {model.Type.AssemblyQualifiedName}");
-            }
-
-            throw Error(c, node, "Exception during deserialization", new InvalidCastException($"Unable to cast a scalar to {model.Type}."));
+            throw NotAMapping(c, node, model);
         }
 
         object? instance = Create(c, node, model.Concrete ?? model.Type);
@@ -484,7 +522,7 @@ internal sealed class NodeBinder
             string key = KeyText(c, keyNode);
             if (seen is not null && !seen.Add(key))
             {
-                throw Error(c, keyNode, $"Encountered duplicate key {key}");
+                throw DuplicateKey(c, keyNode, key);
             }
 
             if (!model.ByKey.TryGetValue(key, out MemberModel? member) && !(model.ByKeyIgnoreCase?.TryGetValue(key, out member) ?? false))
@@ -494,22 +532,48 @@ internal sealed class NodeBinder
                     continue;
                 }
 
-                throw Error(c, keyNode, $"Property '{key}' not found on type '{model.Type.FullName}'.");
+                throw PropertyNotFound(c, keyNode, key, model);
             }
 
-            object? value = Bind(c, valueNode, member.Type);
-            try
-            {
-                member.Set(instance!, value);
-            }
-            catch (Exception ex) when (ex is ArgumentException or InvalidCastException or TargetInvocationException or MemberAccessException)
-            {
-                throw Error(c, valueNode, "Exception during deserialization", ex);
-            }
+            SetMember(c, member, instance!, valueNode, Bind(c, valueNode, member.Type));
         }
 
         return instance;
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Core.YamlException NotAMapping(BindContext c, int node, TypeModel model)
+    {
+        DocState s = c.S;
+        if (s.Node(node).Kind == NodeKind.Sequence)
+        {
+            Mark at = c.Source.MarkAt(s.PropStart(node));
+            return new Core.YamlException(at, at, $"No node deserializer was able to deserialize the node into type {model.Type.AssemblyQualifiedName}");
+        }
+
+        return Error(c, node, "Exception during deserialization", new InvalidCastException($"Unable to cast a scalar to {model.Type}."));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void SetMember(BindContext c, MemberModel member, object instance, int valueNode, object? value)
+    {
+        try
+        {
+            member.Set(instance, value);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidCastException or TargetInvocationException or MemberAccessException)
+        {
+            throw Error(c, valueNode, "Exception during deserialization", ex);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Core.YamlException DuplicateKey(BindContext c, int keyNode, string key) =>
+        Error(c, keyNode, $"Encountered duplicate key {key}");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Core.YamlException PropertyNotFound(BindContext c, int keyNode, string key, TypeModel model) =>
+        Error(c, keyNode, $"Property '{key}' not found on type '{model.Type.FullName}'.");
 
     private static string KeyText(BindContext c, int keyNode)
     {
