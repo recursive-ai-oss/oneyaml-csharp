@@ -167,7 +167,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
         // fixed to off, drops the reflection path below.
         if (!Oy.YamlSerializer.IsReflectionEnabledByDefault || !YamlSerializer.IsReflectionEnabledByDefault)
         {
-            throw new InvalidOperationException("Reflection-based binding is turned off in this application. Pass metadata from a YamlTypeInfo or a YamlSerializerContext, or turn the switch SharpYaml.YamlSerializer.IsReflectionEnabledByDefault on.");
+            throw new InvalidOperationException("Reflection-based binding is turned off in this application. Pass metadata from a YamlTypeInfo or a YamlSerializerContext, or turn the OneYaml.YamlSerializer.IsReflectionEnabledByDefault switch on (and SharpYaml.YamlSerializer.IsReflectionEnabledByDefault, if the program sets it).");
         }
 
         lock (_gate)
@@ -175,9 +175,6 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
             return _engine ??= Build(new ReflectionResolver(this));
         }
     }
-
-    // The engine options for metadata the caller provides, so no reflection is involved.
-    internal Oy.YamlSerializerOptions EngineWith(Oy.IYamlTypeInfoResolver resolver) => Build(resolver);
 
     private Oy.YamlSerializerOptions Build(Oy.IYamlTypeInfoResolver resolver)
     {
@@ -246,7 +243,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     }
 
     internal static NotSupportedException Unsupported(string what) =>
-        new($"{what} is not supported by OneYaml.Compat.SharpYaml. See the list of differences for what is and what is not covered.");
+        new($"{what} is not supported by OneYaml.Compat.SharpYaml. See docs/compat/sharpyaml.md for what is and what is not covered.");
 
     internal YamlMappingOrderPolicy Order => MappingOrder;
 }

@@ -35,7 +35,9 @@ internal static class Documents
             {
                 if (started)
                 {
-                    return BeforeDirectives(yaml, pos);
+                    // A line starting with % above the marker is directive-like only after a document end ("..."), and that case
+                    // returned above; before it, such a line is content of the first document.
+                    return pos;
                 }
 
                 started = true;
@@ -76,35 +78,5 @@ internal static class Documents
         }
 
         return false;
-    }
-
-    // The directives and comments just above a document marker belong to the document it starts.
-    private static int BeforeDirectives(ReadOnlySpan<char> yaml, int marker)
-    {
-        int cut = marker;
-        int p = marker;
-        while (p > 0)
-        {
-            int end = p - 1;
-            if (end > 0 && yaml[end] == '\n' && yaml[end - 1] == '\r')
-            {
-                end--;
-            }
-
-            int start = yaml[..end].LastIndexOfAny('\n', '\r') + 1;
-            ReadOnlySpan<char> line = yaml[start..end];
-            if (!line.IsEmpty && line[0] == '%')
-            {
-                cut = start;
-            }
-            else if (!(line.IsWhiteSpace() || line[0] == '#'))
-            {
-                break;
-            }
-
-            p = start;
-        }
-
-        return cut;
     }
 }

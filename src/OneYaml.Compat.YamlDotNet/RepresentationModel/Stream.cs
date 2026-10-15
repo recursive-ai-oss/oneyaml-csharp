@@ -419,7 +419,7 @@ internal static class ModelWriter
                 buffer.Add(new Ev { Kind = EvKind.MappingEnd });
                 break;
             default:
-                throw new NotSupportedException($"Unknown node type {node.GetType()}.");
+                throw new NotSupportedException($"Unknown node type {node.GetType()}. See docs/compat/yamldotnet.md for the parts of YamlDotNet that are not covered.");
         }
     }
 }

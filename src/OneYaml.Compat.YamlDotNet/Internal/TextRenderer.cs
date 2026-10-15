@@ -463,9 +463,10 @@ internal sealed class TextRenderer
 
         EmitContext context = flow ? (isKey ? EmitContext.FlowKey : EmitContext.FlowValue) : (isKey ? EmitContext.BlockKey : EmitContext.BlockValue);
         byte[] bytes = Encoding.UTF8.GetBytes(text);
-        if (explicitKey)
+        if (explicitKey && (e.IsString || !RawKeyReadsBack(text, style, flow)))
         {
-            // A key too long to be implicit: after "? " the text may be as long as it needs to be.
+            // A key too long to be implicit: after "? " the text may be as long as it needs to be. A key that is not a
+            // string (a long number, say) is written in its raw form below: quoting it would read back as a string.
             _w.WriteExplicitKeyText(bytes, flow);
             return;
         }
@@ -484,6 +485,11 @@ internal sealed class TextRenderer
             _lineOpen = false;
         }
     }
+
+    // A key that is not a string (a long number, say) is written in its raw form after "? " when that form is a plain
+    // scalar: quoting it would read back as a string.
+    private static bool RawKeyReadsBack(string text, ScalarStyle style, bool flow) =>
+        style is ScalarStyle.Any or ScalarStyle.Plain && !text.Contains('\n', StringComparison.Ordinal) && ScalarRules.IsPlainSyntax(text, flow);
 
     private void WriteRawScalar(byte[] bytes, string text, ScalarStyle style, bool flow, int parentIndent, int contentIndent, EmitContext context)
     {

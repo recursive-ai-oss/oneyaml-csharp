@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Xunit;
 using Cm = global::OneYaml.Compat.YamlDotNet.RepresentationModel;
@@ -169,10 +168,9 @@ public class BoundsAndKeysTests
     {
         var stream = new Cm.YamlStream();
         stream.Load(new StringReader(Laughs(3, 4000)));
-        var watch = Stopwatch.StartNew();
+        // The walk stops at its node and text budgets, which is what bounds the time and the memory it can take.
         Assert.ThrowsAny<Core.YamlException>(() => stream.Documents[0].RootNode.ToString());
         Assert.True(GC.GetTotalMemory(false) < 1L << 30);
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20));
     }
 
     [Fact]
@@ -186,20 +184,18 @@ public class BoundsAndKeysTests
     }
 
     [Fact]
-    public void Hashing_a_node_looks_at_a_few_nodes_only_and_agrees_with_equality()
+    public void Hashing_a_shared_structure_visits_each_distinct_node_once_and_agrees_with_equality()
     {
         var stream = new Cm.YamlStream();
         stream.Load(new StringReader(Laughs(5, 1)));
         var root = (Cm.YamlMappingNode)stream.Documents[0].RootNode;
         Cm.YamlNode big = root.Children[new Cm.YamlScalarNode("lv5")];
 
-        var watch = Stopwatch.StartNew();
-        for (int i = 0; i < 1000; i++)
-        {
-            _ = big.GetHashCode();
-        }
-
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2));
+        // lv5 is a sequence of ten references to lv4, and so on down to a sequence of scalars: six sequences and the
+        // scalar nodes of the lowest one, however many times the tree repeats them.
+        int visits = 0;
+        _ = Cm.YamlNode.StructureHash(big, ref visits);
+        Assert.True(visits <= 6 + 10, visits.ToString());
 
         var a = new Cm.YamlSequenceNode("x", new Cm.YamlSequenceNode("y"));
         var b = new Cm.YamlSequenceNode("x", new Cm.YamlSequenceNode("y"));
@@ -208,7 +204,51 @@ public class BoundsAndKeysTests
     }
 
     [Fact]
-    public void Loading_a_mapping_whose_keys_are_large_shared_structures_stays_fast()
+    public void Hashing_looks_at_the_whole_structure_not_only_the_first_nodes()
+    {
+        static Cm.YamlSequenceNode Key(int last)
+        {
+            var seq = new Cm.YamlSequenceNode();
+            for (int i = 0; i < 40; i++)
+            {
+                seq.Add("0");
+            }
+
+            seq.Add(last.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return seq;
+        }
+
+        Assert.NotEqual(Key(1).GetHashCode(), Key(2).GetHashCode());
+        Assert.Equal(Key(7).GetHashCode(), Key(7).GetHashCode());
+    }
+
+    [Fact]
+    public void Complex_keys_that_agree_on_a_long_prefix_do_not_all_hash_alike()
+    {
+        // Keys equal in their first 32 nodes and different after: one bucket for all of them made loading quadratic.
+        const int Keys = 8000;
+        var sb = new StringBuilder();
+        for (int i = 0; i < Keys; i++)
+        {
+            sb.Append("? [").Append(string.Join(", ", Enumerable.Repeat("0", 32))).Append(", ").Append(i).Append("]\n: v\n");
+        }
+
+        var stream = new Cm.YamlStream();
+        stream.Load(new StringReader(sb.ToString()));
+        var map = (Cm.YamlMappingNode)stream.Documents[0].RootNode;
+        Assert.Equal(Keys, map.Children.Count);
+        var hashes = new HashSet<int>();
+        foreach (KeyValuePair<Cm.YamlNode, Cm.YamlNode> pair in map.Children)
+        {
+            hashes.Add(pair.Key.GetHashCode());
+        }
+
+        // A 32-bit hash can meet by chance; a handful of meetings is fine, thousands is the collision.
+        Assert.True(hashes.Count > Keys - 10, hashes.Count.ToString());
+    }
+
+    [Fact]
+    public void Loading_a_mapping_whose_keys_are_large_shared_structures_charges_each_key_by_its_distinct_nodes()
     {
         var sb = new StringBuilder(Laughs(4, 1));
         sb.Append("m:\n");
@@ -217,9 +257,16 @@ public class BoundsAndKeysTests
             sb.Append("  ? [*lv4, ").Append(i).Append("]\n  : x\n");
         }
 
-        var watch = Stopwatch.StartNew();
         var stream = new Cm.YamlStream();
         stream.Load(new StringReader(sb.ToString()));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), watch.Elapsed.ToString());
+        var root = (Cm.YamlMappingNode)stream.Documents[0].RootNode;
+        var m = (Cm.YamlMappingNode)root.Children[new Cm.YamlScalarNode("m")];
+        Assert.Equal(3000, m.Children.Count);
+        foreach (Cm.YamlNode key in m.Children.Keys.Take(50))
+        {
+            int visits = 0;
+            _ = Cm.YamlNode.StructureHash(key, ref visits);
+            Assert.True(visits <= 20, visits.ToString());
+        }
     }
 }

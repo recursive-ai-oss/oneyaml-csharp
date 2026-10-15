@@ -92,6 +92,31 @@ internal static class BuiltInConverters
             return new BigIntegerConverter();
         }
 
+        if (type == typeof(Int128))
+        {
+            return new Int128Converter();
+        }
+
+        if (type == typeof(UInt128))
+        {
+            return new UInt128Converter();
+        }
+
+        if (type == typeof(Half))
+        {
+            return new HalfConverter();
+        }
+
+        if (type == typeof(nint))
+        {
+            return new NIntConverter();
+        }
+
+        if (type == typeof(nuint))
+        {
+            return new NUIntConverter();
+        }
+
         if (type == typeof(char))
         {
             return new CharConverter();
@@ -329,6 +354,146 @@ internal sealed class BigIntegerConverter : YamlConverter<BigInteger>
     {
         NumberStatus s = reader.TryReadBigInteger(out BigInteger v);
         return s == NumberStatus.Ok ? v : throw BindingErrors.Number(in reader, s, "an integer");
+    }
+}
+
+internal sealed class Int128Converter : YamlConverter<Int128>
+{
+    public override void Write(Utf8YamlEmitter writer, Int128 value, YamlSerializerOptions options) => writer.WriteNumberValue((BigInteger)value);
+
+    public override Int128 Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        NumberStatus s = reader.TryReadBigInteger(out BigInteger v);
+        if (s == NumberStatus.Ok)
+        {
+            if (v >= (BigInteger)Int128.MinValue && v <= (BigInteger)Int128.MaxValue)
+            {
+                return (Int128)v;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "a 128-bit integer");
+    }
+}
+
+internal sealed class UInt128Converter : YamlConverter<UInt128>
+{
+    public override void Write(Utf8YamlEmitter writer, UInt128 value, YamlSerializerOptions options) => writer.WriteNumberValue((BigInteger)value);
+
+    public override UInt128 Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        NumberStatus s = reader.TryReadBigInteger(out BigInteger v);
+        if (s == NumberStatus.Ok)
+        {
+            if (v.Sign >= 0 && v <= (BigInteger)UInt128.MaxValue)
+            {
+                return (UInt128)v;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "an unsigned 128-bit integer");
+    }
+}
+
+internal sealed class NIntConverter : YamlConverter<nint>
+{
+    public override void Write(Utf8YamlEmitter writer, nint value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
+    public override nint Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        NumberStatus s = reader.TryReadInt64(out long v);
+        if (s == NumberStatus.Ok)
+        {
+            // On a 32-bit process the native integer is narrower than a long.
+            if (v >= nint.MinValue && v <= nint.MaxValue)
+            {
+                return (nint)v;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "a native integer");
+    }
+}
+
+internal sealed class NUIntConverter : YamlConverter<nuint>
+{
+    public override void Write(Utf8YamlEmitter writer, nuint value, YamlSerializerOptions options) => writer.WriteNumberValue((ulong)value);
+
+    public override nuint Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        NumberStatus s = reader.TryReadUInt64(out ulong v);
+        if (s == NumberStatus.Ok)
+        {
+            if (v <= nuint.MaxValue)
+            {
+                return (nuint)v;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "an unsigned native integer");
+    }
+}
+
+internal sealed class HalfConverter : YamlConverter<Half>
+{
+    public override void Write(Utf8YamlEmitter writer, Half value, YamlSerializerOptions options)
+    {
+        if (!Half.IsFinite(value))
+        {
+            writer.WriteNumberValue((double)value);
+            return;
+        }
+
+        // The shortest text that reads back as the same Half ("0.1", not the float expansion of it), with a point or an
+        // exponent mark so it stays a float: "1" would read back as an integer.
+        Span<char> text = stackalloc char[32];
+        value.TryFormat(text, out int written, default, CultureInfo.InvariantCulture);
+        text = text.Slice(0, written);
+        if (text.IndexOf('.') < 0)
+        {
+            int e = text.IndexOfAny('E', 'e');
+            Span<char> fixedText = stackalloc char[40];
+            if (e < 0)
+            {
+                text.CopyTo(fixedText);
+                ".0".AsSpan().CopyTo(fixedText.Slice(written));
+                writer.WritePlainNumberText(fixedText.Slice(0, written + 2));
+                return;
+            }
+
+            text.Slice(0, e).CopyTo(fixedText);
+            ".0".AsSpan().CopyTo(fixedText.Slice(e));
+            text.Slice(e).CopyTo(fixedText.Slice(e + 2));
+            writer.WritePlainNumberText(fixedText.Slice(0, written + 2));
+            return;
+        }
+
+        writer.WritePlainNumberText(text);
+    }
+
+    public override Half Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        NumberStatus s = reader.TryReadDouble(out double v);
+        if (s == NumberStatus.Ok)
+        {
+            Half h = (Half)v;
+            if (!Half.IsInfinity(h) || double.IsInfinity(v))
+            {
+                return h;
+            }
+
+            s = NumberStatus.OutOfRange;
+        }
+
+        throw BindingErrors.Number(in reader, s, "a number");
     }
 }
 

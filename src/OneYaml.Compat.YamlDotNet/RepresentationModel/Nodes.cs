@@ -208,10 +208,6 @@ public abstract class YamlNode
     // The most text, in characters, that ToString or a visitor walk may produce or see.
     internal const int MaxTextChars = 32 * 1024 * 1024;
 
-    // Hashing looks at this many nodes at most, level by level so that keys that differ in a late item still differ. Equal nodes agree on every node they share, so equal nodes hash alike,
-    // and a key that is a huge shared structure costs no more to hash than a small one.
-    private const int HashNodes = 32;
-
     private Loaded? _source;
     private int _startOffset = -1;
     private int _endOffset = -1;
@@ -304,61 +300,104 @@ public abstract class YamlNode
     /// <inheritdoc/>
     public override int GetHashCode()
     {
-        var hash = new HashCode();
         if (this is YamlScalarNode only)
         {
-            // The usual key is a scalar: no queue needed.
-            hash.Add(NodeType);
-            hash.Add(Tag.Value, StringComparer.Ordinal);
-            hash.Add(only.Value, StringComparer.Ordinal);
-            return hash.ToHashCode();
+            // The usual key is a scalar: nothing to walk.
+            return HashCode.Combine(NodeType, Tag.Value, only.Value);
         }
 
-        var queue = new Queue<YamlNode>();
-        queue.Enqueue(this);
-        int seen = 0;
-        while (queue.Count > 0 && seen++ < HashNodes)
+        int visits = 0;
+        return StructureHash(this, ref visits);
+    }
+
+    // The hash covers the whole structure, so keys that agree on a long prefix still hash apart. Each distinct node is
+    // hashed once however often it is shared (the result is remembered per node), and every distinct node is charged to
+    // the visit budget, so hashing a key costs time in proportion to its size in memory and never to its size as a tree.
+    // The walk keeps its own stack, so depth cannot overflow the thread stack.
+    internal static int StructureHash(YamlNode root, ref int visits)
+    {
+        var done = new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance);
+        var open = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
+        var frames = new List<(YamlNode Node, int Next, int Acc)>();
+        frames.Add((root, 0, Begin(root, ref visits)));
+        open.Add(root);
+        while (true)
         {
-            YamlNode node = queue.Dequeue();
-            hash.Add(node.NodeType);
-            hash.Add(node.Tag.Value, StringComparer.Ordinal);
-            switch (node)
+            int top = frames.Count - 1;
+            (YamlNode node, int next, int acc) = frames[top];
+            YamlNode? child = ChildAt(node, next);
+            if (child is null)
             {
-                case YamlScalarNode scalar:
-                    hash.Add(scalar.Value, StringComparer.Ordinal);
-                    break;
-                case YamlSequenceNode sequence:
-                    hash.Add(sequence.Children.Count);
-                    for (int i = 0; i < Math.Min(sequence.Children.Count, HashNodes); i++)
-                    {
-                        queue.Enqueue(sequence.Children[i]);
-                    }
+                frames.RemoveAt(top);
+                open.Remove(node);
+                done[node] = acc;
+                if (top == 0)
+                {
+                    return acc;
+                }
 
-                    break;
-                case YamlMappingNode mapping:
-                    hash.Add(mapping.Children.Count);
-                    var pairs = new List<YamlNode>();
-                    foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
-                    {
-                        if (pairs.Count >= HashNodes)
-                        {
-                            break;
-                        }
+                (YamlNode parent, int parentNext, int parentAcc) = frames[top - 1];
+                frames[top - 1] = (parent, parentNext + 1, HashCode.Combine(parentAcc, acc));
+                continue;
+            }
 
-                        pairs.Add(pair.Key);
-                        pairs.Add(pair.Value);
-                    }
+            if (done.TryGetValue(child, out int known))
+            {
+                frames[top] = (node, next + 1, HashCode.Combine(acc, known));
+            }
+            else if (open.Contains(child))
+            {
+                // A node that contains itself: a fixed contribution keeps equal shapes hashing alike.
+                frames[top] = (node, next + 1, HashCode.Combine(acc, -1));
+            }
+            else if (child is YamlScalarNode scalar)
+            {
+                Guard(frames.Count, ref visits);
+                int h = HashCode.Combine(scalar.NodeType, scalar.Tag.Value, scalar.Value);
+                done[child] = h;
+                frames[top] = (node, next + 1, HashCode.Combine(acc, h));
+            }
+            else
+            {
+                if (frames.Count > MaxDepth)
+                {
+                    throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
+                }
 
-                    foreach (YamlNode child in pairs)
-                    {
-                        queue.Enqueue(child);
-                    }
-
-                    break;
+                open.Add(child);
+                frames.Add((child, 0, Begin(child, ref visits)));
             }
         }
+    }
 
-        return hash.ToHashCode();
+    private static int Begin(YamlNode node, ref int visits)
+    {
+        Guard(0, ref visits);
+        return node switch
+        {
+            YamlSequenceNode q => HashCode.Combine(node.NodeType, node.Tag.Value, q.Children.Count),
+            YamlMappingNode m => HashCode.Combine(node.NodeType, node.Tag.Value, m.Children.Count),
+            _ => HashCode.Combine(node.NodeType, node.Tag.Value),
+        };
+    }
+
+    private static YamlNode? ChildAt(YamlNode node, int index)
+    {
+        switch (node)
+        {
+            case YamlSequenceNode q:
+                return index < q.Children.Count ? q.Children[index] : null;
+            case YamlMappingNode m:
+                if (index >= m.Children.Count * 2)
+                {
+                    return null;
+                }
+
+                KeyValuePair<YamlNode, YamlNode> pair = m.Children[index / 2];
+                return (index & 1) == 0 ? pair.Key : pair.Value;
+            default:
+                return null;
+        }
     }
 
     internal void SetSource(Loaded source, int start, int end)

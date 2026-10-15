@@ -49,6 +49,7 @@ namespace OneYaml.Tests.Generated;
 [YamlSerializable(typeof(Wide70))]
 [YamlSerializable(typeof(IgnoreCaseMap))]
 [YamlSerializable(typeof(RefConstructor))]
+[YamlSerializable(typeof(WideNumbers))]
 internal sealed partial class ModelsContext : YamlSerializerContext
 {
 }
