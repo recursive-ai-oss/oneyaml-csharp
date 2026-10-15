@@ -82,16 +82,42 @@ jobs:
 
   # Build with warnings as errors (trim and AOT analyzers included) and run every
   # test, Slow ones too, on both runtimes. The tests target net8.0 and net10.0.
+  # The conformance tests read the shared case kit, checked out at a pinned commit.
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      # The kit commit the conformance tests run against. To move it, put the full SHA of a
+      # commit of recursive-ai-oss/oneyaml-kit here, run the tests, and fix what changed.
+      KIT_REF: fb033e0bfddc8a59614cfd1f4b2d829113e99ef9
     steps:
+      # Windows runners check out with line-ending conversion on by default. The kit cases and
+      # the YAML under test need their exact bytes, so conversion is off before any checkout.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v5
-      - name: Keep build output out of the checkout
-        run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+        with:
+          repository: recursive-ai-oss/oneyaml-kit
+          ref: ${{ env.KIT_REF }}
+          path: kit
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Point the tests at the kit
+        run: |
+          echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+          echo "ONEYAML_KIT=$GITHUB_WORKSPACE/kit" >> "$GITHUB_ENV"
+          echo "ONEYAML_YTS_DIR=$GITHUB_WORKSPACE/kit/suites/yaml-test-suite/data-2022-01-17" >> "$GITHUB_ENV"
+          echo "ONEYAML_WORKLOADS=$RUNNER_TEMP/workloads" >> "$GITHUB_ENV"
+      - name: Prepare the benchmark workloads
+        # Writes the workloads the way the kit's own harnesses read them, edit scripts included.
+        # The kit's launcher imports a POSIX-only module, so the workload writer is called directly.
+        run: |
+          python -c "import sys; from pathlib import Path; sys.path.insert(0, 'kit/bench'); from oneyaml_bench import workloads; workloads.prepare(Path(sys.argv[1]), ('quick',))" "$ONEYAML_WORKLOADS"
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |

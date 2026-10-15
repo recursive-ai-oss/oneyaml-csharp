@@ -4,18 +4,64 @@ namespace OneYaml.Tests;
 
 /// <summary>
 /// Locates the shared conformance data. The paths come from the environment so the repository
-/// holds no machine-specific locations; tests that need them skip when a variable is unset.
+/// holds no machine-specific locations. A test that needs a variable skips when it is unset; a variable
+/// that names a missing directory, or a data set that turns out empty, fails the test instead, so a
+/// wrong path can never pass as a skip.
 /// </summary>
 internal static class Corpus
 {
     internal const string SuiteVariable = "ONEYAML_YTS_DIR";
     internal const string KitVariable = "ONEYAML_KIT";
+    internal const string WorkloadsVariable = "ONEYAML_WORKLOADS";
 
-    internal static string? SuiteDirectory => Existing(Environment.GetEnvironmentVariable(SuiteVariable));
+    internal static string? SuiteDirectory => Existing(SuiteVariable);
 
-    internal static string? KitDirectory => Existing(Environment.GetEnvironmentVariable(KitVariable));
+    internal static string? KitDirectory => Existing(KitVariable);
 
-    private static string? Existing(string? path) => !string.IsNullOrEmpty(path) && Directory.Exists(path) ? path : null;
+    /// <summary>
+    /// The workload directories (each holds input.yaml). ONEYAML_WORKLOADS names a prepared set, laid out as the kit
+    /// writes it (a workloads folder with one directory per workload); without it the kit's real-world files are used.
+    /// </summary>
+    internal static IEnumerable<string> Workloads()
+    {
+        string? prepared = Existing(WorkloadsVariable);
+        string root;
+        if (prepared is not null)
+        {
+            root = Path.Combine(prepared, "workloads");
+        }
+        else if (KitDirectory is { } kit)
+        {
+            root = Path.Combine(kit, "bench", "workloads", "real");
+        }
+        else
+        {
+            return [];
+        }
+
+        if (!Directory.Exists(root))
+        {
+            throw new InvalidOperationException($"the workload directory {root} does not exist");
+        }
+
+        return Directory.EnumerateDirectories(root).Where(d => File.Exists(Path.Combine(d, "input.yaml"))).OrderBy(d => d, StringComparer.Ordinal);
+    }
+
+    private static string? Existing(string variable)
+    {
+        string? path = Environment.GetEnvironmentVariable(variable);
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        if (!Directory.Exists(path))
+        {
+            throw new InvalidOperationException($"{variable} names a directory that does not exist: {path}");
+        }
+
+        return path;
+    }
 
     /// <summary>The ids of suite cases, "ID" or "ID/NN" for numbered variants.</summary>
     internal static IEnumerable<string> SuiteCaseIds()
@@ -97,8 +143,11 @@ internal static class Corpus
             return (KitInput.RecipeSize(doc.RootElement) >= KitInput.LargeBytes) == large;
         });
 
-    /// <summary>Wraps ids for a Theory; a lone placeholder row lets the test report a skip when the data is missing.</summary>
-    internal static IEnumerable<object[]> Rows(IEnumerable<string> ids)
+    /// <summary>
+    /// Wraps ids for a Theory. With none of the variables set there is no data and a lone placeholder row lets the
+    /// test report a skip; with one set, an empty data set is an error.
+    /// </summary>
+    internal static IEnumerable<object[]> Rows(IEnumerable<string> ids, params string[] variables)
     {
         bool any = false;
         foreach (string id in ids)
@@ -109,6 +158,14 @@ internal static class Corpus
 
         if (!any)
         {
+            foreach (string variable in variables)
+            {
+                if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable(variable)))
+                {
+                    throw new InvalidOperationException($"{variable} is set but no test data was found under it");
+                }
+            }
+
             yield return [string.Empty];
         }
     }

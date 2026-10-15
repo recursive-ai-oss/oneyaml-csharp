@@ -7,9 +7,9 @@ namespace OneYaml.Tests;
 /// <summary>Runs the kit's parse, safety and diagnostics cases that ask for events.</summary>
 public class KitCaseTests
 {
-    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: false));
+    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: false), Corpus.KitVariable);
 
-    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: true));
+    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: true), Corpus.KitVariable);
 
     [Theory]
     [MemberData(nameof(Cases))]

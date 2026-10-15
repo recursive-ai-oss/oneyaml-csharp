@@ -11,8 +11,6 @@ namespace OneYaml.Compat.Tests;
 // A split between the two (one throws, the other does not) is listed, with its class, in the table below; any other split fails.
 public class CorpusTests
 {
-    private const string SuiteVariable = "ONEYAML_YTS_DIR";
-    private const string WorkloadVariable = "ONEYAML_WORKLOADS";
 
     // Cases where the libraries differ on purpose, each with the class of the difference.
     //   rejects-valid: YamlDotNet refuses YAML the specification allows; the compat package reads it.
@@ -38,69 +36,10 @@ public class CorpusTests
         ["FRK4"] = "empty-key",
     };
 
-    public static IEnumerable<object[]> SuiteCases()
-    {
-        string? dir = Environment.GetEnvironmentVariable(SuiteVariable);
-        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
-        {
-            // xunit rejects an empty data set; the test returns at once for this entry.
-            yield return [string.Empty];
-            yield break;
-        }
+    public static IEnumerable<object[]> SuiteCases() => KitData.Rows(KitData.ValidSuiteIds(), KitData.SuiteVariable);
 
-        foreach (string caseDir in Directory.EnumerateDirectories(dir).OrderBy(d => d, StringComparer.Ordinal))
-        {
-            if (File.Exists(Path.Combine(caseDir, "in.yaml")))
-            {
-                if (!File.Exists(Path.Combine(caseDir, "error")))
-                {
-                    yield return [Path.GetFileName(caseDir)];
-                }
-
-                continue;
-            }
-
-            foreach (string sub in Directory.EnumerateDirectories(caseDir).OrderBy(d => d, StringComparer.Ordinal))
-            {
-                if (File.Exists(Path.Combine(sub, "in.yaml")) && !File.Exists(Path.Combine(sub, "error")))
-                {
-                    yield return [Path.GetFileName(caseDir) + "/" + Path.GetFileName(sub)];
-                }
-            }
-        }
-    }
-
-    public static IEnumerable<object[]> WorkloadCases()
-    {
-        string? dir = Environment.GetEnvironmentVariable(WorkloadVariable);
-        var names = new SortedSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-        {
-            string nested = Path.Combine(dir, "workloads");
-            foreach (string w in Directory.Exists(nested) ? Directory.EnumerateDirectories(nested) : [])
-            {
-                if (File.Exists(Path.Combine(w, "input.yaml")))
-                {
-                    names.Add(Path.GetFileName(w));
-                }
-            }
-
-            foreach (string f in Directory.EnumerateFiles(dir, "*.yaml"))
-            {
-                names.Add(Path.GetFileNameWithoutExtension(f));
-            }
-        }
-
-        if (names.Count == 0)
-        {
-            yield return [string.Empty];
-        }
-
-        foreach (string name in names)
-        {
-            yield return [name];
-        }
-    }
+    public static IEnumerable<object[]> WorkloadCases() =>
+        KitData.Rows(KitData.Workloads().Select(d => Path.GetFileName(d)), KitData.KitVariable, KitData.WorkloadsVariable);
 
     [Theory]
     [MemberData(nameof(SuiteCases))]
@@ -108,10 +47,10 @@ public class CorpusTests
     {
         if (id.Length == 0)
         {
-            return;
+            Assert.Skip($"{KitData.SuiteVariable} is not set");
         }
 
-        string text = File.ReadAllText(Path.Combine(Environment.GetEnvironmentVariable(SuiteVariable)!, id, "in.yaml"));
+        string text = File.ReadAllText(Path.Combine(KitData.Directory(KitData.SuiteVariable)!, id, "in.yaml"));
         Compare(id, text);
     }
 
@@ -122,12 +61,10 @@ public class CorpusTests
     {
         if (name.Length == 0)
         {
-            return;
+            Assert.Skip($"{KitData.KitVariable} is not set");
         }
 
-        string root = Environment.GetEnvironmentVariable(WorkloadVariable)!;
-        string folder = Path.Combine(root, "workloads", name, "input.yaml");
-        string text = File.ReadAllText(File.Exists(folder) ? folder : Path.Combine(root, name + ".yaml"));
+        string text = KitData.WorkloadText(name);
         Compare("workload:" + name, text);
     }
 

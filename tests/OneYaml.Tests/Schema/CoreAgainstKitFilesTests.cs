@@ -25,14 +25,14 @@ public sealed partial class CoreAgainstKitFilesTests
 
     private static string? KitCases()
     {
-        string? kit = Environment.GetEnvironmentVariable("ONEYAML_KIT");
-        if (string.IsNullOrEmpty(kit))
+        string? kit = Corpus.KitDirectory;
+        if (kit is null)
         {
             return null;
         }
 
         string dir = Path.Combine(kit, "suites", "own", "cases", "schema");
-        return Directory.Exists(dir) ? dir : null;
+        return Directory.Exists(dir) ? dir : throw new InvalidOperationException($"{dir} does not exist");
     }
 
     [Fact]

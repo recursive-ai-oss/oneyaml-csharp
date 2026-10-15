@@ -10,73 +10,12 @@ namespace OneYaml.Compat.Tests.SharpYamlCompat;
 // a difference that has no class fails.
 public class SharpYamlCorpusTests
 {
-    private const string SuiteVariable = "ONEYAML_YTS_DIR";
-    private const string WorkloadVariable = "ONEYAML_WORKLOADS";
     private const string ReportVariable = "ONEYAML_SY_REPORT";
 
-    public static IEnumerable<object[]> SuiteCases()
-    {
-        string? dir = Environment.GetEnvironmentVariable(SuiteVariable);
-        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
-        {
-            // xunit rejects an empty data set; the test returns at once for this entry.
-            yield return [string.Empty];
-            yield break;
-        }
+    public static IEnumerable<object[]> SuiteCases() => KitData.Rows(KitData.ValidSuiteIds(), KitData.SuiteVariable);
 
-        foreach (string caseDir in Directory.EnumerateDirectories(dir).OrderBy(d => d, StringComparer.Ordinal))
-        {
-            if (File.Exists(Path.Combine(caseDir, "in.yaml")))
-            {
-                if (!File.Exists(Path.Combine(caseDir, "error")))
-                {
-                    yield return [Path.GetFileName(caseDir)];
-                }
-
-                continue;
-            }
-
-            foreach (string sub in Directory.EnumerateDirectories(caseDir).OrderBy(d => d, StringComparer.Ordinal))
-            {
-                if (File.Exists(Path.Combine(sub, "in.yaml")) && !File.Exists(Path.Combine(sub, "error")))
-                {
-                    yield return [Path.GetFileName(caseDir) + "/" + Path.GetFileName(sub)];
-                }
-            }
-        }
-    }
-
-    public static IEnumerable<object[]> WorkloadCases()
-    {
-        string? dir = Environment.GetEnvironmentVariable(WorkloadVariable);
-        var names = new SortedSet<string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-        {
-            string nested = Path.Combine(dir, "workloads");
-            foreach (string w in Directory.Exists(nested) ? Directory.EnumerateDirectories(nested) : [])
-            {
-                if (File.Exists(Path.Combine(w, "input.yaml")))
-                {
-                    names.Add(Path.GetFileName(w));
-                }
-            }
-
-            foreach (string f in Directory.EnumerateFiles(dir, "*.yaml"))
-            {
-                names.Add(Path.GetFileNameWithoutExtension(f));
-            }
-        }
-
-        if (names.Count == 0)
-        {
-            yield return [string.Empty];
-        }
-
-        foreach (string name in names)
-        {
-            yield return [name];
-        }
-    }
+    public static IEnumerable<object[]> WorkloadCases() =>
+        KitData.Rows(KitData.Workloads().Select(d => Path.GetFileName(d)), KitData.KitVariable, KitData.WorkloadsVariable);
 
     [Theory]
     [MemberData(nameof(SuiteCases))]
@@ -84,10 +23,10 @@ public class SharpYamlCorpusTests
     {
         if (id.Length == 0)
         {
-            return;
+            Assert.Skip($"{KitData.SuiteVariable} is not set");
         }
 
-        string text = File.ReadAllText(Path.Combine(Environment.GetEnvironmentVariable(SuiteVariable)!, id, "in.yaml"));
+        string text = File.ReadAllText(Path.Combine(KitData.Directory(KitData.SuiteVariable)!, id, "in.yaml"));
         Compare(id, text);
     }
 
@@ -98,12 +37,10 @@ public class SharpYamlCorpusTests
     {
         if (name.Length == 0)
         {
-            return;
+            Assert.Skip($"{KitData.KitVariable} is not set");
         }
 
-        string root = Environment.GetEnvironmentVariable(WorkloadVariable)!;
-        string folder = Path.Combine(root, "workloads", name, "input.yaml");
-        string text = File.ReadAllText(File.Exists(folder) ? folder : Path.Combine(root, name + ".yaml"));
+        string text = KitData.WorkloadText(name);
         Compare("workload:" + name, text);
     }
 
@@ -113,14 +50,12 @@ public class SharpYamlCorpusTests
     [InlineData("records-64k")]
     public void Typed_workload_reads_and_writes_alike(string name)
     {
-        string? root = Environment.GetEnvironmentVariable(WorkloadVariable);
-        if (string.IsNullOrEmpty(root) || !Directory.Exists(root))
+        if (KitData.Directory(KitData.KitVariable) is null && KitData.Directory(KitData.WorkloadsVariable) is null)
         {
-            return;
+            Assert.Skip($"{KitData.KitVariable} is not set");
         }
 
-        string file = Path.Combine(root, "workloads", name, "input.yaml");
-        string text = File.ReadAllText(File.Exists(file) ? file : Path.Combine(root, name + ".yaml"));
+        string text = KitData.WorkloadText(name);
         var real = new Rs.YamlSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
         var compat = new Cs.YamlSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
         if (name == "gha-workflow")

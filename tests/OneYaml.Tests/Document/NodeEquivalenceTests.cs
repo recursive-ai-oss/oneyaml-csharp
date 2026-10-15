@@ -12,9 +12,9 @@ namespace OneYaml.Tests.Document;
 /// </summary>
 public class NodeEquivalenceTests
 {
-    public static IEnumerable<object[]> SuiteRows() => Corpus.Rows(Corpus.SuiteCaseIds());
+    public static IEnumerable<object[]> SuiteRows() => Corpus.Rows(Corpus.SuiteCaseIds(), Corpus.SuiteVariable);
 
-    public static IEnumerable<object[]> KitRows() => Corpus.Rows(KitIds());
+    public static IEnumerable<object[]> KitRows() => Corpus.Rows(KitIds(), Corpus.KitVariable);
 
     private static IEnumerable<string> KitIds()
     {

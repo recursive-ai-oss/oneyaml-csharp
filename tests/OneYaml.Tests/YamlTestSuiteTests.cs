@@ -6,7 +6,7 @@ namespace OneYaml.Tests;
 /// <summary>Runs every yaml-test-suite case through the reader.</summary>
 public class YamlTestSuiteTests
 {
-    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.SuiteCaseIds());
+    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.SuiteCaseIds(), Corpus.SuiteVariable);
 
     [Theory]
     [MemberData(nameof(Cases))]

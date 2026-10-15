@@ -10,21 +10,23 @@ namespace OneYaml.Tests.Document;
 /// <summary>Runs the kit's round-trip and edit cases, and the corpora, through the document.</summary>
 public class KitDocumentTests
 {
-    public static IEnumerable<object[]> RoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: false));
+    public static IEnumerable<object[]> RoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: false), Corpus.KitVariable);
 
-    public static IEnumerable<object[]> LargeRoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: true));
+    public static IEnumerable<object[]> LargeRoundTripCases() =>
+        // The kit has no round-trip case of that size at present, so an empty tier is not an error here.
+        Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: true));
 
     // The edit cases, and the safety cases that apply a patch.
     private static IEnumerable<string> PatchableCaseIds() =>
         KitCaseIds("edit", _ => true).Concat(KitCaseIds("safety", c => c.GetProperty("operation").GetProperty("type").GetString() == "patch"));
 
-    public static IEnumerable<object[]> EditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: false));
+    public static IEnumerable<object[]> EditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: false), Corpus.KitVariable);
 
-    public static IEnumerable<object[]> LargeEditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: true));
+    public static IEnumerable<object[]> LargeEditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: true), Corpus.KitVariable);
 
-    public static IEnumerable<object[]> SuiteCases() => Corpus.Rows(Corpus.SuiteCaseIds());
+    public static IEnumerable<object[]> SuiteCases() => Corpus.Rows(Corpus.SuiteCaseIds(), Corpus.SuiteVariable);
 
-    public static IEnumerable<object[]> WorkloadCases() => Corpus.Rows(Workloads().Select(d => Path.GetFileName(d)));
+    public static IEnumerable<object[]> WorkloadCases() => Corpus.Rows(Workloads().Select(d => Path.GetFileName(d)), Corpus.KitVariable, Corpus.WorkloadsVariable);
 
     private static IEnumerable<string> KitCaseIds(string category, Func<JsonElement, bool> keep)
     {
@@ -45,21 +47,8 @@ public class KitDocumentTests
         }
     }
 
-    /// <summary>Workload directories: prepared ones when ONEYAML_WORKLOADS names them, else the kit's real files.</summary>
-    internal static IEnumerable<string> Workloads()
-    {
-        string? prepared = Environment.GetEnvironmentVariable("ONEYAML_WORKLOADS");
-        if (!string.IsNullOrEmpty(prepared) && Directory.Exists(Path.Combine(prepared, "workloads")))
-        {
-            return Directory.EnumerateDirectories(Path.Combine(prepared, "workloads")).Where(HasInput).OrderBy(d => d, StringComparer.Ordinal);
-        }
-
-        string? kit = Corpus.KitDirectory;
-        string real = kit is null ? string.Empty : Path.Combine(kit, "bench", "workloads", "real");
-        return Directory.Exists(real) ? Directory.EnumerateDirectories(real).Where(HasInput).OrderBy(d => d, StringComparer.Ordinal) : [];
-    }
-
-    private static bool HasInput(string dir) => File.Exists(Path.Combine(dir, "input.yaml"));
+    /// <summary>Workload directories: the prepared set when ONEYAML_WORKLOADS names one, else the kit's real files.</summary>
+    internal static IEnumerable<string> Workloads() => Corpus.Workloads();
 
     private static void AssertEqualBytes(byte[] expected, byte[] actual, string what)
     {
@@ -110,7 +99,7 @@ public class KitDocumentTests
     {
         if (id.Length == 0)
         {
-            Assert.Skip($"{Corpus.KitVariable} is not set");
+            Assert.Skip($"{Corpus.KitVariable} is not set, or the kit has no round-trip case in this tier");
         }
 
         string dir = Corpus.KitCaseDirectory(id);
@@ -184,7 +173,19 @@ public class KitDocumentTests
         string editFile = Path.Combine(dir, "edit.json");
         if (!File.Exists(editFile))
         {
-            Assert.Skip("this workload has no edit script (set ONEYAML_WORKLOADS to prepared workloads)");
+            // A prepared workload says in workload.json whether it has an edit script; one that claims a script and
+            // has none is a broken data set, not a skip.
+            string meta = Path.Combine(dir, "workload.json");
+            if (File.Exists(meta))
+            {
+                using JsonDocument info = JsonDocument.Parse(File.ReadAllBytes(meta));
+                if (info.RootElement.TryGetProperty("tasks", out JsonElement tasks) && tasks.EnumerateArray().Any(t => t.GetString() == "edit-script"))
+                {
+                    Assert.Fail($"{dir} lists an edit script but has none");
+                }
+            }
+
+            Assert.Skip("this workload has no edit script");
         }
 
         byte[] input = File.ReadAllBytes(Path.Combine(dir, "input.yaml"));

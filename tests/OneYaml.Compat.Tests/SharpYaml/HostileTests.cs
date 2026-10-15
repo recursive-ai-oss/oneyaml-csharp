@@ -147,10 +147,10 @@ public class SharpYamlHostileTests
     [Fact]
     public void Invalid_suite_inputs_are_refused_with_the_package_exception()
     {
-        string? dir = Environment.GetEnvironmentVariable("ONEYAML_YTS_DIR");
-        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+        string? dir = KitData.Directory(KitData.SuiteVariable);
+        if (dir is null)
         {
-            return;
+            Assert.Skip($"{KitData.SuiteVariable} is not set");
         }
 
         int checkedCases = 0;
@@ -189,8 +189,8 @@ public class SharpYamlHostileTests
     public void Suite_and_safety_inputs_end_in_the_package_exception_through_every_entry_point()
     {
         var inputs = new List<byte[]>();
-        string? dir = Environment.GetEnvironmentVariable("ONEYAML_YTS_DIR");
-        if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
+        string? dir = KitData.Directory(KitData.SuiteVariable);
+        if (dir is not null)
         {
             foreach (string file in Directory.EnumerateFiles(dir, "in.yaml", SearchOption.AllDirectories))
             {
@@ -198,10 +198,15 @@ public class SharpYamlHostileTests
             }
         }
 
-        string? kit = Environment.GetEnvironmentVariable("ONEYAML_KIT");
-        string safety = kit is null ? "" : Path.Combine(kit, "suites", "own", "cases", "safety");
-        if (Directory.Exists(safety))
+        string? kit = KitData.Directory(KitData.KitVariable);
+        if (kit is not null)
         {
+            string safety = Path.Combine(kit, "suites", "own", "cases", "safety");
+            if (!Directory.Exists(safety))
+            {
+                throw new InvalidOperationException($"{safety} does not exist");
+            }
+
             foreach (string file in Directory.EnumerateFiles(safety, "input.yaml", SearchOption.AllDirectories))
             {
                 inputs.Add(File.ReadAllBytes(file));
@@ -210,7 +215,7 @@ public class SharpYamlHostileTests
 
         if (inputs.Count == 0)
         {
-            return;
+            Assert.Skip($"{KitData.SuiteVariable} and {KitData.KitVariable} are not set");
         }
 
         foreach (byte[] bytes in inputs)
