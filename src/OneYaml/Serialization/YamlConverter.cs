@@ -23,6 +23,12 @@ public abstract class YamlConverter
 
 /// <summary>Converts values of type <typeparamref name="T"/> between YAML and .NET.</summary>
 /// <typeparam name="T">The type this converter handles.</typeparam>
+/// <remarks>
+/// The built-in converters stop with a <see cref="YamlErrorCategory.Limit"/> error when the stack is running
+/// out. A converter that calls itself or other converters for each level of nesting should do the same, for
+/// example with <see cref="System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack"/>
+/// when <see cref="YamlLimits.None"/> is in use, because a stack overflow ends the process.
+/// </remarks>
 public abstract class YamlConverter<T> : YamlConverter
 {
     private static readonly bool s_nonNullableValueType = typeof(T).IsValueType && Nullable.GetUnderlyingType(typeof(T)) is null;

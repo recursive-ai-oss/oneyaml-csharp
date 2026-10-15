@@ -54,4 +54,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ParameterTypeMismatch = new(
+        "OY0007",
+        "A constructor parameter and its member differ in type",
+        "The constructor parameter '{0}' of '{1}' has type '{2}' but the member of the same name has type '{3}'; make them the same type",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

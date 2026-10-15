@@ -34,26 +34,6 @@ public sealed class DefaultYamlTypeInfoResolver : IYamlTypeInfoResolver
     }
 }
 
-internal static class ReflectionResolver
-{
-    private static readonly bool s_enabled = !AppContext.TryGetSwitch("OneYaml.YamlSerializer.IsReflectionEnabledByDefault", out bool on) || on;
-    private static DefaultYamlTypeInfoResolver? s_instance;
-
-    // Options without a resolver fall back to reflection unless the application switched it off.
-    // The entry points that rely on this are annotated; the metadata-based overloads set a resolver.
-    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Only reached from entry points that carry the reflection annotations, or when the application keeps its types.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Only reached from entry points that carry the reflection annotations, or when the application keeps its types.")]
-    public static IYamlTypeInfoResolver? GetOrNull()
-    {
-        if (!s_enabled)
-        {
-            return null;
-        }
-
-        return s_instance ??= new DefaultYamlTypeInfoResolver();
-    }
-}
-
 [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove.")]
 [RequiresDynamicCode("Reflection-based binding makes generic types at run time.")]
 internal static class ReflectionTypeInfoFactory
@@ -334,7 +314,10 @@ internal static class ReflectionTypeInfoFactory
             return null;
         }
 
-        ConstructorInfo[] ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance);
+        // A constructor with a ref, in or out parameter cannot be called with a value from a mapping.
+        ConstructorInfo[] ctors = type.GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Where(c => c.GetParameters().All(x => !x.ParameterType.IsByRef))
+            .ToArray();
         ConstructorInfo? marked = ctors.FirstOrDefault(c => c.IsDefined(typeof(YamlConstructorAttribute), false))
             ?? ctors.FirstOrDefault(c => c.IsDefined(typeof(JsonConstructorAttribute), false));
         if (marked is not null)
@@ -364,12 +347,19 @@ internal static class ReflectionTypeInfoFactory
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (PropertyInfo p in OrderedProperties(typeof(T)))
         {
-            if (p.GetIndexParameters().Length != 0 || p.PropertyType.IsByRefLike || p.PropertyType.IsPointer || IsIgnored(p))
+            if (p.GetIndexParameters().Length != 0 || IsUnbindable(p.PropertyType))
             {
                 continue;
             }
 
-            bool boundByConstructor = parameters.Any(x => string.Equals(x.Name, p.Name, StringComparison.OrdinalIgnoreCase));
+            // An ignored member still takes its name, so the base member it overrides or hides stays out too.
+            if (IsIgnored(p))
+            {
+                names.Add(p.Name);
+                continue;
+            }
+
+            bool boundByConstructor = BoundByConstructor(parameters, p.Name, p.PropertyType, typeof(T));
             MethodInfo? setter = p.SetMethod is { IsPublic: true } ? p.SetMethod : null;
             if (setter is null && !boundByConstructor)
             {
@@ -386,12 +376,12 @@ internal static class ReflectionTypeInfoFactory
 
         foreach (FieldInfo f in typeof(T).GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (f.FieldType.IsByRefLike || f.FieldType.IsPointer || IsIgnored(f) || names.Contains(f.Name))
+            if (IsUnbindable(f.FieldType) || IsIgnored(f) || names.Contains(f.Name))
             {
                 continue;
             }
 
-            bool boundByConstructor = parameters.Any(x => string.Equals(x.Name, f.Name, StringComparison.OrdinalIgnoreCase));
+            bool boundByConstructor = BoundByConstructor(parameters, f.Name, f.FieldType, typeof(T));
             if ((f.IsInitOnly || f.IsLiteral) && !boundByConstructor)
             {
                 continue;
@@ -403,6 +393,30 @@ internal static class ReflectionTypeInfoFactory
 
         return [.. result];
     }
+
+    // A constructor parameter fills the member of the same name, so their types must agree: the value is
+    // read once, as one type, and handed to the constructor.
+    private static bool BoundByConstructor(ParameterInfo[] parameters, string member, Type memberType, Type owner)
+    {
+        foreach (ParameterInfo x in parameters)
+        {
+            if (string.Equals(x.Name, member, StringComparison.OrdinalIgnoreCase))
+            {
+                if (x.ParameterType != memberType)
+                {
+                    throw new NotSupportedException($"The constructor parameter '{x.Name}' of '{owner}' has type '{x.ParameterType}' but the member '{member}' has type '{memberType}'; make them the same type.");
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Members of these types are left out, as the source generator leaves them out.
+    private static bool IsUnbindable(Type type) =>
+        type.IsByRefLike || type.IsPointer || type.IsFunctionPointer || typeof(Delegate).IsAssignableFrom(type);
 
     // Derived members first, so a member hidden by a derived one is the one that stays.
     private static IEnumerable<PropertyInfo> OrderedProperties(Type type)
@@ -418,12 +432,12 @@ internal static class ReflectionTypeInfoFactory
 
     private static bool IsIgnored(MemberInfo m)
     {
-        if (m.GetCustomAttribute<YamlIgnoreAttribute>(true) is { } yaml)
+        if (m.GetCustomAttribute<YamlIgnoreAttribute>(false) is { } yaml)
         {
             return yaml.Condition == YamlIgnoreCondition.Always;
         }
 
-        if (m.GetCustomAttribute<JsonIgnoreAttribute>(true) is { } json)
+        if (m.GetCustomAttribute<JsonIgnoreAttribute>(false) is { } json)
         {
             return json.Condition == JsonIgnoreCondition.Always;
         }
@@ -434,12 +448,12 @@ internal static class ReflectionTypeInfoFactory
     // The conditional ignore of a member that is still bound: it only affects writing.
     private static YamlIgnoreCondition? IgnoreConditionOf(MemberInfo m)
     {
-        if (m.GetCustomAttribute<YamlIgnoreAttribute>(true) is { } yaml)
+        if (m.GetCustomAttribute<YamlIgnoreAttribute>(false) is { } yaml)
         {
             return yaml.Condition;
         }
 
-        return m.GetCustomAttribute<JsonIgnoreAttribute>(true)?.Condition switch
+        return m.GetCustomAttribute<JsonIgnoreAttribute>(false)?.Condition switch
         {
             JsonIgnoreCondition.WhenWritingNull => YamlIgnoreCondition.WhenWritingNull,
             JsonIgnoreCondition.WhenWritingDefault => YamlIgnoreCondition.WhenWritingDefault,
@@ -450,13 +464,13 @@ internal static class ReflectionTypeInfoFactory
 
     private static YamlPropertyInfo Make<T>(Type propertyType, PropertyInfo? property, FieldInfo? field, MethodInfo? setter, string name, MemberInfo member)
     {
-        string? explicitName = member.GetCustomAttribute<YamlPropertyNameAttribute>(true)?.Name
-            ?? member.GetCustomAttribute<JsonPropertyNameAttribute>(true)?.Name;
-        bool required = member.IsDefined(typeof(YamlRequiredAttribute), true)
-            || member.IsDefined(typeof(JsonRequiredAttribute), true)
-            || member.IsDefined(typeof(RequiredMemberAttribute), true);
-        int order = member.GetCustomAttribute<YamlPropertyOrderAttribute>(true)?.Order
-            ?? member.GetCustomAttribute<JsonPropertyOrderAttribute>(true)?.Order
+        string? explicitName = member.GetCustomAttribute<YamlPropertyNameAttribute>(false)?.Name
+            ?? member.GetCustomAttribute<JsonPropertyNameAttribute>(false)?.Name;
+        bool required = member.IsDefined(typeof(YamlRequiredAttribute), false)
+            || member.IsDefined(typeof(JsonRequiredAttribute), false)
+            || member.IsDefined(typeof(RequiredMemberAttribute), false);
+        int order = member.GetCustomAttribute<YamlPropertyOrderAttribute>(false)?.Order
+            ?? member.GetCustomAttribute<JsonPropertyOrderAttribute>(false)?.Order
             ?? 0;
         MethodInfo make = typeof(ReflectionTypeInfoFactory).GetMethod(nameof(MakeProperty), Any)!.MakeGenericMethod(typeof(T), propertyType);
         try

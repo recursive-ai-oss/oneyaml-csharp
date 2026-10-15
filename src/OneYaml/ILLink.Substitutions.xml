@@ -1,0 +1,8 @@
+<linker>
+  <assembly fullname="OneYaml">
+    <!-- With the switch off, the trimmer folds the check away and removes the reflection resolver. -->
+    <type fullname="OneYaml.YamlSerializer">
+      <method signature="System.Boolean get_IsReflectionEnabledByDefault()" body="stub" value="false" feature="OneYaml.YamlSerializer.IsReflectionEnabledByDefault" featurevalue="false" />
+    </type>
+  </assembly>
+</linker>

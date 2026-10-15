@@ -72,6 +72,10 @@ internal struct AnchorEntry
     public int TapeEnd;
     public long Nodes;
     public long Bytes;
+
+    // Whether the anchored node is a single scalar. The tape range alone cannot say: when aliases are not
+    // expanded, only scalars are kept on it, so a collection holding one anchored scalar looks the same.
+    public bool IsScalar;
 }
 
 internal struct ReplayFrame
@@ -527,6 +531,7 @@ public ref partial struct Utf8YamlReader
                 {
                     int entry = NewEntry();
                     NodeEntry = entry;
+                    _book!.Entries[entry].IsScalar = true;
 
                     // An anchored scalar is always kept: an alias used as a key reads its text from here.
                     Record();
@@ -733,7 +738,7 @@ public ref partial struct Utf8YamlReader
     {
         AnchorBook book = _book!;
         ref AnchorEntry e = ref book.Entries[entry];
-        if (e.TapeEnd - e.TapeStart != 1 || book.Tape[e.TapeStart].Type != YamlTokenType.Scalar)
+        if (!e.IsScalar)
         {
             return null;
         }

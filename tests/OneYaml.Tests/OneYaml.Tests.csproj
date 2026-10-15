@@ -6,6 +6,8 @@
     <IsPackable>false</IsPackable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsTestProject>true</IsTestProject>
+    <!-- A test model has delegate members the generator leaves out, and says so. -->
+    <NoWarn>$(NoWarn);OY0004</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

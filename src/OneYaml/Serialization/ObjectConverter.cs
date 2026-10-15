@@ -182,6 +182,8 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         ref MemberSet seen,
         ref MemberSet merged)
     {
+        // A merge value may itself hold a merge key, so this recurses with the input.
+        ConverterGuards.EnsureStack(in reader);
         if (reader.Type == YamlTokenType.MappingStart)
         {
             ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);

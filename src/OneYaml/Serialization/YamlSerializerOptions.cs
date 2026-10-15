@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Threading;
 
 namespace OneYaml;
 
@@ -121,18 +122,25 @@ public sealed class YamlSerializerOptions
 
     /// <summary>
     /// Supplies type metadata, typically a generated <see cref="YamlSerializerContext"/>. When it is
-    /// <see langword="null"/>, metadata comes from reflection.
+    /// <see langword="null"/>, the reflection-based <see cref="YamlSerializer"/> overloads use a
+    /// <see cref="DefaultYamlTypeInfoResolver"/> unless reflection is turned off for the application.
     /// </summary>
     public IYamlTypeInfoResolver? TypeInfoResolver
     {
-        get => _resolver;
+        get => Volatile.Read(ref _resolver);
         init => _resolver = value;
     }
 
-    /// <summary>Gets the metadata for a type.</summary>
+    /// <summary>Gets the metadata for a type from <see cref="TypeInfoResolver"/>.</summary>
     /// <param name="type">The type.</param>
     /// <returns>The metadata.</returns>
-    /// <exception cref="NotSupportedException">No resolver knows the type.</exception>
+    /// <remarks>
+    /// This never falls back to reflection: set <see cref="TypeInfoResolver"/> to a generated context, or to a
+    /// <see cref="DefaultYamlTypeInfoResolver"/> to opt in to reflection. The reflection-based
+    /// <see cref="YamlSerializer"/> overloads install that resolver themselves when none is set.
+    /// </remarks>
+    /// <exception cref="NotSupportedException">The resolver does not know the type.</exception>
+    /// <exception cref="InvalidOperationException">No resolver is set.</exception>
     public YamlTypeInfo GetTypeInfo(Type type)
     {
         ArgumentNullException.ThrowIfNull(type);
@@ -142,16 +150,13 @@ public sealed class YamlSerializerOptions
             return known;
         }
 
-        YamlTypeInfo? info = null;
-        if (_resolver is not null)
+        IYamlTypeInfoResolver? resolver = Volatile.Read(ref _resolver);
+        if (resolver is null)
         {
-            info = _resolver.GetTypeInfo(type, this);
-        }
-        else
-        {
-            info = ReflectionResolver.GetOrNull()?.GetTypeInfo(type, this);
+            throw new InvalidOperationException("These options have no TypeInfoResolver. Set one to a generated YamlSerializerContext, or to a DefaultYamlTypeInfoResolver to use reflection.");
         }
 
+        YamlTypeInfo? info = resolver.GetTypeInfo(type, this);
         if (info is null)
         {
             throw new NotSupportedException($"No metadata is available for type '{type}'. Add it to a YamlSerializerContext or use reflection-based options.");
@@ -169,6 +174,38 @@ public sealed class YamlSerializerOptions
     /// <param name="type">The type.</param>
     /// <returns>The converter.</returns>
     public YamlConverter GetConverter(Type type) => GetTypeInfo(type).ConverterBase;
+
+    // The reflection-based serializer overloads come through here. They carry the trimming and AOT
+    // annotations, so a caller that reaches this has accepted reflection; a program that switched
+    // reflection off (as trimmed and ahead-of-time compiled ones do by default) gets a clear error.
+    [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove.")]
+    [RequiresDynamicCode("Reflection-based binding makes generic types at run time.")]
+    internal YamlTypeInfo GetReflectiveTypeInfo(Type type)
+    {
+        EnsureResolver();
+        return GetTypeInfo(type);
+    }
+
+    [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove.")]
+    [RequiresDynamicCode("Reflection-based binding makes generic types at run time.")]
+    internal YamlTypeInfo<T> GetReflectiveTypeInfo<T>() => (YamlTypeInfo<T>)GetReflectiveTypeInfo(typeof(T));
+
+    [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove.")]
+    [RequiresDynamicCode("Reflection-based binding makes generic types at run time.")]
+    private void EnsureResolver()
+    {
+        if (Volatile.Read(ref _resolver) is not null)
+        {
+            return;
+        }
+
+        if (!YamlSerializer.IsReflectionEnabledByDefault)
+        {
+            throw new InvalidOperationException("Reflection-based binding is turned off in this application. Pass generated metadata from a YamlSerializerContext, set TypeInfoResolver, or set the OneYaml.YamlSerializer.IsReflectionEnabledByDefault switch to true.");
+        }
+
+        Interlocked.CompareExchange(ref _resolver, new DefaultYamlTypeInfoResolver(), null);
+    }
 
     private static YamlSerializerOptions CreateDefault()
     {

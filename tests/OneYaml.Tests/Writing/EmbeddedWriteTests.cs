@@ -10,7 +10,7 @@ public class EmbeddedWriteTests
     private static string Embedded(object? value, Utf8YamlEmitter.Embedding embedding, int parentIndent)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        YamlSerializer.WriteEmbedded(buffer, value, YamlSerializerOptions.Default.GetTypeInfo<object>(), embedding, parentIndent);
+        YamlSerializer.WriteEmbedded(buffer, value, new YamlSerializerOptions { TypeInfoResolver = new DefaultYamlTypeInfoResolver() }.GetTypeInfo<object>(), embedding, parentIndent);
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 

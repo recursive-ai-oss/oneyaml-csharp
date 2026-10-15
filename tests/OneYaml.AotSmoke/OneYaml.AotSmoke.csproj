@@ -25,10 +25,9 @@
     <RuntimeIdentifier>$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- With reflection switched off, only generated metadata can find a type. -->
-    <RuntimeHostConfigurationOption Include="OneYaml.YamlSerializer.IsReflectionEnabledByDefault" Value="false" Trim="true" />
-  </ItemGroup>
+  <!-- The package ships this file; a project reference does not bring it, so import it here. It turns
+       reflection off for trimmed and ahead-of-time publishing. -->
+  <Import Project="../../src/OneYaml/buildTransitive/OneYaml.targets" />
 
   <ItemGroup>
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />

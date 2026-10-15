@@ -45,6 +45,8 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="buildTransitive/OneYaml.targets" Pack="true" PackagePath="buildTransitive/" />
+    <EmbeddedResource Include="ILLink.Substitutions.xml" LogicalName="ILLink.Substitutions.xml" />
     <InternalsVisibleTo Include="OneYaml.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />
     <InternalsVisibleTo Include="OneYaml.Fuzz" />
