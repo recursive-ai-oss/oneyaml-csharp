@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/OneYaml/OneYaml.csproj" />
+    <Project Path="src/OneYaml.Compat.SharpYaml/OneYaml.Compat.SharpYaml.csproj" />
     <Project Path="src/OneYaml.Compat.YamlDotNet/OneYaml.Compat.YamlDotNet.csproj" />
     <Project Path="src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" />
   </Folder>
