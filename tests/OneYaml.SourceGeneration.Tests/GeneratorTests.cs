@@ -65,13 +65,15 @@ public class GeneratorTests
     {
         GeneratorRun run = GeneratorHarness.Run(source);
         string actual = Assert.Single(run.Sources).Source.Replace("\r\n", "\n", StringComparison.Ordinal);
-        string path = GeneratorHarness.SnapshotPath(name);
         if (Environment.GetEnvironmentVariable("ONEYAML_UPDATE_SNAPSHOTS") == "1")
         {
-            File.WriteAllText(path, actual);
+            File.WriteAllText(GeneratorHarness.SnapshotPath(name), actual);
         }
 
-        Assert.Equal(File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal), actual);
+        // Read the copy next to the test assembly: deterministic builds map source paths,
+        // so the source location is not usable on a build server.
+        string expected = Path.Combine(AppContext.BaseDirectory, "Snapshots", name + ".g.cs.txt");
+        Assert.Equal(File.ReadAllText(expected).Replace("\r\n", "\n", StringComparison.Ordinal), actual);
     }
 
     [Fact]
