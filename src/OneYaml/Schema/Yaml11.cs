@@ -46,6 +46,10 @@ internal static class Yaml11
                 return text.Length == 1;
             case (byte)'<':
                 return text.Length == 2 && text[1] == (byte)'<';
+            case (byte)'_':
+                // Readers that drop every underscore before parsing a number read "_1" as 1. Only text that becomes a
+                // number is affected, so a name such as "_id" stays plain.
+                return StartsLikeNumberAfterUnderscores(text) && IsLooseNumber(text);
             case (byte)'+':
             case (byte)'-':
             case (byte)'.':
@@ -54,6 +58,17 @@ internal static class Yaml11
             default:
                 return false;
         }
+    }
+
+    private static bool StartsLikeNumberAfterUnderscores(ReadOnlySpan<byte> t)
+    {
+        int i = 0;
+        while (i < t.Length && t[i] == (byte)'_')
+        {
+            i++;
+        }
+
+        return i < t.Length && (IsDigit(t[i]) || t[i] is (byte)'+' or (byte)'-' or (byte)'.');
     }
 
     // Spellings that strict readers reject but loose ones accept: Go's readers drop every underscore
@@ -163,8 +178,9 @@ internal static class Yaml11
                 return true;
             }
 
+            // The literal YAML 1.1 float pattern allows no digits at all, so ".", "-." and ".e-12" match it.
             int f = SkipDigitsAndUnderscores(t, i + 1);
-            return f > i + 1 && IsExponentTail(t, f);
+            return IsExponentTail(t, f);
         }
 
         if (!IsDigit(t[i]))

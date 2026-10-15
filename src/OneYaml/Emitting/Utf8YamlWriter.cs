@@ -16,7 +16,11 @@ namespace OneYaml.Emitting;
 /// </summary>
 internal readonly partial struct Utf8YamlWriter
 {
-    /// <summary>Longest implicit key YAML allows, in characters; longer keys need the explicit <c>? </c> form.</summary>
+    /// <summary>
+    /// Longest implicit key the writer allows, counted in UTF-16 code units (a character outside the Basic Multilingual
+    /// Plane counts twice). The specification allows 1,024 characters; counting units is stricter and also safe for
+    /// readers that count them. Longer keys need the explicit <c>? </c> form.
+    /// </summary>
     public const int MaxImplicitKeyLength = 1024;
 
     // Bytes the double-quoted writer must look at one by one: controls, the quote, the backslash,
@@ -347,7 +351,7 @@ internal readonly partial struct Utf8YamlWriter
 
     /// <summary>
     /// Tells whether a key written in this style would be longer than an implicit key may be: 1,024
-    /// characters including quotes and escapes.
+    /// UTF-16 code units including quotes and escapes.
     /// </summary>
     private static bool IsTooLongForImplicitKey(ReadOnlySpan<byte> text, ScalarWriteStyle style)
     {
@@ -381,7 +385,8 @@ internal readonly partial struct Utf8YamlWriter
         }
     }
 
-    // Characters of valid UTF-8: every byte that does not continue a character.
+    // UTF-16 code units of valid UTF-8: every byte that does not continue a character, and a second unit for the
+    // four-byte characters (the lead bytes F0 to F4), which UTF-16 writes as a surrogate pair.
     private static int CountCharacters(ReadOnlySpan<byte> text)
     {
         int count = 0;
@@ -389,7 +394,7 @@ internal readonly partial struct Utf8YamlWriter
         {
             if ((b & 0xC0) != 0x80)
             {
-                count++;
+                count += b >= 0xF0 ? 2 : 1;
             }
         }
 
@@ -425,7 +430,7 @@ internal readonly partial struct Utf8YamlWriter
             }
 
             int cp = rune.Value;
-            length += !ScalarText.MustEscape(cp) ? 1 : cp is 0x85 or 0x2028 or 0x2029 ? 2 : cp <= 0xFF ? 4 : 6;
+            length += !ScalarText.MustEscape(cp) ? (cp > 0xFFFF ? 2 : 1) : cp is 0x85 or 0x2028 or 0x2029 ? 2 : cp <= 0xFF ? 4 : 6;
             rest = rest.Slice(used);
         }
 

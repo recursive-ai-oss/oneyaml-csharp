@@ -11,7 +11,7 @@ namespace OneYaml;
 
 public sealed partial class Utf8YamlEmitter
 {
-    // A key whose UTF-8 form is at most this long cannot pass 1,024 characters once quoted and escaped
+    // A key whose UTF-8 form is at most this long cannot pass 1,024 UTF-16 code units once quoted and escaped
     // (a control byte becomes four characters), so it needs no measuring.
     private const int ShortKeyBytes = 250;
 
@@ -233,7 +233,7 @@ public sealed partial class Utf8YamlEmitter
         WriteLead(lead);
         if (style == ScalarWriteStyle.ExplicitKeyRequired)
         {
-            // An implicit key may take 1,024 characters at most; a longer one is written with "? ", and
+            // An implicit key may take 1,024 UTF-16 code units at most; a longer one is written with "? ", and
             // the colon goes on a line of its own.
             _w.WriteRaw("? "u8);
             _w.WriteExplicitKeyText(utf8);
