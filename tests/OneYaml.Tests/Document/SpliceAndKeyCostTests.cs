@@ -10,6 +10,7 @@ namespace OneYaml.Tests.Document;
 /// equal a fresh parse of the same bytes, for every line ending), float keys with huge exponents, and
 /// merge patches that delete many members.
 /// </summary>
+[Collection(TimingGroup.Name)]
 public class SpliceAndKeyCostTests
 {
     private static string Edit(string yaml, Action<YamlDocument> edit)
@@ -320,14 +321,26 @@ public class SpliceAndKeyCostTests
             }
 
             patch.Append('}');
-            using YamlDocument doc = YamlDocument.Parse(sb.ToString());
+            string text = sb.ToString();
             string p = patch.ToString();
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            var watch = Stopwatch.StartNew();
-            doc.ApplyMergePatch(p);
-            bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-            Assert.Equal("{}\n", Encoding.UTF8.GetString(doc.ToBytes()));
-            return watch.ElapsedMilliseconds;
+            long best = long.MaxValue;
+            bytes = 0;
+
+            // Processor time, best of three: a shared runner can stall any single run, but no stall makes every
+            // run slow, and a quadratic step still shows in each of them.
+            for (int run = 0; run < 3; run++)
+            {
+                using YamlDocument doc = YamlDocument.Parse(text);
+                long before = GC.GetAllocatedBytesForCurrentThread();
+                var clock = CpuClock.Start();
+                doc.ApplyMergePatch(p);
+                long ms = (long)clock.Elapsed.TotalMilliseconds;
+                bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+                Assert.Equal("{}\n", Encoding.UTF8.GetString(doc.ToBytes()));
+                best = Math.Min(best, ms);
+            }
+
+            return best;
         }
 
         Measure(500, out _);
