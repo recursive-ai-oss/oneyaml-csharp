@@ -52,7 +52,7 @@ internal sealed partial class DocState
 
         src.Slice(r).CopyTo(buf.AsSpan(w));
         w += src.Length - r;
-        var state = new DocState(buf, w, old.Encoding, old.HasByteOrderMark);
+        var state = new DocState(buf, w, old.Encoding, old.HasByteOrderMark, old.AllowDuplicateKeys);
         try
         {
             state.Parse(limits);

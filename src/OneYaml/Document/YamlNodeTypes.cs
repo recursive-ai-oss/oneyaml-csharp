@@ -55,6 +55,14 @@ public sealed record YamlDocumentOptions
     /// <summary>The limits to enforce when parsing and when following aliases. <see langword="null"/> means <see cref="YamlLimits.Default"/>.</summary>
     public YamlLimits? Limits { get; init; }
 
+    /// <summary>
+    /// Accept mappings that hold the same key twice, as lossless editing of such a file needs. Keys are
+    /// compared after Core schema resolution, so <c>1</c> and <c>0x1</c> are the same key but <c>1</c> and
+    /// <c>"1"</c> are not. By default a repeated key is a <see cref="YamlErrorCategory.DuplicateKey"/> error.
+    /// When allowed, a pointer or indexer that matches more than one key is refused as ambiguous.
+    /// </summary>
+    public bool AllowDuplicateKeys { get; init; }
+
     /// <summary>The options used when none are given.</summary>
     public static YamlDocumentOptions Default { get; } = new();
 }

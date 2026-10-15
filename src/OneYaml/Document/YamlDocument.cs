@@ -4,6 +4,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
 using OneYaml.Documents;
@@ -72,7 +73,7 @@ public sealed class YamlDocument : IDisposable
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
         using YamlInput input = YamlInput.FromChars(text, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits), limits);
+        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false), limits);
     }
 
     /// <summary>Parses YAML bytes: UTF-8, UTF-16 or UTF-32, detected from a byte order mark or the first characters.</summary>
@@ -84,7 +85,7 @@ public sealed class YamlDocument : IDisposable
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
         using YamlInput input = YamlInput.FromBytes(bytes, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits), limits);
+        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false), limits);
     }
 
     /// <summary>Reads a stream to its end and parses it.</summary>
@@ -302,6 +303,85 @@ public sealed class YamlDocument : IDisposable
         DocState s = Current(document);
         ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth);
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
+    }
+
+    /// <summary>
+    /// Applies an RFC 6902 JSON Patch. The patch is atomic: if any operation fails, the document is
+    /// left exactly as it was. A <c>test</c> compares by the YAML data model under the Core schema.
+    /// </summary>
+    /// <param name="patch">A JSON array of operations.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
+    /// <exception cref="YamlException">The patch is malformed (<see cref="YamlErrorCategory.PatchInvalid"/>) or an operation failed; <see cref="YamlException.OperationIndex"/> names it.</exception>
+    public void ApplyPatch(string patch, int document = 0)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        Apply(PatchEngine.ReadOperations(PatchEngine.ParseJson(patch, _limits), _limits), document);
+    }
+
+    /// <summary>Applies an RFC 6902 JSON Patch given as UTF-8 JSON. See <see cref="ApplyPatch(string, int)"/>.</summary>
+    /// <param name="utf8Patch">A JSON array of operations.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="YamlException">The patch is malformed or an operation failed. The document is unchanged.</exception>
+    public void ApplyPatch(ReadOnlySpan<byte> utf8Patch, int document = 0)
+        => Apply(PatchEngine.ReadOperations(PatchEngine.ParseJson(utf8Patch, _limits), _limits), document);
+
+    /// <summary>Applies an RFC 6902 JSON Patch given as a JSON node tree. See <see cref="ApplyPatch(string, int)"/>.</summary>
+    /// <param name="patch">A <see cref="JsonArray"/> of operations.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="YamlException">The patch is malformed or an operation failed. The document is unchanged.</exception>
+    public void ApplyPatch(JsonNode? patch, int document = 0)
+        => Apply(PatchEngine.ReadOperations(patch, _limits), document);
+
+    /// <summary>Applies a patch built with <see cref="YamlPatch"/>. See <see cref="ApplyPatch(string, int)"/>.</summary>
+    /// <param name="patch">The patch.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
+    /// <exception cref="YamlException">An operation failed. The document is unchanged.</exception>
+    public void ApplyPatch(YamlPatch patch, int document = 0)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        Apply(patch.Steps, document);
+    }
+
+    private void Apply(IReadOnlyList<PatchStep> steps, int document)
+    {
+        DocState s = Current(document);
+        Swap(PatchEngine.Apply(s, _limits, document, steps));
+    }
+
+    /// <summary>
+    /// Applies an RFC 7396 JSON Merge Patch: an object merges member by member, <c>null</c> deletes a
+    /// member, and any other value (an array too) replaces what is there. The patch is atomic.
+    /// Deletions in a mapping run after its other members. Merging an object into an alias is refused.
+    /// </summary>
+    /// <param name="patch">The patch as JSON text.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
+    /// <exception cref="YamlException">The patch is not valid JSON, or it cannot be applied. The document is unchanged.</exception>
+    public void ApplyMergePatch(string patch, int document = 0)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        Merge(PatchEngine.ParseJson(patch, _limits), document);
+    }
+
+    /// <summary>Applies an RFC 7396 JSON Merge Patch given as UTF-8 JSON. See <see cref="ApplyMergePatch(string, int)"/>.</summary>
+    /// <param name="utf8Patch">The patch as JSON bytes.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="YamlException">The patch is not valid JSON, or it cannot be applied. The document is unchanged.</exception>
+    public void ApplyMergePatch(ReadOnlySpan<byte> utf8Patch, int document = 0)
+        => Merge(PatchEngine.ParseJson(utf8Patch, _limits), document);
+
+    /// <summary>Applies an RFC 7396 JSON Merge Patch given as a JSON node tree. See <see cref="ApplyMergePatch(string, int)"/>.</summary>
+    /// <param name="patch">The patch; <see langword="null"/> is the JSON value null.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <exception cref="YamlException">The patch cannot be applied. The document is unchanged.</exception>
+    public void ApplyMergePatch(JsonNode? patch, int document = 0) => Merge(patch, document);
+
+    private void Merge(JsonNode? patch, int document)
+    {
+        DocState s = Current(document);
+        Swap(PatchEngine.ApplyMerge(s, _limits, document, patch));
     }
 
     /// <summary>Removes the entry or item a pointer names.</summary>

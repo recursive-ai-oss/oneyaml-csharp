@@ -104,7 +104,14 @@ internal static class ValueWriter
             }
 
             ref readonly VNode val = ref v[next];
-            if (val.Kind == VKind.Scalar)
+            if (val.Kind == VKind.Alias)
+            {
+                o.Write(" *"u8);
+                o.Write(val.Text);
+                o.Write((byte)'\n');
+                next++;
+            }
+            else if (val.Kind == VKind.Scalar)
             {
                 o.Write((byte)' ');
                 ScalarWriteStyle used = WriteScalar(o, val, stack.Count == 1 ? valueStyle : ScalarWriteStyle.Plain, EmitContext.BlockValue, f.Col, f.Col + layout.Step);
@@ -182,7 +189,13 @@ internal static class ValueWriter
 
             pending = false;
             ref readonly VNode n = ref v[next];
-            if (n.Kind == VKind.Scalar)
+            if (n.Kind == VKind.Alias)
+            {
+                o.Write((byte)'*');
+                o.Write(n.Text);
+                next++;
+            }
+            else if (n.Kind == VKind.Scalar)
             {
                 WriteScalar(o, n, ScalarWriteStyle.Plain, EmitContext.FlowValue, 0, 0);
                 next++;
