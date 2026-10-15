@@ -189,7 +189,7 @@ public class YamlStream : IEnumerable<YamlDocument>
             sb.Append(Encoding.UTF8.GetString(renderer.Written));
         }
 
-        return sb.ToString();
+        return settings.WithNewLine(sb.ToString());
     }
 }
 
