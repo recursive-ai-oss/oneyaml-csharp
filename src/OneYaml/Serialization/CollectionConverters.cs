@@ -32,6 +32,17 @@ internal sealed class ListConverter<T> : YamlConverter<List<T>>
 
     public ListConverter(YamlTypeInfo<T> elementInfo) => _element = elementInfo.Converter;
 
+    public override void Write(Utf8YamlEmitter writer, List<T> value, YamlSerializerOptions options)
+    {
+        writer.Begin(isMapping: false, value);
+        for (int i = 0; i < value.Count; i++)
+        {
+            _element.WriteValue(writer, value[i], options);
+        }
+
+        writer.WriteEndSequence();
+    }
+
     public override List<T>? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         if (reader.Type != YamlTokenType.SequenceStart)
@@ -56,6 +67,17 @@ internal sealed class ArrayConverter<T> : YamlConverter<T[]>
 
     public ArrayConverter(YamlTypeInfo<T> elementInfo) => _element = elementInfo.Converter;
 
+    public override void Write(Utf8YamlEmitter writer, T[] value, YamlSerializerOptions options)
+    {
+        writer.Begin(isMapping: false, value);
+        foreach (T item in value)
+        {
+            _element.WriteValue(writer, item, options);
+        }
+
+        writer.WriteEndSequence();
+    }
+
     public override T[]? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         if (reader.Type != YamlTokenType.SequenceStart)
@@ -78,12 +100,32 @@ internal sealed class ArrayConverter<T> : YamlConverter<T[]>
 internal sealed class CollectionConverter<TCollection, T> : YamlConverter<TCollection>
 {
     private readonly ListConverter<T> _list;
+    private readonly YamlConverter<T> _element;
     private readonly Func<List<T>, TCollection> _make;
 
     public CollectionConverter(YamlTypeInfo<T> elementInfo, Func<List<T>, TCollection> make)
     {
         _list = new ListConverter<T>(elementInfo);
+        _element = elementInfo.Converter;
         _make = make;
+    }
+
+    public override void Write(Utf8YamlEmitter writer, TCollection value, YamlSerializerOptions options)
+    {
+        // The element type is known from the collection's interface; a value that is no sequence of T is a metadata mistake.
+        if (value is not IEnumerable<T> items)
+        {
+            GenericWriter.Write(writer, value, options);
+            return;
+        }
+
+        writer.Begin(isMapping: false, value);
+        foreach (T item in items)
+        {
+            _element.WriteValue(writer, item, options);
+        }
+
+        writer.WriteEndSequence();
     }
 
     public override TCollection? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
@@ -103,6 +145,23 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
     {
         _key = keyInfo.Converter;
         _value = valueInfo.Converter;
+    }
+
+    public override void Write(Utf8YamlEmitter writer, Dictionary<TKey, TValue> value, YamlSerializerOptions options) =>
+        WriteEntries(writer, value, value, options);
+
+    // The entries of any dictionary type, in the order it enumerates them. A scalar written where the mapping
+    // expects a key becomes the key, so every key type is written by its own converter.
+    internal void WriteEntries(Utf8YamlEmitter writer, object reference, IEnumerable<KeyValuePair<TKey, TValue>> entries, YamlSerializerOptions options)
+    {
+        writer.Begin(isMapping: true, reference);
+        foreach (KeyValuePair<TKey, TValue> entry in entries)
+        {
+            _key.WriteValue(writer, entry.Key, options);
+            _value.WriteValue(writer, entry.Value, options);
+        }
+
+        writer.WriteEndMapping();
     }
 
     public override Dictionary<TKey, TValue>? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
@@ -217,6 +276,9 @@ internal sealed class GeneralDictionaryConverter<TDictionary, TKey, TValue> : Ya
         _create = create;
     }
 
+    public override void Write(Utf8YamlEmitter writer, TDictionary value, YamlSerializerOptions options) =>
+        _inner.WriteEntries(writer, value, value, options);
+
     public override TDictionary? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         Dictionary<TKey, TValue>? source = _inner.Read(ref reader, typeToConvert, options);
@@ -243,6 +305,19 @@ internal sealed class AdaptedConverter<TTarget, TImpl> : YamlConverter<TTarget>
     private readonly YamlConverter<TImpl> _inner;
 
     public AdaptedConverter(YamlConverter<TImpl> inner) => _inner = inner;
+
+    // The value is whatever implements the interface; the implementation the reader makes is only one of them.
+    public override void Write(Utf8YamlEmitter writer, TTarget value, YamlSerializerOptions options)
+    {
+        if (value is TImpl impl)
+        {
+            _inner.Write(writer, impl, options);
+        }
+        else
+        {
+            GenericWriter.Write(writer, value, options);
+        }
+    }
 
     public override TTarget? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
         _inner.Read(ref reader, typeToConvert, options);

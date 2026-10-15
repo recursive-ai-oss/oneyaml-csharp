@@ -1,6 +1,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace OneYaml;
@@ -23,6 +24,8 @@ public abstract class YamlTypeInfo
     internal abstract YamlConverter ConverterBase { get; }
 
     internal abstract object? ReadBoxed(ref Utf8YamlReader reader);
+
+    internal abstract void WriteBoxed(Utf8YamlEmitter writer, object? value);
 }
 
 /// <summary>Metadata about <typeparamref name="T"/>: its converter and, for an object type, its members.</summary>
@@ -33,6 +36,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
     private readonly object _gate = new();
     private volatile bool _configured;
     private YamlPropertyInfo<T>[] _properties = [];
+    private YamlPropertyInfo<T>[] _writeProps = [];
     private YamlParameterInfo[] _parameters = [];
     private byte[][] _names = [];
     private int[] _buckets = [];
@@ -77,6 +81,11 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
     internal bool CanCreate => _values!.ConstructorCreator is not null || _values.ObjectCreator is not null;
 
     internal YamlPropertyInfo<T>[] Props => _properties;
+
+    // The members that can be written, in the order they are written: by order, then as described.
+    internal YamlPropertyInfo<T>[] WriteProps => _writeProps;
+
+    internal override void WriteBoxed(Utf8YamlEmitter writer, object? value) => Converter.WriteBoxed(writer, value, Options);
 
     internal int RequiredCount => _requiredCount;
 
@@ -183,6 +192,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
                 }
             }
 
+            _writeProps = [.. props.Where(static p => p.CanWrite).OrderBy(static p => p.Order)];
             _properties = props;
             _parameters = parameters;
             _extraSlots = extra;
@@ -308,6 +318,9 @@ public abstract class YamlPropertyInfo
 
     internal string? ExplicitName { get; }
 
+    // When the member is left out of the output; set from the metadata and settled against the options' default.
+    internal YamlIgnoreCondition? IgnoreCondition { get; set; }
+
     internal byte[] NameUtf8 { get; private set; }
 
     internal int ParameterIndex { get; set; }
@@ -337,6 +350,12 @@ public abstract class YamlPropertyInfo<TDeclaring> : YamlPropertyInfo
     }
 
     internal abstract void Configure(YamlSerializerOptions options, int index);
+
+    // Whether the member has a getter, so it can be written.
+    internal abstract bool CanWrite { get; }
+
+    // Writes the key and the value, unless the member is left out.
+    internal abstract void Write(Utf8YamlEmitter writer, TDeclaring instance);
 
     // Reads the value and assigns it.
     internal abstract void Read(ref Utf8YamlReader reader, ref TDeclaring instance);
@@ -372,8 +391,11 @@ public sealed class YamlPropertyInfoValues<TDeclaring, TProperty>
     /// <summary>A converter for this member only.</summary>
     public YamlConverter<TProperty>? Converter { get; init; }
 
-    /// <summary>Reads the member.</summary>
+    /// <summary>Reads the member. A member with no getter is read but never written.</summary>
     public Func<TDeclaring, TProperty>? Getter { get; init; }
+
+    /// <summary>When the member is left out of the output. When it is <see langword="null"/>, the options' default applies.</summary>
+    public YamlIgnoreCondition? IgnoreCondition { get; init; }
 
     /// <summary>Assigns the member of a reference type. A member with no setter is filled through the constructor only.</summary>
     public Action<TDeclaring, TProperty>? Setter { get; init; }
@@ -410,11 +432,43 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     private readonly YamlPropertyInfoValues<TDeclaring, TProperty> _values;
     private YamlConverter<TProperty>? _converter;
     private YamlSerializerOptions? _options;
+    private byte[]? _prepared;
+    private YamlIgnoreCondition _ignore;
 
     public YamlPropertyInfoImpl(YamlPropertyInfoValues<TDeclaring, TProperty> values)
         : base(values.Name, values.SerializedName, values.IsRequired, values.Order)
     {
         _values = values;
+        IgnoreCondition = values.IgnoreCondition;
+    }
+
+    internal override bool CanWrite => _values.Getter is not null;
+
+    internal override void Write(Utf8YamlEmitter writer, TDeclaring instance)
+    {
+        TProperty value = _values.Getter!(instance);
+        if (_ignore == YamlIgnoreCondition.WhenWritingNull)
+        {
+            if (value is null)
+            {
+                return;
+            }
+        }
+        else if (_ignore == YamlIgnoreCondition.WhenWritingDefault && EqualityComparer<TProperty>.Default.Equals(value, default!))
+        {
+            return;
+        }
+
+        if (_prepared is { } key)
+        {
+            writer.WritePreparedKey(key);
+        }
+        else
+        {
+            writer.WritePropertyName(Name);
+        }
+
+        _converter!.WriteValue(writer, value, _options!);
     }
 
     public override Type PropertyType => typeof(TProperty);
@@ -423,6 +477,8 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     {
         ApplyName(options, index);
         _options = options;
+        _ignore = IgnoreCondition ?? options.DefaultIgnoreCondition;
+        _prepared = Utf8YamlEmitter.PrepareKey(NameUtf8);
         _converter = _values.Converter ?? (_values.PropertyTypeInfo ?? options.GetTypeInfo<TProperty>()).Converter;
     }
 

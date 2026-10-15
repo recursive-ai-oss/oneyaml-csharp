@@ -9,8 +9,8 @@ using OneYaml.Text;
 
 namespace OneYaml;
 
-/// <summary>Reads YAML into .NET values.</summary>
-public static class YamlSerializer
+/// <summary>Reads YAML into .NET values and writes .NET values as YAML.</summary>
+public static partial class YamlSerializer
 {
     private const string UnreferencedMessage = "Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.";
     private const string DynamicMessage = "Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.";

@@ -130,6 +130,10 @@ internal sealed class MemberSpec
 
     public bool CanRead { get; set; }
 
+    // The condition an ignore attribute names for writing, as the value of the condition enums
+    // (0 never, 2 when writing default, 3 when writing null); null when no attribute names one.
+    public int? IgnoreCondition { get; set; }
+
     public SetterKind Setter { get; set; }
 }
 

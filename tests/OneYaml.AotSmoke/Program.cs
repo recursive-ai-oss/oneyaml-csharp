@@ -37,6 +37,23 @@ bool ok = job is not null
 object? generic = YamlSerializer.Deserialize(Yaml, SmokeContext.Default.Object);
 bool genericOk = generic is Dictionary<string, object?> map && map["replicas"] is long and 3;
 
+// Writing through generated metadata, typed and generic, and reading the text back.
+string written = YamlSerializer.Serialize(job!, SmokeContext.Default.BuildJob);
+BuildJob? again = YamlSerializer.Deserialize(written, SmokeContext.Default.BuildJob);
+bool writeOk = again is not null
+    && again.Replicas == 3
+    && again.Mode == Mode.Fast
+    && again.Steps.Count == 2 && again.Steps[1].Env!.Count == 1
+    && again.Limits.Memory == "4Gi"
+    && again.Origin.Y == 2
+    && again.Ports.SequenceEqual([80, 443])
+    && again.Owner.Level == 7
+    && YamlSerializer.Serialize(again, SmokeContext.Default.BuildJob) == written;
+string genericWritten = YamlSerializer.Serialize(generic, SmokeContext.Default.Object);
+object? genericAgain = YamlSerializer.Deserialize(genericWritten, SmokeContext.Default.Object);
+bool genericWriteOk = genericAgain is Dictionary<string, object?> again2 && again2["replicas"] is long and 3
+    && YamlSerializer.Serialize(genericAgain, SmokeContext.Default.Object) == genericWritten;
+
 string error;
 try
 {
@@ -59,5 +76,5 @@ catch (NotSupportedException)
     reflectionOff = true;
 }
 
-Console.WriteLine($"typed={ok} generic={genericOk} error={error} reflectionOff={reflectionOff}");
-return ok && genericOk && error == "Binding at 1:11" && reflectionOff ? 0 : 1;
+Console.WriteLine($"typed={ok} generic={genericOk} write={writeOk} genericWrite={genericWriteOk} error={error} reflectionOff={reflectionOff}");
+return ok && genericOk && writeOk && genericWriteOk && error == "Binding at 1:11" && reflectionOff ? 0 : 1;

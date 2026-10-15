@@ -418,9 +418,9 @@ internal static class ReflectionTypeInfoFactory
 
     private static bool IsIgnored(MemberInfo m)
     {
-        if (m.IsDefined(typeof(YamlIgnoreAttribute), true))
+        if (m.GetCustomAttribute<YamlIgnoreAttribute>(true) is { } yaml)
         {
-            return true;
+            return yaml.Condition == YamlIgnoreCondition.Always;
         }
 
         if (m.GetCustomAttribute<JsonIgnoreAttribute>(true) is { } json)
@@ -429,6 +429,23 @@ internal static class ReflectionTypeInfoFactory
         }
 
         return false;
+    }
+
+    // The conditional ignore of a member that is still bound: it only affects writing.
+    private static YamlIgnoreCondition? IgnoreConditionOf(MemberInfo m)
+    {
+        if (m.GetCustomAttribute<YamlIgnoreAttribute>(true) is { } yaml)
+        {
+            return yaml.Condition;
+        }
+
+        return m.GetCustomAttribute<JsonIgnoreAttribute>(true)?.Condition switch
+        {
+            JsonIgnoreCondition.WhenWritingNull => YamlIgnoreCondition.WhenWritingNull,
+            JsonIgnoreCondition.WhenWritingDefault => YamlIgnoreCondition.WhenWritingDefault,
+            JsonIgnoreCondition.Never => YamlIgnoreCondition.Never,
+            _ => null,
+        };
     }
 
     private static YamlPropertyInfo Make<T>(Type propertyType, PropertyInfo? property, FieldInfo? field, MethodInfo? setter, string name, MemberInfo member)
@@ -444,7 +461,8 @@ internal static class ReflectionTypeInfoFactory
         MethodInfo make = typeof(ReflectionTypeInfoFactory).GetMethod(nameof(MakeProperty), Any)!.MakeGenericMethod(typeof(T), propertyType);
         try
         {
-            return (YamlPropertyInfo)make.Invoke(null, [name, explicitName, required, order, setter, field])!;
+            MethodInfo? getter = property?.GetMethod is { IsPublic: true } g ? g : null;
+            return (YamlPropertyInfo)make.Invoke(null, [name, explicitName, required, order, setter, field, getter, IgnoreConditionOf(member)])!;
         }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
@@ -453,8 +471,9 @@ internal static class ReflectionTypeInfoFactory
         }
     }
 
-    private static YamlPropertyInfo MakeProperty<TDeclaring, TProperty>(string name, string? explicitName, bool required, int order, MethodInfo? setter, FieldInfo? field)
+    private static YamlPropertyInfo MakeProperty<TDeclaring, TProperty>(string name, string? explicitName, bool required, int order, MethodInfo? setter, FieldInfo? field, MethodInfo? getMethod, YamlIgnoreCondition? ignore)
     {
+        Func<TDeclaring, TProperty>? getter = field is not null ? FieldGetter<TDeclaring, TProperty>(field) : getMethod is not null ? PropertyGetter<TDeclaring, TProperty>(getMethod) : null;
         Action<TDeclaring, TProperty>? classSetter = null;
         YamlRefSetter<TDeclaring, TProperty>? refSetter = null;
         bool isStruct = typeof(TDeclaring).IsValueType;
@@ -490,9 +509,38 @@ internal static class ReflectionTypeInfoFactory
             SerializedName = explicitName,
             IsRequired = required,
             Order = order,
+            Getter = getter,
+            IgnoreCondition = ignore,
             Setter = classSetter,
             RefSetter = refSetter,
         });
+    }
+
+    private static Func<TDeclaring, TProperty> PropertyGetter<TDeclaring, TProperty>(MethodInfo getMethod)
+    {
+        if (!typeof(TDeclaring).IsValueType)
+        {
+            return getMethod.CreateDelegate<Func<TDeclaring, TProperty>>();
+        }
+
+        if (RuntimeFeature.IsDynamicCodeSupported)
+        {
+            ParameterExpression target = Expression.Parameter(typeof(TDeclaring));
+            return Expression.Lambda<Func<TDeclaring, TProperty>>(Expression.Call(target, getMethod), target).Compile();
+        }
+
+        return o => (TProperty)getMethod.Invoke(o, null)!;
+    }
+
+    private static Func<TDeclaring, TProperty> FieldGetter<TDeclaring, TProperty>(FieldInfo field)
+    {
+        if (RuntimeFeature.IsDynamicCodeSupported)
+        {
+            ParameterExpression target = Expression.Parameter(typeof(TDeclaring));
+            return Expression.Lambda<Func<TDeclaring, TProperty>>(Expression.Field(target, field), target).Compile();
+        }
+
+        return o => (TProperty)field.GetValue(o)!;
     }
 
     private static Action<TDeclaring, TProperty> FieldSetter<TDeclaring, TProperty>(FieldInfo field)

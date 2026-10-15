@@ -46,6 +46,18 @@ They read the same `ONEYAML_WORKLOADS` directory; `records-4k` is cut from the f
 ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter '*LoadBenchmarks*' --artifacts "$DIR/bdn"
 ```
 
+## Dump benchmarks
+
+`TypedDumpBenchmarks` writes the gha-workflow, records-4k and records-64k models with the OneYaml
+reflection and generated paths (to a string and to UTF-8 bytes), VYaml and SharpYaml through generated code,
+and YamlDotNet through reflection. `GenericDumpBenchmarks` writes six untyped trees; each library writes the
+tree its own reader produced. The model or tree is loaded in setup, so only the writing is timed. Both read
+the `ONEYAML_WORKLOADS` directory; the Helm file is `helm-values-64k`, made by the kit's generator.
+
+```
+ONEYAML_WORKLOADS="$DIR/workloads" dotnet run -c Release -f net10.0 -- --filter '*DumpBenchmarks*' --artifacts "$DIR/bdn"
+```
+
 ## Scalar benchmarks
 
 The scalar benchmarks read workload files from a checkout of the conformance kit: set

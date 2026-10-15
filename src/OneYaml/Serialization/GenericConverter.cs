@@ -12,6 +12,9 @@ internal sealed class GenericConverter : YamlConverter<object>
 {
     public override bool HandleNull => true;
 
+    public override void Write(Utf8YamlEmitter writer, object value, YamlSerializerOptions options) =>
+        GenericWriter.Write(writer, value, options);
+
     public override object? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
         GenericLoader.Load(ref reader);
 }

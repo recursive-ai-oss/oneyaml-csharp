@@ -16,6 +16,9 @@ public abstract class YamlConverter
     /// <param name="typeToConvert">The type.</param>
     /// <returns><see langword="true"/> when it can.</returns>
     public abstract bool CanConvert(Type typeToConvert);
+
+    // Writes a value known only as an object, for the walker that writes `object` members and for adapters.
+    internal abstract void WriteBoxed(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options);
 }
 
 /// <summary>Converts values of type <typeparamref name="T"/> between YAML and .NET.</summary>
@@ -49,6 +52,34 @@ public abstract class YamlConverter<T> : YamlConverter
     /// <returns>The value.</returns>
     public abstract T? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options);
 
+    /// <summary>Writes a value.</summary>
+    /// <param name="writer">The emitter. Write exactly one value: a scalar, or a collection from its start to its end.</param>
+    /// <param name="value">The value. It is never <see langword="null"/> unless <see cref="HandleNull"/> is <see langword="true"/>.</param>
+    /// <param name="options">The options in effect.</param>
+    public abstract void Write(Utf8YamlEmitter writer, T value, YamlSerializerOptions options);
+
+    // The call every writer uses: null handling first, then the converter.
+    internal void WriteValue(Utf8YamlEmitter writer, T? value, YamlSerializerOptions options)
+    {
+        if (value is null && !HandleNull)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        Write(writer, value!, options);
+    }
+
+    internal override void WriteBoxed(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
+    {
+        if (value is null && s_nonNullableValueType)
+        {
+            throw Utf8YamlEmitter.Misuse($"A null cannot be written as {typeof(T).Name}.");
+        }
+
+        WriteValue(writer, (T?)value, options);
+    }
+
     // The call every caller uses: null handling first, then the converter.
     internal T? ReadValue(ref Utf8YamlReader reader, YamlSerializerOptions options)
     {
@@ -79,6 +110,9 @@ public abstract class YamlConverterFactory : YamlConverter
     /// <param name="options">The options in effect.</param>
     /// <returns>A converter for the type, or <see langword="null"/> for none.</returns>
     public abstract YamlConverter? CreateConverter(Type typeToConvert, YamlSerializerOptions options);
+
+    internal override void WriteBoxed(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options) =>
+        throw new InvalidOperationException("A converter factory makes converters; it does not write values.");
 }
 
 /// <summary>Names the YAML key of a member, overriding the naming policy.</summary>
@@ -97,10 +131,15 @@ public sealed class YamlPropertyNameAttribute : Attribute
     public string Name { get; }
 }
 
-/// <summary>Leaves a member out of binding.</summary>
+/// <summary>Leaves a member out of binding, or out of the output under a condition.</summary>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false)]
 public sealed class YamlIgnoreAttribute : Attribute
 {
+    /// <summary>
+    /// When the member is left out. The default, <see cref="YamlIgnoreCondition.Always"/>, leaves it out of reading and
+    /// writing; the other conditions apply to writing only.
+    /// </summary>
+    public YamlIgnoreCondition Condition { get; set; } = YamlIgnoreCondition.Always;
 }
 
 /// <summary>Marks the constructor to bind through when a type has several.</summary>
