@@ -481,7 +481,7 @@ internal sealed partial class DocState
             // For the last item, the edit may reach past its end: into the blanks and comments after the last
             // entry of a block collection, or the gap before a closing bracket.
             // Only a block scalar at the end can read the comment lines after it as its own, so only then are they all included.
-            regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e), EndsInBlockScalar(old, end - 1, text))) : jEnd;
+            regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e), EndsInBlockScalar(old, kFirst, tNode, text))) : jEnd;
             oldKids = 0;
             for (int c = kFirst; c < tNode; c += old._nodes[c].Size)
             {
@@ -614,16 +614,32 @@ internal sealed partial class DocState
     }
 
     // Whether the last value of the region, before or after the edit, may be a block scalar. The new text is
-    // judged by its indicator characters, which is cheap and errs towards yes.
-    private static bool EndsInBlockScalar(DocState old, int lastNode, ReadOnlySpan<byte> text)
-        => (old._nodes[lastNode].Kind == NodeKind.Scalar && (ScalarStyle)old._nodes[lastNode].Style is ScalarStyle.Literal or ScalarStyle.Folded)
-           || text.IndexOfAny((byte)'|', (byte)'>') >= 0;
+    // judged by its indicator characters, which is cheap and errs towards yes. The old nodes are all checked,
+    // not only the last: when the edit removes the last items, an earlier block scalar of the region becomes the
+    // last value and reads the lines after it as its own.
+    private static bool EndsInBlockScalar(DocState old, int firstNode, int endNode, ReadOnlySpan<byte> text)
+    {
+        if (text.IndexOfAny((byte)'|', (byte)'>') >= 0)
+        {
+            return true;
+        }
+
+        for (int i = firstNode; i < endNode; i++)
+        {
+            if (old._nodes[i].Kind == NodeKind.Scalar && (ScalarStyle)old._nodes[i].Style is ScalarStyle.Literal or ScalarStyle.Folded)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // Past the end of a block collection come the rest of its last line and the blank and comment lines up to
     // the next line with content. A block scalar at the end of the region reads them as its own (a kept one
     // keeps the blank lines, any other reads a more indented comment line as text), so the region must
     // see them too, or it would read the scalar differently from the whole text.
-    private static int TrailingTriviaEnd(ReadOnlySpan<byte> src, int pos, bool followingLines)
+    internal static int TrailingTriviaEnd(ReadOnlySpan<byte> src, int pos, bool followingLines)
     {
         int p = pos;
         if (p > 0 && !IsBreak(src[p - 1]))

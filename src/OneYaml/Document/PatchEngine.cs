@@ -589,11 +589,11 @@ internal static class PatchEngine
                     continue;
                 }
 
-                if (!DeleteMany(ref cur, original, limits, document, tokens, f.Deletions))
+                if (!DeleteMany(ref cur, original, limits, document, tokens, f.Deletions, out List<byte[]>? encoded))
                 {
-                    foreach (string key in f.Deletions)
+                    for (int i = 0; i < f.Deletions.Count; i++)
                     {
-                        tokens.Add(Utf8Strict(key));
+                        tokens.Add(encoded is null ? Utf8Strict(f.Deletions[i]) : encoded[i]);
                         Swap(ref cur, original, DeleteMember(cur, limits, document, tokens));
                         tokens.RemoveAt(tokens.Count - 1);
                     }
@@ -720,8 +720,9 @@ internal static class PatchEngine
     }
 
     // Many null members of one mapping: one pass over the mapping and one rebuild, when the plain block case applies.
-    private static bool DeleteMany(ref DocState cur, DocState original, YamlLimits limits, int document, List<byte[]> tokens, List<string> names)
+    private static bool DeleteMany(ref DocState cur, DocState original, YamlLimits limits, int document, List<byte[]> tokens, List<string> names, out List<byte[]>? keys)
     {
+        keys = null;
         if (names.Count < 2)
         {
             return false;
@@ -733,7 +734,7 @@ internal static class PatchEngine
             return false;
         }
 
-        var keys = new List<byte[]>(names.Count);
+        keys = new List<byte[]>(names.Count);
         foreach (string name in names)
         {
             keys.Add(Utf8Strict(name));
