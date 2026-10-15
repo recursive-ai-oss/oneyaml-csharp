@@ -126,6 +126,31 @@ public class EquivalenceTests
         }
     }
 
+    [Theory]
+    [MemberData(nameof(Inputs))]
+    public void Generated_and_reflection_metadata_write_the_same_text_for_what_they_read(Type type, string yaml)
+    {
+        for (int variant = 0; variant <= 5; variant++)
+        {
+            object? value;
+            try
+            {
+                value = YamlSerializer.Deserialize(yaml, type, Options(variant));
+            }
+            catch (YamlException)
+            {
+                // The input does not bind; the read tests above cover how it fails.
+                return;
+            }
+
+            var context = new ModelsContext(Options(variant));
+            string reflected = YamlSerializer.Serialize(value, type, Options(variant));
+            string generated = YamlSerializer.Serialize(value, context.GetTypeInfo(type)!);
+
+            Assert.True(reflected == generated, $"{type.Name} variant {variant}\ninput: {yaml}\nreflection:\n{reflected}\ngenerated:\n{generated}");
+        }
+    }
+
     [Fact]
     public void Merge_keys_read_the_same_through_both()
     {
@@ -252,6 +277,9 @@ public class EquivalenceTests
     {
         public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
             reader.GetString().ToUpperInvariant();
+
+        public override void Write(Utf8YamlEmitter writer, string value, YamlSerializerOptions options) =>
+            writer.WriteStringValue(value.ToUpperInvariant());
     }
 
     // ---- Running and describing ----

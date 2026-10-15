@@ -291,6 +291,12 @@ internal sealed class Emitter
             Line($"Getter = static o => o.{m.Name},");
         }
 
+        if (m.IgnoreCondition is { } condition)
+        {
+            string name = condition == 3 ? "WhenWritingNull" : condition == 2 ? "WhenWritingDefault" : "Never";
+            Line($"IgnoreCondition = global::OneYaml.YamlIgnoreCondition.{name},");
+        }
+
         string target = obj.IsStruct ? "RefSetter" : "Setter";
         string parameters = obj.IsStruct ? $"(ref {d} o, {t} v)" : "(o, v)";
         switch (m.Setter)

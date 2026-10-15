@@ -611,6 +611,9 @@ public class BinderTests
     {
         public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
             reader.GetString().ToUpperInvariant();
+
+        public override void Write(Utf8YamlEmitter writer, string value, YamlSerializerOptions options) =>
+            writer.WriteStringValue(value.ToUpperInvariant());
     }
 
     [Fact]

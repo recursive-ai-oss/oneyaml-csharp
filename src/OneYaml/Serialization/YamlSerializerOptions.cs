@@ -17,6 +17,22 @@ public enum YamlUnmappedMemberHandling
     Disallow,
 }
 
+/// <summary>When a member is left out of the output.</summary>
+public enum YamlIgnoreCondition
+{
+    /// <summary>The member is always written (on a member: use the options' default).</summary>
+    Never = 0,
+
+    /// <summary>The member is never read or written. Only meaningful on a member.</summary>
+    Always = 1,
+
+    /// <summary>The member is left out when its value is the default for its type.</summary>
+    WhenWritingDefault = 2,
+
+    /// <summary>The member is left out when its value is <see langword="null"/>.</summary>
+    WhenWritingNull = 3,
+}
+
 /// <summary>Supplies the metadata the serializer needs for a type.</summary>
 public interface IYamlTypeInfoResolver
 {
@@ -40,6 +56,8 @@ public sealed class YamlSerializerOptions
     private JsonNamingPolicy? _namingPolicy = JsonNamingPolicy.CamelCase;
     private IYamlTypeInfoResolver? _resolver;
     private YamlLimits _limits = YamlLimits.Default;
+    private int _indentSize = 2;
+    private YamlIgnoreCondition _defaultIgnore;
     private bool _used;
 
     /// <summary>Creates options with the defaults.</summary>
@@ -66,7 +84,26 @@ public sealed class YamlSerializerOptions
     /// <summary>What to do with keys that match no member. The default is to skip them.</summary>
     public YamlUnmappedMemberHandling UnmappedMemberHandling { get; init; }
 
-    /// <summary>The limits to enforce while reading. The default is <see cref="YamlLimits.Default"/>.</summary>
+    /// <summary>The number of spaces one level of nesting adds when writing, from 1 to 8. The default is 2.</summary>
+    public int IndentSize
+    {
+        get => _indentSize;
+        init => _indentSize = value is >= 1 and <= 8 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "The indent size must be between 1 and 8.");
+    }
+
+    /// <summary>
+    /// Which members are left out when writing: never (the default), when null, or when the default of their type.
+    /// A member's own condition takes precedence. <see cref="YamlIgnoreCondition.Always"/> is not allowed here.
+    /// </summary>
+    public YamlIgnoreCondition DefaultIgnoreCondition
+    {
+        get => _defaultIgnore;
+        init => _defaultIgnore = value is YamlIgnoreCondition.Always
+            ? throw new ArgumentException("Always cannot be the default for every member.", nameof(value))
+            : value;
+    }
+
+    /// <summary>The limits to enforce while reading and writing. The default is <see cref="YamlLimits.Default"/>.</summary>
     public YamlLimits Limits
     {
         get => _limits;

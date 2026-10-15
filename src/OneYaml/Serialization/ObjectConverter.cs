@@ -35,6 +35,19 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
     public ObjectConverter(YamlTypeInfo<T> info) => _info = info;
 
+    public override void Write(Utf8YamlEmitter writer, T value, YamlSerializerOptions options)
+    {
+        YamlTypeInfo<T> info = _info;
+        info.EnsureConfigured();
+        writer.Begin(isMapping: true, typeof(T).IsValueType ? null : value);
+        foreach (YamlPropertyInfo<T> p in info.WriteProps)
+        {
+            p.Write(writer, value);
+        }
+
+        writer.WriteEndMapping();
+    }
+
     public override T? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         if (reader.Type != YamlTokenType.MappingStart)

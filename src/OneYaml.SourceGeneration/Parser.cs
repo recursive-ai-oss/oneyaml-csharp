@@ -747,36 +747,40 @@ internal sealed class Parser
             || FindAttribute(symbol, _yamlRequired) is not null
             || FindAttribute(symbol, _jsonRequired) is not null;
         int order = IntArgument(FindAttribute(symbol, _yamlOrder)) ?? IntArgument(FindAttribute(symbol, _jsonOrder)) ?? 0;
+        int? condition = IgnoreConditionOf(symbol);
         return new MemberSpec(name, spec.Name, spec)
         {
             SerializedName = explicitName,
             IsRequired = required,
             Order = order,
+            IgnoreCondition = condition is 0 or 2 or 3 ? condition : null,
         };
     }
 
     private bool IsIgnored(ISymbol symbol)
     {
-        if (FindAttribute(symbol, _yamlIgnore) is not null)
+        // The condition 1 (Always) is the default when none is named, in both enums.
+        return IgnoreConditionOf(symbol) == 1;
+    }
+
+    // The ignore condition a member names: 0 never, 1 always, 2 when writing default, 3 when writing null; null for no attribute.
+    private int? IgnoreConditionOf(ISymbol symbol)
+    {
+        AttributeData? attribute = FindAttribute(symbol, _yamlIgnore) ?? FindAttribute(symbol, _jsonIgnore);
+        if (attribute is null)
         {
-            return true;
+            return null;
         }
 
-        if (FindAttribute(symbol, _jsonIgnore) is { } json)
+        foreach (KeyValuePair<string, TypedConstant> named in attribute.NamedArguments)
         {
-            // JsonIgnoreCondition.Always is 1 and is the default when no condition is named.
-            foreach (KeyValuePair<string, TypedConstant> named in json.NamedArguments)
+            if (named.Key == "Condition")
             {
-                if (named.Key == "Condition")
-                {
-                    return named.Value.Value is int condition && condition == 1;
-                }
+                return named.Value.Value is int condition ? condition : 1;
             }
-
-            return true;
         }
 
-        return false;
+        return 1;
     }
 
     private static bool HasAttribute(ISymbol symbol, INamedTypeSymbol? attribute) => FindAttribute(symbol, attribute) is not null;

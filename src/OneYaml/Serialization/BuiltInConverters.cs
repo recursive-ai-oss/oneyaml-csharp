@@ -150,6 +150,8 @@ internal static class BuiltInConverters
 
 internal sealed class StringConverter : YamlConverter<string>
 {
+    public override void Write(Utf8YamlEmitter writer, string value, YamlSerializerOptions options) => writer.WriteStringValue(value);
+
     public override bool HandleNull => true;
 
     public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
@@ -165,12 +167,16 @@ internal sealed class StringConverter : YamlConverter<string>
 
 internal sealed class BooleanConverter : YamlConverter<bool>
 {
+    public override void Write(Utf8YamlEmitter writer, bool value, YamlSerializerOptions options) => writer.WriteBooleanValue(value);
+
     public override bool Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
         reader.TryReadBoolean(out bool v) == NumberStatus.Ok ? v : throw BindingErrors.Text(in reader, "a boolean");
 }
 
 internal sealed class Int32Converter : YamlConverter<int>
 {
+    public override void Write(Utf8YamlEmitter writer, int value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override int Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -190,6 +196,8 @@ internal sealed class Int32Converter : YamlConverter<int>
 
 internal sealed class Int64Converter : YamlConverter<long>
 {
+    public override void Write(Utf8YamlEmitter writer, long value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override long Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -199,6 +207,8 @@ internal sealed class Int64Converter : YamlConverter<long>
 
 internal sealed class Int16Converter : YamlConverter<short>
 {
+    public override void Write(Utf8YamlEmitter writer, short value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override short Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -218,6 +228,8 @@ internal sealed class Int16Converter : YamlConverter<short>
 
 internal sealed class SByteConverter : YamlConverter<sbyte>
 {
+    public override void Write(Utf8YamlEmitter writer, sbyte value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override sbyte Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -237,6 +249,8 @@ internal sealed class SByteConverter : YamlConverter<sbyte>
 
 internal sealed class ByteConverter : YamlConverter<byte>
 {
+    public override void Write(Utf8YamlEmitter writer, byte value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override byte Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -256,6 +270,8 @@ internal sealed class ByteConverter : YamlConverter<byte>
 
 internal sealed class UInt16Converter : YamlConverter<ushort>
 {
+    public override void Write(Utf8YamlEmitter writer, ushort value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override ushort Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -275,6 +291,8 @@ internal sealed class UInt16Converter : YamlConverter<ushort>
 
 internal sealed class UInt32Converter : YamlConverter<uint>
 {
+    public override void Write(Utf8YamlEmitter writer, uint value, YamlSerializerOptions options) => writer.WriteNumberValue((long)value);
+
     public override uint Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadInt64(out long v);
@@ -294,6 +312,8 @@ internal sealed class UInt32Converter : YamlConverter<uint>
 
 internal sealed class UInt64Converter : YamlConverter<ulong>
 {
+    public override void Write(Utf8YamlEmitter writer, ulong value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override ulong Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadUInt64(out ulong v);
@@ -303,6 +323,8 @@ internal sealed class UInt64Converter : YamlConverter<ulong>
 
 internal sealed class BigIntegerConverter : YamlConverter<BigInteger>
 {
+    public override void Write(Utf8YamlEmitter writer, BigInteger value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override BigInteger Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadBigInteger(out BigInteger v);
@@ -312,6 +334,8 @@ internal sealed class BigIntegerConverter : YamlConverter<BigInteger>
 
 internal sealed class DoubleConverter : YamlConverter<double>
 {
+    public override void Write(Utf8YamlEmitter writer, double value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override double Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadDouble(out double v);
@@ -321,6 +345,8 @@ internal sealed class DoubleConverter : YamlConverter<double>
 
 internal sealed class SingleConverter : YamlConverter<float>
 {
+    public override void Write(Utf8YamlEmitter writer, float value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override float Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadDouble(out double v);
@@ -330,6 +356,8 @@ internal sealed class SingleConverter : YamlConverter<float>
 
 internal sealed class DecimalConverter : YamlConverter<decimal>
 {
+    public override void Write(Utf8YamlEmitter writer, decimal value, YamlSerializerOptions options) => writer.WriteNumberValue(value);
+
     public override decimal Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         NumberStatus s = reader.TryReadDecimal(out decimal v);
@@ -339,6 +367,8 @@ internal sealed class DecimalConverter : YamlConverter<decimal>
 
 internal sealed class CharConverter : YamlConverter<char>
 {
+    public override void Write(Utf8YamlEmitter writer, char value, YamlSerializerOptions options) => writer.WriteStringValue(new ReadOnlySpan<char>(in value));
+
     public override char Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         reader.RequireScalar();
@@ -352,6 +382,20 @@ internal abstract class TextConverter<T> : YamlConverter<T>
 {
     protected abstract bool TryParse(string text, out T value);
 
+    // Formats the value in its round-trip form; the text is at most 64 characters.
+    protected abstract bool TryFormat(T value, Span<char> destination, out int written);
+
+    public override void Write(Utf8YamlEmitter writer, T value, YamlSerializerOptions options)
+    {
+        Span<char> buffer = stackalloc char[64];
+        if (!TryFormat(value, buffer, out int written))
+        {
+            throw Utf8YamlEmitter.Misuse($"The value cannot be written as {Describe}.");
+        }
+
+        writer.WriteStringValue(buffer.Slice(0, written));
+    }
+
     protected abstract string Describe { get; }
 
     public override T Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
@@ -363,6 +407,8 @@ internal abstract class TextConverter<T> : YamlConverter<T>
 
 internal sealed class GuidConverter : TextConverter<Guid>
 {
+    protected override bool TryFormat(Guid value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "D");
+
     protected override string Describe => "a GUID";
 
     protected override bool TryParse(string text, out Guid value) => Guid.TryParse(text, out value);
@@ -370,6 +416,8 @@ internal sealed class GuidConverter : TextConverter<Guid>
 
 internal sealed class DateTimeConverter : TextConverter<DateTime>
 {
+    protected override bool TryFormat(DateTime value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "O", CultureInfo.InvariantCulture);
+
     protected override string Describe => "a date and time";
 
     protected override bool TryParse(string text, out DateTime value) =>
@@ -378,6 +426,8 @@ internal sealed class DateTimeConverter : TextConverter<DateTime>
 
 internal sealed class DateTimeOffsetConverter : TextConverter<DateTimeOffset>
 {
+    protected override bool TryFormat(DateTimeOffset value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "O", CultureInfo.InvariantCulture);
+
     protected override string Describe => "a date and time with an offset";
 
     // YAML timestamps without an offset are UTC.
@@ -387,6 +437,8 @@ internal sealed class DateTimeOffsetConverter : TextConverter<DateTimeOffset>
 
 internal sealed class DateOnlyConverter : TextConverter<DateOnly>
 {
+    protected override bool TryFormat(DateOnly value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "O", CultureInfo.InvariantCulture);
+
     protected override string Describe => "a date";
 
     protected override bool TryParse(string text, out DateOnly value) => DateOnly.TryParse(text, CultureInfo.InvariantCulture, out value);
@@ -394,6 +446,8 @@ internal sealed class DateOnlyConverter : TextConverter<DateOnly>
 
 internal sealed class TimeOnlyConverter : TextConverter<TimeOnly>
 {
+    protected override bool TryFormat(TimeOnly value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "O", CultureInfo.InvariantCulture);
+
     protected override string Describe => "a time of day";
 
     protected override bool TryParse(string text, out TimeOnly value) => TimeOnly.TryParse(text, CultureInfo.InvariantCulture, out value);
@@ -401,6 +455,8 @@ internal sealed class TimeOnlyConverter : TextConverter<TimeOnly>
 
 internal sealed class TimeSpanConverter : TextConverter<TimeSpan>
 {
+    protected override bool TryFormat(TimeSpan value, Span<char> destination, out int written) => value.TryFormat(destination, out written, "c", CultureInfo.InvariantCulture);
+
     protected override string Describe => "a time span";
 
     protected override bool TryParse(string text, out TimeSpan value) => TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out value);
@@ -408,6 +464,8 @@ internal sealed class TimeSpanConverter : TextConverter<TimeSpan>
 
 internal sealed class UriConverter : YamlConverter<Uri>
 {
+    public override void Write(Utf8YamlEmitter writer, Uri value, YamlSerializerOptions options) => writer.WriteStringValue(value.OriginalString);
+
     public override Uri? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         reader.RequireScalar();
@@ -418,6 +476,8 @@ internal sealed class UriConverter : YamlConverter<Uri>
 // Binary data is Base64 text (the binary tag's form); a sequence of byte values is accepted too.
 internal sealed class ByteArrayConverter : YamlConverter<byte[]>
 {
+    public override void Write(Utf8YamlEmitter writer, byte[] value, YamlSerializerOptions options) => writer.WriteBinaryValue(value);
+
     public override byte[]? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         if (reader.Type == YamlTokenType.Scalar)
@@ -457,6 +517,18 @@ internal sealed class NullableConverter<T> : YamlConverter<T?>
 
     public override bool HandleNull => true;
 
+    public override void Write(Utf8YamlEmitter writer, T? value, YamlSerializerOptions options)
+    {
+        if (value is { } inner)
+        {
+            _inner.WriteValue(writer, inner, options);
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+    }
+
     public override T? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) =>
         reader.IsNull ? null : _inner.ReadValue(ref reader, options);
 }
@@ -467,6 +539,7 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
 {
     private readonly Dictionary<string, TEnum> _exact = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TEnum> _ignoreCase = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<TEnum, string> _written = [];
 
     public EnumConverter(YamlSerializerOptions options)
     {
@@ -475,12 +548,37 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
             string name = value.ToString();
             _exact.TryAdd(name, value);
             _ignoreCase.TryAdd(name, value);
+            string writtenName = name;
             if (options.PropertyNamingPolicy is { } policy)
             {
                 string converted = policy.ConvertName(name);
                 _exact.TryAdd(converted, value);
                 _ignoreCase.TryAdd(converted, value);
+                writtenName = converted;
             }
+
+            _written.TryAdd(value, writtenName);
+        }
+    }
+
+    // A declared value is written by its name, through the naming policy. A combination of flags is written
+    // with the plain names, which the reader parses whatever the policy; a number outside the names stays a number.
+    public override void Write(Utf8YamlEmitter writer, TEnum value, YamlSerializerOptions options)
+    {
+        if (_written.TryGetValue(value, out string? name))
+        {
+            writer.WriteStringValue(name);
+            return;
+        }
+
+        string text = value.ToString();
+        if (text.Length > 0 && (char.IsAsciiDigit(text[0]) || text[0] == '-'))
+        {
+            writer.WritePlainNumberText(text);
+        }
+        else
+        {
+            writer.WriteStringValue(text);
         }
     }
 
