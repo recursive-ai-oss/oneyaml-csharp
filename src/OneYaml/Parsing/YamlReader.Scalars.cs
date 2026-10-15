@@ -503,8 +503,10 @@ internal ref partial struct YamlReader
                 break;
             }
 
-            if (firstIndent < 0)
+            if (firstIndent < 0 || firstIndent < minIndent)
             {
+                // No line of text belongs to the scalar, so the longest blank line sets the indentation
+                // whether the stream ends or the next token follows (a value must not depend on what comes after).
                 contentIndent = Math.Max(minIndent, longestBlank);
             }
             else

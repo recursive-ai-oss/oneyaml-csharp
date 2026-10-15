@@ -1,0 +1,723 @@
+using System;
+using System.Buffers;
+using OneYaml.Parsing;
+using OneYaml.Text;
+
+namespace OneYaml.Documents;
+
+/// <summary>
+/// The text of a YAML stream and its lossless tree. A state is never changed after it is built:
+/// an edit builds the next state from the bytes it wants, so a failed edit leaves this one intact.
+/// The arrays come from the shared pool and go back on <see cref="Dispose"/>.
+/// </summary>
+internal sealed partial class DocState : IDisposable
+{
+    private const int PropWidth = 5;
+
+    private byte[] _buf;
+    private CstNode[] _nodes;
+    private int[] _props;
+    private DocInfo[] _docs;
+    private int[] _comments;
+
+    private DocState(byte[] buf, int length, YamlEncoding encoding, bool hasBom)
+    {
+        _buf = buf;
+        Length = length;
+        Encoding = encoding;
+        HasByteOrderMark = hasBom;
+        _nodes = [];
+        _props = [];
+        _docs = [];
+        _comments = [];
+    }
+
+    /// <summary>The number of bytes of text.</summary>
+    public int Length { get; }
+
+    /// <summary>The encoding the stream arrived in, written back on output.</summary>
+    public YamlEncoding Encoding { get; }
+
+    /// <summary>Whether the stream began with a byte order mark.</summary>
+    public bool HasByteOrderMark { get; }
+
+    public int NodeCount { get; private set; }
+
+    public int DocCount { get; private set; }
+
+    public int CommentCount { get; private set; }
+
+    /// <summary>Whether any alias occurs in the stream.</summary>
+    public int AliasCount { get; private set; }
+
+    public ReadOnlySpan<byte> Text => _buf.AsSpan(0, Length);
+
+    public ReadOnlySpan<CstNode> Nodes => _nodes.AsSpan(0, NodeCount);
+
+    public ref readonly CstNode Node(int index) => ref _nodes[index];
+
+    public ref readonly DocInfo Doc(int index) => ref _docs[index];
+
+    public (int Start, int End) Comment(int index) => (_comments[index * 2], _comments[(index * 2) + 1]);
+
+    public bool HasAnchor(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth)] >= 0;
+
+    public bool HasTag(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth) + 2] >= 0;
+
+    /// <summary>The anchor name (without <c>&amp;</c>) of a node, empty when it has none.</summary>
+    public ReadOnlySpan<byte> AnchorName(int node)
+    {
+        int p = _nodes[node].Props;
+        if (p < 0 || _props[p * PropWidth] < 0)
+        {
+            return default;
+        }
+
+        return Text.Slice(_props[p * PropWidth], _props[(p * PropWidth) + 1]);
+    }
+
+    /// <summary>The tag as written (including the leading <c>!</c>), empty when the node has none.</summary>
+    public ReadOnlySpan<byte> RawTag(int node)
+    {
+        int p = _nodes[node].Props;
+        if (p < 0 || _props[(p * PropWidth) + 2] < 0)
+        {
+            return default;
+        }
+
+        return Text.Slice(_props[(p * PropWidth) + 2], _props[(p * PropWidth) + 3]);
+    }
+
+    /// <summary>Where the node's first property starts, or its own start when it has none.</summary>
+    public int PropStart(int node)
+    {
+        int p = _nodes[node].Props;
+        return p < 0 ? _nodes[node].Start : _props[(p * PropWidth) + 4];
+    }
+
+    /// <summary>Just after the node's last property, or its start when it has none.</summary>
+    public int PropEnd(int node)
+    {
+        int p = _nodes[node].Props;
+        if (p < 0)
+        {
+            return _nodes[node].Start;
+        }
+
+        int end = 0;
+        int row = p * PropWidth;
+        if (_props[row] >= 0)
+        {
+            end = _props[row] + _props[row + 1];
+        }
+
+        if (_props[row + 2] >= 0)
+        {
+            end = Math.Max(end, _props[row + 2] + _props[row + 3]);
+        }
+
+        return end;
+    }
+
+    public void Dispose()
+    {
+        Return(ref _buf);
+        Return(ref _nodes);
+        Return(ref _props);
+        Return(ref _docs);
+        Return(ref _comments);
+        NodeCount = 0;
+    }
+
+    private static void Return<T>(ref T[] array)
+    {
+        T[] a = array;
+        array = [];
+        if (a.Length != 0)
+        {
+            ArrayPool<T>.Shared.Return(a);
+        }
+    }
+
+    /// <summary>
+    /// Copies the text into a pooled buffer and builds the tree.
+    /// </summary>
+    /// <param name="utf8">Validated UTF-8 text without a byte order mark.</param>
+    /// <param name="encoding">The encoding the stream was read in.</param>
+    /// <param name="hasBom">Whether the stream had a byte order mark.</param>
+    /// <param name="limits">The limits to enforce.</param>
+    /// <returns>The new state.</returns>
+    public static DocState Build(ReadOnlySpan<byte> utf8, YamlEncoding encoding, bool hasBom, YamlLimits limits)
+    {
+        byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(utf8.Length, 1));
+        utf8.CopyTo(buf);
+        var state = new DocState(buf, utf8.Length, encoding, hasBom);
+        try
+        {
+            state.Parse(limits);
+            return state;
+        }
+        catch
+        {
+            state.Dispose();
+            throw;
+        }
+    }
+
+    private static void Grow<T>(ref T[] array, int used, int minimum)
+    {
+        int size = Math.Max(Math.Max(array.Length * 2, minimum), 16);
+        T[] bigger = ArrayPool<T>.Shared.Rent(size);
+        if (used > 0)
+        {
+            Array.Copy(array, bigger, used);
+        }
+
+        if (array.Length != 0)
+        {
+            ArrayPool<T>.Shared.Return(array);
+        }
+
+        array = bigger;
+    }
+
+    private int AddNode()
+    {
+        if (NodeCount == _nodes.Length)
+        {
+            Grow(ref _nodes, NodeCount, NodeCount + 1);
+        }
+
+        _nodes[NodeCount] = default;
+        return NodeCount++;
+    }
+
+    private void Parse(YamlLimits limits)
+    {
+        ReadOnlySpan<byte> src = Text;
+        _nodes = ArrayPool<CstNode>.Shared.Rent((src.Length / 6) + 16);
+        _docs = ArrayPool<DocInfo>.Shared.Rent(4);
+        var anchors = new AnchorMap();
+        int[] openNode = ArrayPool<int>.Shared.Rent(32);
+        int[] openLast = ArrayPool<int>.Shared.Rent(32);
+        int open = 0;
+        bool inDocument = false;
+        var reader = new YamlReader(src, new YamlReaderOptions { Limits = limits, RecordComments = true });
+        try
+        {
+            while (reader.Read())
+            {
+                switch (reader.TokenType)
+                {
+                    case YamlTokenType.DocumentStart:
+                        {
+                            if (DocCount == _docs.Length)
+                            {
+                                Grow(ref _docs, DocCount, DocCount + 1);
+                            }
+
+                            _docs[DocCount] = new DocInfo
+                            {
+                                Root = -1,
+                                StartPos = reader.Start,
+                                StartEnd = reader.End,
+                                ExplicitStart = !reader.IsImplicit,
+                            };
+                            DocCount++;
+                            anchors.Clear();
+                            inDocument = true;
+                            break;
+                        }
+
+                    case YamlTokenType.DocumentEnd:
+                        _docs[DocCount - 1].EndPos = reader.Start;
+                        inDocument = false;
+                        break;
+
+                    case YamlTokenType.MappingStart:
+                    case YamlTokenType.SequenceStart:
+                    case YamlTokenType.Scalar:
+                    case YamlTokenType.Alias:
+                        {
+                            if (!inDocument)
+                            {
+                                break;
+                            }
+
+                            int parent = open > 0 ? openNode[open - 1] : -1;
+                            int prev = open > 0 ? openLast[open - 1] : -1;
+                            int idx = AddNode();
+                            if (parent < 0)
+                            {
+                                _docs[DocCount - 1].Root = idx;
+                            }
+                            else
+                            {
+                                openLast[open - 1] = idx;
+                                _nodes[parent].Count++;
+                            }
+
+                            ref CstNode n = ref _nodes[idx];
+                            n.Parent = parent;
+                            n.Props = -1;
+                            n.Size = 1;
+                            n.Start = reader.Start;
+                            n.End = reader.End;
+                            bool isKey = parent >= 0 && _nodes[parent].Kind == NodeKind.Mapping && (_nodes[parent].Count & 1) == 1;
+                            if (isKey)
+                            {
+                                n.Flags |= NodeFlags.IsKey;
+                            }
+
+                            if (reader.TokenType == YamlTokenType.Alias)
+                            {
+                                n.Kind = NodeKind.Alias;
+                                int target = anchors.Find(src, reader.Anchor);
+                                if (target < 0)
+                                {
+                                    throw YamlException.At(YamlErrorCategory.Syntax, "The alias refers to an anchor that is not defined.", src, reader.Start);
+                                }
+
+                                n.Aux = target;
+                                _nodes[target].Flags |= NodeFlags.HasAliases;
+                                AliasCount++;
+                                break;
+                            }
+
+                            if (reader.HasAnchor || reader.HasTag)
+                            {
+                                n.Props = AddProps(ref reader, src);
+                                if (reader.HasAnchor)
+                                {
+                                    anchors.Set(src, reader.AnchorStart, reader.Anchor.Length, idx);
+                                }
+                            }
+
+                            if (reader.TokenType == YamlTokenType.Scalar)
+                            {
+                                n.Kind = NodeKind.Scalar;
+                                n.Style = (byte)reader.ScalarStyle;
+                                if (reader.ValueIsEscapedOrFolded)
+                                {
+                                    n.Flags |= NodeFlags.Escaped;
+                                }
+
+                                if (reader.ScalarStyle is ScalarStyle.Literal or ScalarStyle.Folded)
+                                {
+                                    n.Aux = reader.BlockIndent;
+                                    n.Chomp = (byte)reader.BlockChomping;
+                                    if (reader.BlockChomping != Chomping.Keep)
+                                    {
+                                        n.End = TrimBlankLines(src, n.Start, n.End, n.Aux);
+                                    }
+                                }
+                                else if (reader.ScalarStyle == ScalarStyle.Plain && reader.End == reader.Start)
+                                {
+                                    n.Flags |= NodeFlags.Empty;
+                                    PlaceEmpty(src, idx, parent, prev, isKey);
+                                }
+                            }
+                            else
+                            {
+                                n.Kind = reader.TokenType == YamlTokenType.MappingStart ? NodeKind.Mapping : NodeKind.Sequence;
+                                if (reader.CollectionStyle == CollectionStyle.Flow)
+                                {
+                                    n.Flags |= NodeFlags.Flow;
+                                    if (reader.End == reader.Start)
+                                    {
+                                        // A flow mapping with no braces: the pair inside a flow sequence.
+                                        n.Flags |= NodeFlags.Pair;
+                                    }
+                                }
+
+                                if (open == openNode.Length)
+                                {
+                                    Grow(ref openNode, open, open + 1);
+                                    Grow(ref openLast, open, open + 1);
+                                }
+
+                                openNode[open] = idx;
+                                openLast[open] = -1;
+                                open++;
+                            }
+
+                            break;
+                        }
+
+                    case YamlTokenType.MappingEnd:
+                    case YamlTokenType.SequenceEnd:
+                        {
+                            if (!inDocument)
+                            {
+                                break;
+                            }
+
+                            open--;
+                            int idx = openNode[open];
+                            ref CstNode n = ref _nodes[idx];
+                            n.Size = NodeCount - idx;
+                            if (n.IsFlow && (n.Flags & NodeFlags.Pair) == 0)
+                            {
+                                n.End = reader.End;
+                            }
+                            else
+                            {
+                                int last = openLast[open];
+                                n.End = last >= 0 ? _nodes[last].End : n.Start;
+                            }
+
+                            break;
+                        }
+                }
+            }
+
+            if (DocCount == 0)
+            {
+                // An empty stream, or one that holds only comments, still has one empty document.
+                _docs[0] = new DocInfo { Root = -1, StartPos = src.Length, StartEnd = src.Length, EndPos = src.Length };
+                DocCount = 1;
+            }
+
+            for (int d = 0; d < DocCount; d++)
+            {
+                if (_docs[d].Root < 0)
+                {
+                    int at = AddNode();
+                    ref CstNode e = ref _nodes[at];
+                    e.Parent = -1;
+                    e.Props = -1;
+                    e.Size = 1;
+                    e.Flags = NodeFlags.Empty;
+                    e.Start = e.End = _docs[d].StartEnd;
+                    _docs[d].Root = at;
+                }
+            }
+
+            CommentCount = reader.CommentCount;
+            if (CommentCount > 0)
+            {
+                _comments = ArrayPool<int>.Shared.Rent(CommentCount * 2);
+                for (int i = 0; i < CommentCount; i++)
+                {
+                    (_comments[i * 2], _comments[(i * 2) + 1]) = reader.GetComment(i);
+                }
+            }
+        }
+        finally
+        {
+            reader.Dispose();
+            anchors.Dispose();
+            ArrayPool<int>.Shared.Return(openNode);
+            ArrayPool<int>.Shared.Return(openLast);
+        }
+    }
+
+    // A block scalar the reader ends after its blank lines. They are not part of the value unless
+    // the chomping keeps them, and a later edit of the value must not swallow them.
+    internal static int TrimBlankLines(ReadOnlySpan<byte> src, int start, int end, int indent)
+    {
+        int bodyStart = BodyStart(src, start);
+        int e = end;
+        while (e > bodyStart)
+        {
+            int t = e;
+            if (src[t - 1] == (byte)'\n')
+            {
+                t--;
+                if (t > bodyStart && src[t - 1] == (byte)'\r')
+                {
+                    t--;
+                }
+            }
+            else if (src[t - 1] == (byte)'\r')
+            {
+                t--;
+            }
+
+            int lineStart = t;
+            while (lineStart > bodyStart && src[lineStart - 1] is not ((byte)'\n' or (byte)'\r'))
+            {
+                lineStart--;
+            }
+
+            if (t - lineStart > indent || src.Slice(lineStart, t - lineStart).IndexOfAnyExcept((byte)' ') >= 0)
+            {
+                break;
+            }
+
+            e = lineStart;
+        }
+
+        return e;
+    }
+
+    /// <summary>The offset of the first line of a block scalar's content, after the header line.</summary>
+    /// <param name="src">The text.</param>
+    /// <param name="start">The offset of the <c>|</c> or <c>&gt;</c>.</param>
+    /// <returns>The offset just after the header's line break.</returns>
+    public static int BodyStart(ReadOnlySpan<byte> src, int start)
+    {
+        int i = src.Slice(start).IndexOfAny((byte)'\n', (byte)'\r');
+        if (i < 0)
+        {
+            return src.Length;
+        }
+
+        i += start;
+        return i + (src[i] == (byte)'\r' && i + 1 < src.Length && src[i + 1] == (byte)'\n' ? 2 : 1);
+    }
+
+    private int AddProps(ref YamlReader reader, ReadOnlySpan<byte> src)
+    {
+        int row = PropCountRows;
+        if ((row + 1) * PropWidth > _props.Length)
+        {
+            Grow(ref _props, row * PropWidth, (row + 1) * PropWidth);
+        }
+
+        int a = reader.HasAnchor ? reader.AnchorStart : -1;
+        int aLen = reader.HasAnchor ? reader.Anchor.Length : 0;
+        int t = reader.HasTag ? reader.TagStart : -1;
+        int tLen = reader.HasTag ? reader.RawTag.Length : 0;
+        int first = int.MaxValue;
+        if (a >= 0)
+        {
+            first = a - 1;
+        }
+
+        if (t >= 0)
+        {
+            first = Math.Min(first, t);
+        }
+
+        int at = row * PropWidth;
+        _props[at] = a;
+        _props[at + 1] = aLen;
+        _props[at + 2] = t;
+        _props[at + 3] = tLen;
+        _props[at + 4] = first;
+        PropCountRows++;
+        _ = src;
+        return row;
+    }
+
+    private int PropCountRows { get; set; }
+
+    // The reader reports an omitted node where the next token starts, which is often a later line.
+    // For the edit engine the useful place is right after the indicator that introduces it.
+    private void PlaceEmpty(ReadOnlySpan<byte> src, int idx, int parent, int prev, bool isKey)
+    {
+        ref CstNode n = ref _nodes[idx];
+        if (n.Props >= 0)
+        {
+            n.Start = n.End = PropEnd(idx);
+            return;
+        }
+
+        if (isKey)
+        {
+            return;
+        }
+
+        if (parent < 0)
+        {
+            // An empty document goes right after its start marker when it has one.
+            if (DocCount > 0 && _docs[DocCount - 1].ExplicitStart)
+            {
+                n.Start = n.End = _docs[DocCount - 1].StartEnd;
+            }
+
+            return;
+        }
+
+        ref CstNode p = ref _nodes[parent];
+        if (p.Kind == NodeKind.Mapping && prev >= 0)
+        {
+            int at = SkipTrivia(src, _nodes[prev].End);
+            if (at < src.Length && src[at] == (byte)':')
+            {
+                n.Start = n.End = at + 1;
+            }
+            else
+            {
+                n.Start = n.End = _nodes[prev].End;
+                n.Flags |= NodeFlags.Bare;
+            }
+        }
+        else if (p.Kind == NodeKind.Sequence && !p.IsFlow)
+        {
+            int from = prev >= 0 ? _nodes[prev].End : p.Start;
+            int at = SkipTrivia(src, from);
+            if (at < src.Length && src[at] == (byte)'-')
+            {
+                n.Start = n.End = at + 1;
+            }
+        }
+    }
+
+    /// <summary>Skips blanks, line breaks and comments.</summary>
+    /// <param name="src">The text.</param>
+    /// <param name="from">Where to start.</param>
+    /// <returns>The offset of the next byte that is none of them.</returns>
+    public static int SkipTrivia(ReadOnlySpan<byte> src, int from)
+    {
+        int i = from;
+        while (i < src.Length)
+        {
+            byte b = src[i];
+            if (b is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+            {
+                i++;
+            }
+            else if (b == (byte)'#' && (i == 0 || src[i - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r'))
+            {
+                int e = src.Slice(i).IndexOfAny((byte)'\n', (byte)'\r');
+                if (e < 0)
+                {
+                    return src.Length;
+                }
+
+                i += e;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return i;
+    }
+
+    // A small hash map from anchor names to nodes, with open addressing. Anchors are rare, so
+    // nothing is allocated until the first one.
+    private sealed class AnchorMap : IDisposable
+    {
+        private int[] _table = [];
+        private int[] _entries = []; // per entry: hash, start, length, node
+        private int _count;
+
+        public void Clear()
+        {
+            if (_count != 0)
+            {
+                Array.Clear(_table);
+                _count = 0;
+            }
+        }
+
+        public int Find(ReadOnlySpan<byte> src, ReadOnlySpan<byte> name)
+        {
+            if (_count == 0)
+            {
+                return -1;
+            }
+
+            int hash = Hash(name);
+            int mask = _table.Length - 1;
+            for (int slot = hash & mask; ; slot = (slot + 1) & mask)
+            {
+                int e = _table[slot];
+                if (e == 0)
+                {
+                    return -1;
+                }
+
+                int at = (e - 1) * 4;
+                if (_entries[at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
+                {
+                    return _entries[at + 3];
+                }
+            }
+        }
+
+        public void Set(ReadOnlySpan<byte> src, int start, int length, int node)
+        {
+            ReadOnlySpan<byte> name = src.Slice(start, length);
+            if (_table.Length == 0)
+            {
+                _table = new int[16];
+                _entries = new int[16 * 4];
+            }
+
+            int hash = Hash(name);
+            int mask = _table.Length - 1;
+            for (int slot = hash & mask; ; slot = (slot + 1) & mask)
+            {
+                int e = _table[slot];
+                if (e == 0)
+                {
+                    break;
+                }
+
+                int at = (e - 1) * 4;
+                if (_entries[at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
+                {
+                    // An anchor may be redefined; aliases after this point mean the new node.
+                    _entries[at + 3] = node;
+                    return;
+                }
+            }
+
+            if ((_count + 1) * 2 > _table.Length)
+            {
+                Rehash(src);
+                mask = _table.Length - 1;
+            }
+
+            if ((_count + 1) * 4 > _entries.Length)
+            {
+                Array.Resize(ref _entries, _entries.Length * 2);
+            }
+
+            int w = _count * 4;
+            _entries[w] = hash;
+            _entries[w + 1] = start;
+            _entries[w + 2] = length;
+            _entries[w + 3] = node;
+            _count++;
+            for (int slot = hash & mask; ; slot = (slot + 1) & mask)
+            {
+                if (_table[slot] == 0)
+                {
+                    _table[slot] = _count;
+                    return;
+                }
+            }
+        }
+
+        private void Rehash(ReadOnlySpan<byte> src)
+        {
+            _ = src;
+            int[] bigger = new int[_table.Length * 2];
+            int mask = bigger.Length - 1;
+            for (int i = 0; i < _count; i++)
+            {
+                for (int slot = _entries[i * 4] & mask; ; slot = (slot + 1) & mask)
+                {
+                    if (bigger[slot] == 0)
+                    {
+                        bigger[slot] = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            _table = bigger;
+        }
+
+        private static int Hash(ReadOnlySpan<byte> name)
+        {
+            uint h = 2166136261;
+            foreach (byte b in name)
+            {
+                h = (h ^ b) * 16777619;
+            }
+
+            return (int)(h & 0x7FFFFFFF);
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+}

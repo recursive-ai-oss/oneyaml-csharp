@@ -9,6 +9,12 @@ internal static class Program
     // in this directory) and the folder never lands in the repository.
     private static int Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == "--retained")
+        {
+            RetainedMemory.Print(args.Skip(1).ToArray());
+            return 0;
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
         return 0;
     }

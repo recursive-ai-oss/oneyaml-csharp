@@ -184,6 +184,12 @@ internal ref partial struct YamlReader
     /// </summary>
     public readonly bool ValueIsEscapedOrFolded => _escapedOrFolded;
 
+    /// <summary>For a block scalar: the column its content lines are indented to.</summary>
+    public readonly int BlockIndent => _blockIndent;
+
+    /// <summary>For a block scalar: how its trailing line breaks are treated.</summary>
+    public readonly Chomping BlockChomping => _chomping;
+
     /// <summary>The number of comments recorded so far (zero unless comments are recorded).</summary>
     public readonly int CommentCount => _commentCount / 2;
 
