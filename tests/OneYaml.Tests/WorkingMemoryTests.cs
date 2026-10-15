@@ -102,6 +102,26 @@ public class WorkingMemoryTests
         Assert.Equal("x", value);
     }
 
+    [Theory]
+    [InlineData("flow")]
+    [InlineData("block")]
+    public void A_deep_generic_load_rents_each_level_once(string shape)
+    {
+        const int Depth = 100;
+        string yaml = shape == "flow"
+            ? string.Concat(Enumerable.Repeat("[", Depth)) + string.Concat(Enumerable.Repeat("]", Depth)) + "\n"
+            : string.Concat(Enumerable.Range(0, Depth).Select(i => new string(' ', i) + "k:\n")) + new string(' ', Depth) + "v\n";
+        byte[] bytes = Encoding.UTF8.GetBytes(yaml);
+        YamlSerializer.Deserialize<object>(bytes);
+        using var rents = new PoolRents();
+        Assert.NotNull(YamlSerializer.Deserialize<object>(bytes));
+
+        // Growing by doubling rents every size on the way (32, 64 and 128 for 100 levels), which is nearly twice
+        // the room the deepest level needs. The frames of the load go into chunks that are never copied, and a run
+        // of closing tokens takes one queue slot, so the total stays below what two more doubled arrays would add.
+        Assert.True(rents.Sizes.Sum() <= (shape == "flow" ? 1_100 : 600), "rented " + string.Join(", ", rents.Sizes));
+    }
+
     [Fact]
     public void A_small_dump_rents_one_small_buffer()
     {

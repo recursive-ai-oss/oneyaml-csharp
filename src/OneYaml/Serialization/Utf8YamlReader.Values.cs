@@ -729,9 +729,19 @@ public ref partial struct Utf8YamlReader
     // Like GetString, but short ASCII strings that repeat (mapping keys, enum-like values, tags) share one
     // instance per reader, so a document of records allocates each distinct word once. Inputs under 8 KiB skip it:
     // the cache itself would cost more than the repeats save.
+    private static readonly string?[] s_singleCharacters = new string?[128];
+
+    private static string SingleCharacter(byte b) => s_singleCharacters[b] ??= ((char)b).ToString();
+
     internal string GetSharedString()
     {
         int length = ContentEnd - ContentStart;
+        if (length == 1 && !Escaped && _src[ContentStart] < 0x80)
+        {
+            // One-letter keys are common, and the strings are shared by every reader, so nothing is made per key.
+            return SingleCharacter(_src[ContentStart]);
+        }
+
         if (Escaped || length is 0 or > 32 || _src.Length < 8192)
         {
             return GetString();
