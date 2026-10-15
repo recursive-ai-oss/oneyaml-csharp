@@ -478,7 +478,13 @@ public ref partial struct Utf8YamlReader
                     CheckIntegerLength(t);
                     return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? big : throw CreateException("The integer is not valid.");
                 case ScalarKind.Float:
-                    return CoreSchema.TryParseDouble(t, out double d) ? d : throw CreateException("The number is not valid.");
+                    if (!CoreSchema.TryParseDouble(t, out double d))
+                    {
+                        throw CreateException("The number is not valid.");
+                    }
+
+                    // Only the .inf spellings read as infinity; a finite literal that overflows would silently change the data.
+                    return double.IsInfinity(d) && t.IndexOfAny((byte)'f', (byte)'F') < 0 ? throw CreateException("The number is outside the range of double.") : d;
                 default:
                     return t.IsEmpty ? string.Empty : Escaped ? Encoding.UTF8.GetString(t) : GetSharedString();
             }

@@ -82,6 +82,9 @@ public class EquivalenceTests
         }
 
         Add(typeof(InitOnly), "kind: k\ncount: 3\ntags: [a]\nnote: n", "count: 3", "kind: k", "kind: [k]");
+        Add(typeof(GenericInitDerived), "value: 5\nlabel: l\nextra: e", "value: x", "value: 1\nvalue: 2", "");
+        Add(typeof(GenericInitStruct<long>), "item: 7", "item: [1]", "");
+        Add(typeof(FewMembers), "keep: k\nother: 1\nother: 2", "hidden: 1\nhidden: 2", ": a\n: b", "~: a\n~: b", "a: 1\nb: 2\na: 3", "\"a\\x41\": 1\n\"aA\": 2", "keep: k\nother: 1\nOther: 2", "x: 1\ny: 2");
         Add(typeof(InitStruct), "name: n\nsize: 2", "size: x", "");
         Add(typeof(Coord), "x: 1\ny: 2", "x: 1", "y: z");
         Add(typeof(Defaults), "name: n", "name: n\ntone: red\nratio: 2\nbig: 9\nletter: z\non: false\nopt: 4\nid: 4f2a8a1e-6b9d-4a39-9b5c-0d1e2f3a4b5c\nsmall: 7\nlabel: ~", "tone: Blue", "name: n\ntone: nope");

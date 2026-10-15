@@ -721,6 +721,7 @@ internal sealed class Parser
                 // A member filled through the constructor is never assigned afterwards.
                 member.Setter = !publicSetter || bound ? SetterKind.None : p.SetMethod!.IsInitOnly ? SetterKind.InitOnly : SetterKind.Plain;
                 member.DeclaringTypeName = p.ContainingType.ToDisplayString(s_typeFormat);
+                member.DeclaringIsGeneric = IsInGenericType(p.ContainingType);
                 obj.Members.Add(member);
             }
         }
@@ -755,6 +756,19 @@ internal sealed class Parser
                 obj.Members.Add(member);
             }
         }
+    }
+
+    private static bool IsInGenericType(INamedTypeSymbol type)
+    {
+        for (INamedTypeSymbol? t = type; t is not null; t = t.ContainingType)
+        {
+            if (t.IsGenericType)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     // A member name as it must appear in code: a keyword needs the @ prefix.

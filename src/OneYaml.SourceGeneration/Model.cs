@@ -139,6 +139,8 @@ internal sealed class MemberSpec
     // The type that declares the property, which an accessor for its init-only setter must name:
     // the runtime looks the setter up on that type and does not search its base types.
     public string? DeclaringTypeName { get; set; }
+
+    public bool DeclaringIsGeneric { get; set; }
 }
 
 // A diagnostic that can be compared, so the pipeline can tell when nothing changed.

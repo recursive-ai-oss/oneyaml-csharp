@@ -206,6 +206,17 @@ internal sealed class Emitter
     {
         ObjectSpec obj = type.Object!;
         string n = type.Name;
+        foreach (MemberSpec m in obj.Members)
+        {
+            // UnsafeAccessor cannot name a member of a generic type on every target, so these go through the library.
+            if (m.Setter == SetterKind.InitOnly && m.DeclaringIsGeneric)
+            {
+                string declaring = m.DeclaringTypeName ?? n;
+                string call = obj.IsStruct ? "CreateInitOnlyRefSetter" : "CreateInitOnlySetter";
+                Line($"var {InitLocal(m)} = {Services}.{call}<{declaring}, {m.TypeName}>({Literal(m.Name)});");
+            }
+        }
+
         Line($"var values = new global::OneYaml.YamlObjectInfoValues<{n}>");
         Open();
         switch (obj.Creator)
@@ -304,6 +315,10 @@ internal sealed class Emitter
             case SetterKind.Plain:
                 Line($"{target} = static {parameters} => o.{Parser.CodeName(m.Name)} = v,");
                 break;
+            case SetterKind.InitOnly when m.DeclaringIsGeneric:
+                // A delegate over the base type's setter also accepts the derived type.
+                Line($"{target} = {InitLocal(m)},");
+                break;
             case SetterKind.InitOnly:
                 string accessor = AddAccessor(m.DeclaringTypeName ?? d, t, m.Name, obj.IsStruct);
                 Line(obj.IsStruct
@@ -329,6 +344,8 @@ internal sealed class Emitter
             $"private static extern void {name}({self} instance, {valueType} value);"));
         return name;
     }
+
+    private static string InitLocal(MemberSpec m) => "setInit" + Parser.CodeName(m.Name).TrimStart('@');
 
     private static string Literal(string value) => SymbolDisplay.FormatLiteral(value, quote: true);
 
