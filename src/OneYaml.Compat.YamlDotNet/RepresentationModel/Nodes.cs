@@ -307,26 +307,19 @@ public abstract class YamlNode
         }
 
         int visits = 0;
-        if (HashScope.Active)
-        {
-            // While a model loads, every key shares one memo, so a node shared by many keys is hashed once.
-            return StructureHash(this, ref visits, HashScope.Memo, throwOnLimit: true) ?? Begin(this);
-        }
-
-        // Outside a load a hash never throws: past the limits it falls back to the node's own kind, tag and size.
-        return StructureHash(this, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance), throwOnLimit: false) ?? Begin(this);
+        return StructureHash(this, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance)) ?? Begin(this);
     }
 
-    // The hash covers the whole structure, so keys that agree on a long prefix still hash apart. Each distinct node is
-    // hashed once however often it is shared (the result is remembered per node), and every distinct node is charged to
-    // the visit budget, so hashing a key costs time in proportion to its size in memory and never to its size as a tree.
-    // The walk keeps its own stack, so depth cannot overflow the thread stack.
-    // A model that contains itself, or that is past the limits, has no structural hash that equal nodes are sure to
-    // share, so those give null (or throw when asked to) and the caller falls back to the shallow hash of the root.
+    // The hash covers the whole structure, so keys that agree on a long prefix still hash apart, and it depends on the
+    // structure alone: equal nodes hash alike however they are shared and however large they are. Each distinct node is
+    // hashed once however often it is shared (the result is remembered per node), so the time is in proportion to the
+    // size in memory and never to the size as a tree. The walk keeps its own stack, so depth cannot overflow the thread
+    // stack. A model that contains itself has no finite structure to hash; it gives null and the caller falls back to
+    // the shallow hash of the root, which equal nodes share (equality on such a model ends in an exception anyway).
     internal static int StructureHash(YamlNode root, ref int visits) =>
-        StructureHash(root, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance), throwOnLimit: false) ?? Begin(root);
+        StructureHash(root, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance)) ?? Begin(root);
 
-    internal static int? StructureHash(YamlNode root, ref int visits, Dictionary<YamlNode, int> done, bool throwOnLimit)
+    internal static int? StructureHash(YamlNode root, ref int visits, Dictionary<YamlNode, int> done)
     {
         if (done.TryGetValue(root, out int cached))
         {
@@ -335,11 +328,7 @@ public abstract class YamlNode
 
         var open = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
         var frames = new List<(YamlNode Node, int Next, int Acc)>();
-        if (!Charge(0, ref visits, throwOnLimit))
-        {
-            return null;
-        }
-
+        visits++;
         frames.Add((root, 0, Begin(root)));
         open.Add(root);
         while (true)
@@ -374,41 +363,18 @@ public abstract class YamlNode
             }
             else if (child is YamlScalarNode scalar)
             {
-                if (!Charge(frames.Count, ref visits, throwOnLimit))
-                {
-                    return null;
-                }
-
+                visits++;
                 int h = HashCode.Combine(scalar.NodeType, scalar.Tag.Value, scalar.Value);
                 done[child] = h;
                 frames[top] = (node, next + 1, HashCode.Combine(acc, h));
             }
             else
             {
-                if (!Charge(frames.Count, ref visits, throwOnLimit))
-                {
-                    return null;
-                }
-
+                visits++;
                 open.Add(child);
                 frames.Add((child, 0, Begin(child)));
             }
         }
-    }
-
-    private static bool Charge(int depth, ref int visits, bool throwOnLimit)
-    {
-        if (depth > MaxDepth || ++visits > MaxVisits)
-        {
-            if (throwOnLimit)
-            {
-                throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
-            }
-
-            return false;
-        }
-
-        return true;
     }
 
     private static int Begin(YamlNode node)
@@ -544,32 +510,37 @@ public abstract class YamlNode
     }
 }
 
-// Shares one hash memo across the keys of one load. The nodes it holds are complete and unchanged while the load runs.
-// A struct on purpose: a load that never hashes a collection key must not allocate for it.
-internal readonly struct HashScope : IDisposable
+// The key comparer of the mappings a load builds. While the load runs it remembers the hash of every collection key, so a
+// node that many keys share is hashed once. The memo belongs to the load alone: it is dropped when the load ends, after
+// which the same comparer hashes each key from scratch, and the two always agree because the hash depends on structure only.
+internal sealed class LoadKeyComparer : IEqualityComparer<YamlNode>
 {
-    [ThreadStatic]
-    private static int s_depth;
+    private Dictionary<YamlNode, int>? _memo;
+    private bool _off;
 
-    [ThreadStatic]
-    private static Dictionary<YamlNode, int>? s_memo;
+    public bool Equals(YamlNode? x, YamlNode? y) => x is null ? y is null : x.Equals(y);
 
-    public HashScope()
+    public int GetHashCode(YamlNode node)
     {
-        s_depth++;
-    }
-
-    public static bool Active => s_depth > 0;
-
-    public static Dictionary<YamlNode, int> Memo => s_memo ??= new(ReferenceEqualityComparer.Instance);
-
-    public void Dispose()
-    {
-        if (--s_depth == 0)
+        if (node is YamlScalarNode || _off)
         {
-            s_memo = null;
+            return node.GetHashCode();
         }
+
+        int visits = 0;
+        _memo ??= new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance);
+        return YamlNode.StructureHash(node, ref visits, _memo) ?? node.GetHashCode();
     }
+
+    // A node still being built (an alias to an ancestor) can change after it is hashed, so such a load goes without the memo.
+    public void Abandon()
+    {
+        _off = true;
+        _memo = null;
+    }
+
+    // The nodes are complete and the load is over.
+    public void Complete() => Abandon();
 }
 
 /// <summary>A scalar node: text with an optional style, tag and anchor.</summary>
@@ -711,6 +682,12 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
     /// <summary>Creates an empty mapping.</summary>
     public YamlMappingNode()
     {
+        Children = new Helpers.OrderedDictionary<YamlNode, YamlNode>(null);
+    }
+
+    internal YamlMappingNode(IEqualityComparer<YamlNode> keyComparer)
+    {
+        Children = new Helpers.OrderedDictionary<YamlNode, YamlNode>(keyComparer);
     }
 
     /// <summary>Creates a mapping from entries.</summary>
@@ -723,6 +700,7 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
     /// <summary>Creates a mapping from entries.</summary>
     /// <param name="children">The entries.</param>
     public YamlMappingNode(IEnumerable<KeyValuePair<YamlNode, YamlNode>> children)
+        : this()
     {
         ArgumentNullException.ThrowIfNull(children);
         foreach (KeyValuePair<YamlNode, YamlNode> pair in children)
@@ -741,6 +719,7 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
     /// <summary>Creates a mapping from keys and values in turn: key, value, key, value.</summary>
     /// <param name="children">The nodes.</param>
     public YamlMappingNode(IEnumerable<YamlNode> children)
+        : this()
     {
         ArgumentNullException.ThrowIfNull(children);
         using IEnumerator<YamlNode> e = children.GetEnumerator();
@@ -757,7 +736,7 @@ public sealed class YamlMappingNode : YamlNode, IEnumerable<KeyValuePair<YamlNod
     }
 
     /// <summary>The entries, in the order they were added.</summary>
-    public IOrderedDictionary<YamlNode, YamlNode> Children { get; } = new Helpers.OrderedDictionary<YamlNode, YamlNode>();
+    public IOrderedDictionary<YamlNode, YamlNode> Children { get; }
 
     /// <summary>How the mapping is written.</summary>
     public MappingStyle Style { get; set; }

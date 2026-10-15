@@ -30,7 +30,12 @@ internal sealed class OrderedDictionary<TKey, TValue> : IOrderedDictionary<TKey,
     where TKey : notnull
 {
     private readonly List<KeyValuePair<TKey, TValue>> _entries = [];
-    private readonly Dictionary<TKey, int> _index = [];
+    private readonly Dictionary<TKey, int> _index;
+
+    public OrderedDictionary(IEqualityComparer<TKey>? comparer)
+    {
+        _index = new Dictionary<TKey, int>(comparer);
+    }
 
     public int Count => _entries.Count;
 

@@ -167,10 +167,17 @@ public class BoundsAndKeysTests
     public void ToString_of_a_model_that_prints_far_larger_than_its_text_stops_with_an_exception()
     {
         var stream = new Cm.YamlStream();
-        stream.Load(new StringReader(Laughs(3, 4000)));
-        // The walk stops at its node and text budgets, which is what bounds the time and the memory it can take.
-        Assert.ThrowsAny<Core.YamlException>(() => stream.Documents[0].RootNode.ToString());
-        Assert.True(GC.GetTotalMemory(false) < 1L << 30);
+        // The last level unrolls to about 400 million characters, some 800 MB of output if nothing stopped the walk.
+        stream.Load(new StringReader(Laughs(4, 4000)));
+        Cm.YamlNode root = stream.Documents[0].RootNode;
+
+        // Count what this walk allocates on this thread, not the heap of the process, which other tests in it change.
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Assert.ThrowsAny<Core.YamlException>(() => root.ToString());
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        // The text limit is 32 million characters, about 64 MB of builder chunks.
+        Assert.True(allocated < 200L * 1024 * 1024, allocated.ToString());
     }
 
     [Fact]
@@ -323,5 +330,159 @@ public class BoundsAndKeysTests
 
         var set = new HashSet<Cm.YamlNode> { big };
         Assert.Contains(big, set);
+    }
+
+    // ---- a hash depends on structure alone ----
+
+    // The large models of these tests are garbage when they end; other tests in this class look at the size of the heap.
+    private static void ReleaseMemory()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    private static string SharedKeyDocument(int items)
+    {
+        string numbers = string.Join(',', Enumerable.Range(0, items));
+        return $"base: &a [{numbers}]\nm:\n  ? [*a]\n  : 1\n  ? [*a, [{numbers}]]\n  : 2\n";
+    }
+
+    [Fact]
+    public void A_loaded_mapping_finds_its_own_keys_when_one_of_them_is_larger_than_a_million_distinct_nodes()
+    {
+        var stream = new Cm.YamlStream();
+        stream.Load(new StringReader(SharedKeyDocument(520_000)));
+        var root = (Cm.YamlMappingNode)stream.Documents[0].RootNode;
+        var m = (Cm.YamlMappingNode)root.Children[new Cm.YamlScalarNode("m")];
+        Assert.Equal(2, m.Children.Count);
+        int found = 0;
+        foreach (Cm.YamlNode key in m.Children.Keys)
+        {
+            Assert.True(m.Children.ContainsKey(key));
+            Assert.NotNull(m[key]);
+            found++;
+        }
+
+        Assert.Equal(2, found);
+        ReleaseMemory();
+    }
+
+    [Fact]
+    public void Equal_models_hash_alike_however_they_share_nodes()
+    {
+        var shared = new Cm.YamlSequenceNode();
+        var copy = new Cm.YamlSequenceNode();
+        for (int i = 0; i < 600_000; i++)
+        {
+            shared.Add(new Cm.YamlScalarNode("v" + i));
+            copy.Add(new Cm.YamlScalarNode("v" + i));
+        }
+
+        // The first holds the same 600,000 nodes twice, the second holds 1,200,000 distinct ones.
+        var once = new Cm.YamlSequenceNode(shared, shared);
+        var twice = new Cm.YamlSequenceNode(shared, copy);
+        Assert.True(once.Equals(twice));
+        Assert.Equal(once.GetHashCode(), twice.GetHashCode());
+        ReleaseMemory();
+    }
+
+    [Fact]
+    public void A_hash_taken_after_a_load_matches_the_one_the_load_used()
+    {
+        var stream = new Cm.YamlStream();
+        stream.Load(new StringReader("? [a, [b, c], {d: e}]\n: 1\n? [a, [b, c]]\n: 2\n"));
+        var map = (Cm.YamlMappingNode)stream.Documents[0].RootNode;
+        var rebuilt = new Cm.YamlSequenceNode("a", new Cm.YamlSequenceNode("b", "c"), new Cm.YamlMappingNode("d", "e"));
+        Assert.Equal("1", ((Cm.YamlScalarNode)map[rebuilt]).Value);
+        Assert.Equal(rebuilt.GetHashCode(), map.Children[0].Key.GetHashCode());
+    }
+
+    [Fact]
+    public void A_hash_of_a_very_deep_model_neither_throws_nor_overflows_the_stack()
+    {
+        var inner = new Cm.YamlSequenceNode();
+        Cm.YamlSequenceNode top = inner;
+        for (int i = 0; i < 100_000; i++)
+        {
+            var outer = new Cm.YamlSequenceNode();
+            outer.Add(top);
+            top = outer;
+        }
+
+        _ = top.GetHashCode();
+        Assert.Equal(top.GetHashCode(), top.GetHashCode());
+    }
+
+    private sealed class WatchingParser(Core.IParser inner, Action whileLoading) : Core.IParser
+    {
+        public Core.Events.ParsingEvent? Current => inner.Current;
+
+        public bool MoveNext()
+        {
+            whileLoading();
+            return inner.MoveNext();
+        }
+    }
+
+    [Fact]
+    public void A_parser_that_hashes_nodes_while_a_stream_loads_sees_no_state_of_the_load()
+    {
+        var hashes = new List<(int Before, int After)>();
+        var parser = new WatchingParser(new Core.Parser(new StringReader("? [a, b]\n: 1\n? [c]\n: 2\n")), () =>
+        {
+            var node = new Cm.YamlSequenceNode("x");
+            int before = node.GetHashCode();
+            node.Add("y");
+            hashes.Add((before, node.GetHashCode()));
+        });
+
+        var stream = new Cm.YamlStream();
+        stream.Load(parser);
+        Assert.Equal(2, ((Cm.YamlMappingNode)stream.Documents[0].RootNode).Children.Count);
+        Assert.NotEmpty(hashes);
+        Assert.All(hashes, h => Assert.NotEqual(h.Before, h.After));
+    }
+
+    private sealed class ScriptedParser(IEnumerable<Core.Events.ParsingEvent> events) : Core.IParser
+    {
+        private readonly IEnumerator<Core.Events.ParsingEvent> _events = events.GetEnumerator();
+
+        public Core.Events.ParsingEvent? Current { get; private set; }
+
+        public bool MoveNext()
+        {
+            bool more = _events.MoveNext();
+            Current = more ? _events.Current : null;
+            return more;
+        }
+    }
+
+    [Fact]
+    public void A_key_that_points_back_at_a_collection_still_being_built_loads_from_a_custom_parser()
+    {
+        var anchor = new Core.AnchorName("a");
+        var none = Core.TagName.Empty;
+        Core.Events.ParsingEvent[] events =
+        [
+            new Core.Events.StreamStart(),
+            new Core.Events.DocumentStart(),
+            new Core.Events.SequenceStart(anchor, none, true, Core.Events.SequenceStyle.Block),
+            new Core.Events.MappingStart(Core.AnchorName.Empty, none, true, Core.Events.MappingStyle.Block),
+            new Core.Events.SequenceStart(Core.AnchorName.Empty, none, true, Core.Events.SequenceStyle.Flow),
+            new Core.Events.AnchorAlias(anchor),
+            new Core.Events.SequenceEnd(),
+            new Core.Events.Scalar("1"),
+            new Core.Events.MappingEnd(),
+            new Core.Events.SequenceEnd(),
+            new Core.Events.DocumentEnd(true),
+            new Core.Events.StreamEnd(),
+        ];
+
+        var stream = new Cm.YamlStream();
+        stream.Load(new ScriptedParser(events));
+        Assert.Single(stream.Documents);
+        var root = (Cm.YamlSequenceNode)stream.Documents[0].RootNode;
+        Assert.Single(root.Children);
     }
 }
