@@ -198,6 +198,12 @@ internal static class DocumentBuilder
 {
     public static void Build(Loaded source, List<YamlDocument> into)
     {
+        using var scope = new HashScope();
+        BuildAll(source, into);
+    }
+
+    private static void BuildAll(Loaded source, List<YamlDocument> into)
+    {
         DocState s = source.State;
         int count = s.NoRealDocument ? 0 : s.DocCount;
         for (int d = 0; d < count; d++)
@@ -283,6 +289,12 @@ internal static class DocumentBuilder
 internal static class EventDocumentBuilder
 {
     public static YamlDocument Read(IParser parser)
+    {
+        using var scope = new HashScope();
+        return ReadDocument(parser);
+    }
+
+    private static YamlDocument ReadDocument(IParser parser)
     {
         parser.Consume<DocumentStart>();
         var anchors = new Dictionary<string, YamlNode>(StringComparer.Ordinal);

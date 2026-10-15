@@ -391,6 +391,47 @@ public ref partial struct Utf8YamlReader
         }
     }
 
+    // A decimal float is parsed straight to Half: going through double first rounds twice and can land one step off.
+    internal readonly NumberStatus TryReadHalf(out Half value)
+    {
+        value = default;
+        if (Type == YamlTokenType.Scalar)
+        {
+            byte[]? rented = null;
+            try
+            {
+                Span<byte> scratch = stackalloc byte[ScratchSize];
+                ReadOnlySpan<byte> t = Text(scratch, ref rented);
+                if (TryResolve(t, out ScalarKind k) && k == ScalarKind.Float && t.IndexOfAny((byte)'f', (byte)'F') < 0
+                    && t.IndexOfAny((byte)'n', (byte)'N') < 0)
+                {
+                    if (!Half.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value))
+                    {
+                        return NumberStatus.NotNumber;
+                    }
+
+                    return Half.IsInfinity(value) ? NumberStatus.OutOfRange : NumberStatus.Ok;
+                }
+            }
+            finally
+            {
+                if (rented is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
+            }
+        }
+
+        NumberStatus s = TryReadDouble(out double v);
+        if (s != NumberStatus.Ok)
+        {
+            return s;
+        }
+
+        value = (Half)v;
+        return Half.IsInfinity(value) && !double.IsInfinity(v) ? NumberStatus.OutOfRange : NumberStatus.Ok;
+    }
+
     internal readonly NumberStatus TryReadDecimal(out decimal value)
     {
         value = 0;
