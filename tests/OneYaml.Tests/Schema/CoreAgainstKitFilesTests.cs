@@ -54,14 +54,28 @@ public sealed partial class CoreAgainstKitFilesTests
             string inputPath = Path.Combine(caseDir, "input.yaml");
             using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(caseDir, "case.json")));
             JsonElement root = doc.RootElement;
+
+            // A bounded case may also accept an exact value; the resolver must give that value, so it is checked too.
+            JsonElement expect = root.GetProperty("expect");
+            if (expect.GetProperty("kind").GetString() == "bounded" && expect.TryGetProperty("accept", out JsonElement accept)
+                && accept.ValueKind == JsonValueKind.Object)
+            {
+                expect = accept;
+            }
+
             if (!File.Exists(inputPath) || root.GetProperty("operation").GetProperty("type").GetString() != "value"
-                || root.GetProperty("expect").GetProperty("kind").GetString() != "value")
+                || !expect.TryGetProperty("kind", out JsonElement expectKind) || expectKind.GetString() != "value")
             {
                 skipped.Add(name + " (not a value case)");
                 continue;
             }
 
-            JsonElement expected = root.GetProperty("expect").GetProperty("value")[0];
+            // The expected value is inline or in a file beside the case.
+            using JsonDocument? valueFile = expect.TryGetProperty("file", out JsonElement file)
+                ? JsonDocument.Parse(File.ReadAllText(Path.Combine(caseDir, file.GetString()!)))
+                : null;
+            JsonElement values = valueFile?.RootElement ?? expect.GetProperty("value");
+            JsonElement expected = values[0];
             string[] lines = File.ReadAllLines(inputPath);
             if (expected.ValueKind == JsonValueKind.Object && !expected.TryGetProperty("$map", out _) && lines.All(l => KeyValueLine().IsMatch(l)))
             {
