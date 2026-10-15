@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using OneYaml.Parsing;
 using OneYaml.Text;
 
 namespace OneYaml;
@@ -295,7 +296,8 @@ public static partial class YamlSerializer
     {
         info.Options.MakeReadOnly();
         using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
-        var reader = new Utf8YamlReader(input.Utf8Text, info.Options, !IsGeneric(info));
+        YamlReader.Scratch scratch = default;
+        var reader = new Utf8YamlReader(input.Utf8Text, info.Options, !IsGeneric(info), ref scratch);
         try
         {
             reader.BeginDocument(synthesizeEmptyStream: true);
@@ -314,7 +316,8 @@ public static partial class YamlSerializer
     {
         YamlSerializerOptions options = info.Options;
         options.MakeReadOnly();
-        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info));
+        YamlReader.Scratch scratch = default;
+        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info), ref scratch);
         try
         {
             reader.BeginDocument(synthesizeEmptyStream: true);
@@ -342,7 +345,8 @@ public static partial class YamlSerializer
     {
         YamlSerializerOptions options = info.Options;
         options.MakeReadOnly();
-        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info));
+        YamlReader.Scratch scratch = default;
+        var reader = new Utf8YamlReader(utf8, options, !IsGeneric(info), ref scratch);
         try
         {
             var all = new List<T?>();

@@ -53,7 +53,7 @@ internal struct StagedEntry
     public int Offset;
 }
 
-[InlineArray(8)]
+[InlineArray(16)]
 internal struct InlineStaged
 {
     private StagedEntry _first;

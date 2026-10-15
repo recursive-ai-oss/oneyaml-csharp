@@ -7,7 +7,7 @@ namespace OneYaml.Parsing;
 internal ref partial struct YamlReader
 {
     /// <summary>An upper bound on the decoded byte length of the current scalar.</summary>
-    public readonly int MaxDecodedLength => ScalarDecoder.MaxDecodedLength(_contentEnd - _contentStart);
+    public readonly int MaxDecodedLength => ScalarDecoder.MaxDecodedLength(RawScalar, ScalarStyle);
 
     /// <summary>Decodes the current scalar's value as UTF-8 into <paramref name="destination"/>.</summary>
     /// <param name="destination">At least <see cref="MaxDecodedLength"/> bytes.</param>

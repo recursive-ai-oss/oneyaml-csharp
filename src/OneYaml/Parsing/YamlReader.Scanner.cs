@@ -8,7 +8,7 @@ internal ref partial struct YamlReader
     // A place where an implicit mapping key may start. Only the keys of open flow levels and
     // the current block line are kept, oldest first. A key remembers how far its characters have
     // been counted, so staleness checks cost O(1) per token however long a token is.
-    private struct SimpleKey
+    internal struct SimpleKey
     {
         public int Level;
         public int TokenNumber;
@@ -44,10 +44,12 @@ internal ref partial struct YamlReader
     private bool _tabBefore;
     private bool _afterDocumentEnd;
 
-    private int[] _indents;
+    private Span<int> _indents;
+    private int[]? _indentsRented;
     private int _indentCount;
 
-    private SimpleKey[] _keys;
+    private Span<SimpleKey> _keys;
+    private SimpleKey[]? _keysRented;
     private int _keyHead;
     private int _keyTail;
     private int _staleCursor;
@@ -57,9 +59,11 @@ internal ref partial struct YamlReader
     private int _commentsOnlyUntil = -1;
 
     // For each open flow collection: 1 when it is a mapping, 0 when it is a sequence.
-    private byte[] _flowKinds;
+    private Span<byte> _flowKinds;
+    private byte[]? _flowKindsRented;
 
-    private Token[] _queue;
+    private Span<Token> _queue;
+    private Token[]? _queueRented;
     private int _qHead;
     private int _qTail;
     private int _tokensParsed;
@@ -163,15 +167,20 @@ internal ref partial struct YamlReader
             if (_qHead >= _queue.Length / 2)
             {
                 int count = _qTail - _qHead;
-                Array.Copy(_queue, _qHead, _queue, 0, count);
+                _queue.Slice(_qHead, count).CopyTo(_queue);
                 _qHead = 0;
                 _qTail = count;
             }
             else
             {
                 Token[] bigger = ArrayPool<Token>.Shared.Rent(_queue.Length * 2);
-                Array.Copy(_queue, _qHead, bigger, 0, _qTail - _qHead);
-                ArrayPool<Token>.Shared.Return(_queue);
+                _queue.Slice(_qHead, _qTail - _qHead).CopyTo(bigger);
+                if (_queueRented is not null)
+                {
+                    ArrayPool<Token>.Shared.Return(_queueRented);
+                }
+
+                _queueRented = bigger;
                 _queue = bigger;
                 _qTail -= _qHead;
                 _qHead = 0;
@@ -351,7 +360,7 @@ internal ref partial struct YamlReader
         {
             if (_keyHead > 0)
             {
-                Array.Copy(_keys, _keyHead, _keys, 0, _keyTail - _keyHead);
+                _keys.Slice(_keyHead, _keyTail - _keyHead).CopyTo(_keys);
                 _keyTail -= _keyHead;
                 _staleCursor = Math.Max(0, _staleCursor - _keyHead);
                 _keyHead = 0;
@@ -359,7 +368,7 @@ internal ref partial struct YamlReader
 
             if (_keyTail == _keys.Length)
             {
-                Grow(ref _keys, _keyTail);
+                Grow(ref _keys, ref _keysRented, _keyTail);
             }
         }
 
@@ -387,7 +396,7 @@ internal ref partial struct YamlReader
 
         if (_indentCount == _indents.Length)
         {
-            Grow(ref _indents, _indentCount);
+            Grow(ref _indents, ref _indentsRented, _indentCount);
         }
 
         _indents[_indentCount++] = _indent;
@@ -863,7 +872,7 @@ internal ref partial struct YamlReader
         SaveSimpleKey();
         if (_flowLevel == _flowKinds.Length)
         {
-            Grow(ref _flowKinds, _flowLevel);
+            Grow(ref _flowKinds, ref _flowKindsRented, _flowLevel);
         }
 
         _flowKinds[_flowLevel] = kind == TokenKind.FlowMappingStart ? (byte)1 : (byte)0;

@@ -10,11 +10,22 @@ namespace OneYaml.Parsing;
 internal static class ScalarDecoder
 {
     /// <summary>The most bytes <see cref="Decode"/> can write for a raw scalar of the given length.</summary>
-    /// <param name="rawLength">The length of the raw scalar text.</param>
+    /// <param name="raw">The raw scalar text.</param>
+    /// <param name="style">The scalar style.</param>
     /// <returns>An upper bound on the decoded length.</returns>
-    public static int MaxDecodedLength(int rawLength)
+    public static int MaxDecodedLength(ReadOnlySpan<byte> raw, ScalarStyle style)
     {
-        long max = ((long)rawLength * 2) + 4;
+        // Decoding only drops characters (quotes, indentation, escape backslashes, folded breaks), bar two
+        // things: a block scalar may gain its final line break, and the escapes \L and \P turn two
+        // bytes into the three of U+2028 and U+2029, one byte more per backslash at most. Only double-quoted
+        // text has escapes. A tight bound matters because the buffer comes from a pool that rounds up to a
+        // power of two.
+        long max = raw.Length + 4L;
+        if (style == ScalarStyle.DoubleQuoted)
+        {
+            max += raw.Count((byte)'\\');
+        }
+
         return max > int.MaxValue ? int.MaxValue : (int)max;
     }
 

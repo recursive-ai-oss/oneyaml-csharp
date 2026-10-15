@@ -281,6 +281,17 @@ public ref partial struct Utf8YamlReader
         NodeEntry = -1;
     }
 
+    // As above, with the scanner's first working space in the caller's stack frame.
+    internal Utf8YamlReader(ReadOnlySpan<byte> utf8, YamlSerializerOptions options, bool expandAliases, ref YamlReader.Scratch scratch)
+    {
+        _options = options;
+        _limits = options.Limits;
+        _src = utf8;
+        _expand = expandAliases;
+        _r = new YamlReader(utf8, new YamlReaderOptions { Limits = _limits }, ref scratch);
+        NodeEntry = -1;
+    }
+
     /// <summary>The kind of the current token.</summary>
     public readonly YamlTokenKind TokenType => Type switch
     {
@@ -770,7 +781,7 @@ public ref partial struct Utf8YamlReader
             return Encoding.UTF8.GetString(raw);
         }
 
-        byte[] buffer = new byte[ScalarDecoder.MaxDecodedLength(raw.Length)];
+        byte[] buffer = new byte[ScalarDecoder.MaxDecodedLength(raw, t.Style)];
         int n = ScalarDecoder.Decode(raw, t.Style, t.BlockIndent, t.Chomping, buffer);
         return Encoding.UTF8.GetString(buffer, 0, n);
     }

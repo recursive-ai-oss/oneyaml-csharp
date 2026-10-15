@@ -27,7 +27,7 @@ public class DocumentBenchmarks
     private string _setPath = string.Empty;
     private int _setCount;
 
-    [Params("reference-a", "records-4k", "openapi-petstore", "helm-ingress-nginx", "compose-merge-2k", "openapi-100k")]
+    [Params("reference-a", "records-4k", "openapi-petstore", "helm-ingress-nginx", "compose-merge-2k", "openapi-100k", "anchors-32k", "helm-values-64k")]
     public string Workload { get; set; } = string.Empty;
 
     [GlobalSetup]
