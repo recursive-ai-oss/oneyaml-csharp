@@ -346,4 +346,52 @@ public class ReaderEdgeTests
         Assert.InRange(r.Error.Offset, 0, bytes.Length);
         Assert.True(r.Error.Line >= 1 && r.Error.Column >= 1);
     }
+
+    // ---- Runs of closing tokens ----
+
+    [Theory]
+    [InlineData("[[[a]]]\n")]
+    [InlineData("{a: [[b]], c: {d: {e: f}}}\n")]
+    [InlineData("[[a]]: b\n")]
+    [InlineData("[[[a]], [b]]\n")]
+    [InlineData("[ [ [a] ] ,[[b]]]\n")]
+    [InlineData("{[[a]]: {b: [c]}}\n")]
+    public void Each_closing_bracket_of_a_run_is_reported_where_it_stands(string yaml)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(yaml);
+        var starts = new List<int>();
+        using YamlInput text = YamlInput.FromBytes(bytes, YamlLimits.Default);
+        using var reader = new YamlReader(text.Utf8Text, new YamlReaderOptions());
+        while (reader.Read())
+        {
+            // Only the closers written in the text: a block collection around the flow key ends without a bracket.
+            if (reader.TokenType is YamlTokenType.SequenceEnd or YamlTokenType.MappingEnd && reader.Start < bytes.Length && bytes[reader.Start] is (byte)']' or (byte)'}')
+            {
+                Assert.Equal(reader.Start + 1, reader.End);
+                starts.Add(reader.Start);
+            }
+        }
+
+        var expected = new List<int>();
+        for (int i = 0; i < yaml.Length; i++)
+        {
+            if (yaml[i] is ']' or '}')
+            {
+                expected.Add(i);
+            }
+        }
+
+        Assert.Equal(expected, starts);
+    }
+
+    [Fact]
+    public void Block_levels_that_end_together_give_one_end_event_each()
+    {
+        Assert.Equal(
+            ["+STR", "+DOC", "+MAP", "=VAL :a", "+MAP", "=VAL :b", "+MAP", "=VAL :c", "=VAL :1", "-MAP", "-MAP", "=VAL :d", "=VAL :2", "-MAP", "-DOC", "-STR"],
+            Events("a:\n b:\n  c: 1\nd: 2\n"));
+        Assert.Equal(
+            ["+STR", "+DOC", "+MAP", "=VAL :a", "+SEQ", "+MAP", "=VAL :b", "+SEQ", "=VAL :x", "-SEQ", "-MAP", "-SEQ", "-MAP", "-DOC", "-STR"],
+            Events("a:\n- b:\n  - x\n"));
+    }
 }

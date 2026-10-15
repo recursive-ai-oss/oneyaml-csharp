@@ -93,7 +93,7 @@ public class GenericLoadBenchmarks
     private byte[] _bytes = [];
     private string _text = string.Empty;
 
-    [Params("reference-a", "reference-b", "compose-merge-2k", "gha-workflow", "k8s-ingress-nginx-multi", "k8s-multi-16k", "openapi-100k", "records-64k", "wide-map-64k", "long-scalars-256k", "anchors-32k")]
+    [Params("deep-block", "deep-flow", "flow-heavy-64k", "reference-a", "reference-b", "compose-merge-2k", "gha-workflow", "k8s-ingress-nginx-multi", "k8s-multi-16k", "openapi-100k", "records-64k", "wide-map-64k", "long-scalars-256k", "anchors-32k")]
     public string Workload { get; set; } = string.Empty;
 
     private bool _multi;

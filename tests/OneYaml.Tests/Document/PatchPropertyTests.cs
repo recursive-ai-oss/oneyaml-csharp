@@ -399,7 +399,13 @@ public class PatchPropertyTests
                     }
                     else
                     {
-                        Assert.True(ex.Category is YamlErrorCategory.RefusedAlias or YamlErrorCategory.PatchPath or YamlErrorCategory.RefusedAmbiguous or YamlErrorCategory.PatchInvalid, $"{ex.Category}: {ex.Message}\n{what}");
+                        // A copy or move writes out what an alias stands for. A value that expands past the alias
+                        // budget is refused by design, and the nested-alias documents in the corpus have such values.
+                        bool expands = ops.Any(o => o?["op"]?.GetValue<string>() is "copy" or "move");
+                        Assert.True(
+                            ex.Category is YamlErrorCategory.RefusedAlias or YamlErrorCategory.PatchPath or YamlErrorCategory.RefusedAmbiguous or YamlErrorCategory.PatchInvalid
+                            || (expands && ex.Category == YamlErrorCategory.Limit),
+                            $"{ex.Category}: {ex.Message}\n{what}");
                     }
 
                     byte[] after = doc.ToBytes();
@@ -437,5 +443,26 @@ public class PatchPropertyTests
 
         Assert.True(succeeded > 0 && injected > 0 && compared > 0, "the run exercised no patch");
         Console.WriteLine($"patch property seed {seed}: {succeeded} applied ({compared} compared with the model), {refused} failed ({injected} with an injected failing operation)");
+    }
+
+    [Fact]
+    public void Moving_a_value_that_expands_past_the_alias_budget_is_a_limit_error_and_changes_nothing()
+    {
+        // Each level holds ten references to the one before, so the last value stands for about 10^8 nodes.
+        // An anchor defined later cannot be referenced from an earlier place, so the move has to write the value out.
+        var sb = new System.Text.StringBuilder("a: &a [x, x, x, x, x, x, x, x, x, x]\n");
+        for (char c = 'b'; c <= 'i'; c++)
+        {
+            char prev = (char)(c - 1);
+            sb.Append(c).Append(": &").Append(c).Append(" [").Append(string.Join(", ", Enumerable.Repeat("*" + prev, 10))).Append("]\n");
+        }
+
+        sb.Append("j: [1, 2, 3, 4, 5, *i]\n");
+        byte[] before = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        using YamlDocument doc = YamlDocument.Parse(before);
+        var ex = Assert.Throws<YamlException>(() => doc.ApplyPatch("[{\"op\":\"move\",\"path\":\"/a/2\",\"from\":\"/j/5\"}]"));
+        Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+        Assert.Equal(0, ex.OperationIndex);
+        Assert.True(before.AsSpan().SequenceEqual(doc.ToBytes()));
     }
 }

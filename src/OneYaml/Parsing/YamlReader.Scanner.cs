@@ -147,6 +147,25 @@ internal ref partial struct YamlReader
             return;
         }
 
+        if (head.X > 1)
+        {
+            // A run of closing tokens is one token that counts its members. One of them is read; the token
+            // stays until the last. The brackets of a run are next to each other, so the next one is a byte on.
+            if (head.Kind == TokenKind.BlockEnd)
+            {
+                head.X--;
+                return;
+            }
+
+            if (head.Kind is TokenKind.FlowSequenceEnd or TokenKind.FlowMappingEnd)
+            {
+                head.X--;
+                head.Start++;
+                head.End++;
+                return;
+            }
+        }
+
         _qHead++;
         _tokensParsed++;
         if (_qHead == _qTail)
@@ -411,9 +430,23 @@ internal ref partial struct YamlReader
             return;
         }
 
+        // Closing many levels at once (the end of a deeply nested document) would queue one token per level and
+        // grow the queue to match. The run is kept as one token that counts its levels, and it is taken apart
+        // as the parser reads it (see SkipToken).
+        bool first = true;
         while (_indent > column)
         {
-            Enqueue(TokenKind.BlockEnd, _pos, _pos);
+            if (first)
+            {
+                Enqueue(TokenKind.BlockEnd, _pos, _pos);
+                first = false;
+            }
+            else
+            {
+                ref Token last = ref _queue[_qTail - 1];
+                last.X = last.X == 0 ? 2 : last.X + 1;
+            }
+
             _indent = _indents[--_indentCount];
         }
     }
@@ -892,6 +925,22 @@ internal ref partial struct YamlReader
 
         _simpleKeyAllowed = false;
         _prevJson = true;
+
+        // Brackets that close a deeply nested value arrive in a run. While a key may still start before
+        // them they all wait in the queue, so a run is kept as one token that counts its members.
+        if (_qTail > _qHead)
+        {
+            ref Token last = ref _queue[_qTail - 1];
+            int members = Math.Max(last.X, 1);
+            if (last.Kind == kind && last.Start + members == _pos)
+            {
+                last.X = members + 1;
+                _lastTokenEnd = _pos + 1;
+                _pos++;
+                return;
+            }
+        }
+
         Enqueue(kind, _pos, _pos + 1);
         _pos++;
     }

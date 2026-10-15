@@ -32,8 +32,83 @@ internal struct GenericFrame
     public bool IsMap;
     public bool HaveKey;
     public bool KeyIsMerge;
+
+    // Sets that few mappings need (merge keys, keys that are not plain text) live apart, so that a frame stays small.
+    public FrameSets? Sets;
+}
+
+internal sealed class FrameSets
+{
     public HashSet<string>? Merged;
     public HashSet<string>? Identities;
+}
+
+// The open collections of a load. The first levels sit in the caller's stack space; deeper levels go into
+// fixed-size chunks that are rented one at a time and never copied, so a deep document takes exactly the
+// room it needs and not the sum of every doubling step on the way.
+internal ref struct FrameStack
+{
+    private const int ChunkShift = 4;
+    private const int ChunkSize = 1 << ChunkShift;
+
+    private readonly Span<GenericFrame> _first;
+    private GenericFrame[]?[]? _chunks;
+    private int _chunkCount;
+
+    public FrameStack(Span<GenericFrame> first)
+    {
+        _first = first;
+        _chunks = null;
+        _chunkCount = 0;
+        Count = 0;
+    }
+
+    public int Count { get; private set; }
+
+    public ref GenericFrame Top => ref At(Count - 1);
+
+    private ref GenericFrame At(int i)
+    {
+        if ((uint)i < (uint)_first.Length)
+        {
+            return ref _first[i];
+        }
+
+        int j = i - _first.Length;
+        return ref _chunks![j >> ChunkShift]![j & (ChunkSize - 1)];
+    }
+
+    public ref GenericFrame Push()
+    {
+        if (Count >= _first.Length + (_chunkCount << ChunkShift))
+        {
+            if (_chunks is null)
+            {
+                _chunks = new GenericFrame[]?[8];
+            }
+            else if (_chunkCount == _chunks.Length)
+            {
+                Array.Resize(ref _chunks, _chunks.Length * 2);
+            }
+
+            _chunks[_chunkCount++] = ArrayPool<GenericFrame>.Shared.Rent(ChunkSize);
+        }
+
+        return ref At(Count++);
+    }
+
+    public ref GenericFrame Pop() => ref At(--Count);
+
+    public void Release()
+    {
+        for (int i = 0; i < _chunkCount; i++)
+        {
+            ArrayPool<GenericFrame>.Shared.Return(_chunks![i]!, clearArray: true);
+            _chunks[i] = null;
+        }
+
+        _chunkCount = 0;
+    }
 }
 
 // Room for the first levels of nesting on the stack, so that an ordinary document never rents a frame array.
@@ -115,25 +190,23 @@ internal static class GenericLoader
     public static object? Load(ref Utf8YamlReader reader)
     {
         InlineFrames inline = default;
-        Span<GenericFrame> stack = inline;
-        GenericFrame[]? rented = null;
+        var stack = new FrameStack(inline);
         InlineStaged inlineStaged = default;
         var staged = new StagedEntries(inlineStaged);
-        int sp = 0;
         try
         {
             while (true)
             {
                 object? value;
                 int entry;
-                bool expectKey = sp > 0 && stack[sp - 1].IsMap && !stack[sp - 1].HaveKey;
+                bool expectKey = stack.Count > 0 && stack.Top.IsMap && !stack.Top.HaveKey;
                 switch (reader.Type)
                 {
                     case YamlTokenType.Scalar:
                         entry = reader.NodeEntry;
                         if (expectKey)
                         {
-                            ref GenericFrame kf = ref stack[sp - 1];
+                            ref GenericFrame kf = ref stack.Top;
                             kf.KeyIsMerge = ConverterGuards.IsMergeKey(in reader);
                             kf.KeyOffset = reader.Start;
                             kf.Key = reader.GetSharedString();
@@ -142,7 +215,7 @@ internal static class GenericLoader
                             {
                                 // Keys are judged after resolution: 1 and 0x1 are the same key.
                                 string? identity = reader.KeyIdentity();
-                                if (identity is not null && !(kf.Identities ??= []).Add(identity))
+                                if (identity is not null && !((kf.Sets ??= new FrameSets()).Identities ??= []).Add(identity))
                                 {
                                     throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, reader.Start);
                                 }
@@ -161,7 +234,7 @@ internal static class GenericLoader
                     case YamlTokenType.Alias:
                         if (expectKey)
                         {
-                            ref GenericFrame af = ref stack[sp - 1];
+                            ref GenericFrame af = ref stack.Top;
                             af.KeyIsMerge = false;
                             af.KeyOffset = reader.Start;
                             af.Key = reader.GetAnchorScalarText(reader.AliasEntry)
@@ -181,21 +254,8 @@ internal static class GenericLoader
                                 throw reader.CreateException("This mapping key is a collection; read documents with complex keys through YamlDocument.");
                             }
 
-                            if (sp == stack.Length)
-                            {
-                                GenericFrame[] bigger = ArrayPool<GenericFrame>.Shared.Rent(stack.Length * 2);
-                                stack[..sp].CopyTo(bigger);
-                                if (rented is not null)
-                                {
-                                    ArrayPool<GenericFrame>.Shared.Return(rented, clearArray: true);
-                                }
-
-                                rented = bigger;
-                                stack = bigger;
-                            }
-
                             bool map = reader.Type == YamlTokenType.MappingStart;
-                            stack[sp++] = new GenericFrame
+                            stack.Push() = new GenericFrame
                             {
                                 Container = map ? null : new List<object?>(),
                                 Base = staged.Count,
@@ -208,12 +268,12 @@ internal static class GenericLoader
                     case YamlTokenType.MappingEnd:
                     case YamlTokenType.SequenceEnd:
                         {
-                            if (sp == 0)
+                            if (stack.Count == 0)
                             {
                                 throw reader.Error(YamlErrorCategory.Syntax, "Unexpected end of a collection.");
                             }
 
-                            ref GenericFrame top = ref stack[--sp];
+                            ref GenericFrame top = ref stack.Pop();
                             value = top.IsMap ? FinishMap(ref top, ref staged) : top.Container;
                             entry = top.Entry;
                             top = default;
@@ -229,12 +289,12 @@ internal static class GenericLoader
                     reader.SetAnchorValue(entry, value);
                 }
 
-                if (sp == 0)
+                if (stack.Count == 0)
                 {
                     return value;
                 }
 
-                Add(reader.Source, ref stack[sp - 1], value, ref staged);
+                Add(reader.Source, ref stack.Top, value, ref staged);
 
             Next:
                 if (!reader.Read())
@@ -245,11 +305,7 @@ internal static class GenericLoader
         }
         finally
         {
-            if (rented is not null)
-            {
-                ArrayPool<GenericFrame>.Shared.Return(rented, clearArray: true);
-            }
-
+            stack.Release();
             staged.Release();
         }
     }
@@ -295,9 +351,9 @@ internal static class GenericLoader
         var dict = (Dictionary<string, object?>)frame.Container;
         if (frame.KeyIsMerge)
         {
-            Merge(input, dict, ref frame.Merged, value, frame.KeyOffset);
+            Merge(input, dict, ref (frame.Sets ??= new FrameSets()).Merged, value, frame.KeyOffset);
         }
-        else if (frame.Merged is not null && frame.Merged.Remove(key))
+        else if (frame.Sets?.Merged is { } merged && merged.Remove(key))
         {
             dict[key] = value;
         }
