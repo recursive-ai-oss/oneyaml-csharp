@@ -19,6 +19,7 @@ internal sealed class Model
     public string Kind = "scalar";   // scalar, map, seq, alias
     public string Style = "";        // plain, single, double, literal, folded, block, flow
     public string? Tag;
+    public string? Resolved;         // the tag with its handle resolved
     public string? Anchor;
     public string Type = "";         // scalar: null, bool, int, float, str
     public string Text = "";         // scalar: normalised value; alias: name
@@ -79,14 +80,13 @@ internal sealed class Model
     public static string Normalise(double d) => double.IsNaN(d) ? ".nan" : d.ToString("R", CultureInfo.InvariantCulture);
 
     /// <summary>Resolves a scalar the way the Core schema does, for comparison.</summary>
-    public static (string Type, string Text) Resolve(bool plain, string? rawTag, string value)
+    public static (string Type, string Text) Resolve(bool plain, string? rawTag, string? resolvedTag, string value)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(value);
         ScalarKind kind;
         if (rawTag is not null)
         {
-            string t = rawTag.StartsWith("!<", StringComparison.Ordinal) ? rawTag[2..^1] : rawTag;
-            CoreTag core = CoreSchema.ParseTag(Encoding.UTF8.GetBytes(t));
+            CoreTag core = CoreSchema.ParseResolvedTag(Encoding.UTF8.GetBytes(resolvedTag ?? rawTag));
             if (core == CoreTag.Unknown || !CoreSchema.TryResolveTagged(core, bytes, out kind))
             {
                 return ("str", value);
@@ -155,7 +155,7 @@ internal sealed class Model
                         };
                         Props(ref node, in reader);
                         node.Raw = reader.GetString();
-                        (node.Type, node.Text) = Resolve(reader.ScalarStyle == ScalarStyle.Plain, node.Tag, node.Raw);
+                        (node.Type, node.Text) = Resolve(reader.ScalarStyle == ScalarStyle.Plain, node.Tag, node.Resolved, node.Raw);
                         break;
                     }
 
@@ -208,8 +208,20 @@ internal sealed class Model
         if (r.HasTag)
         {
             node.Tag = Encoding.UTF8.GetString(r.RawTag);
+            node.Resolved = r.GetResolvedTag();
         }
     }
+
+    private static string? ResolvedOf(DocState s, int node) => s.TagClassOf(node) switch
+    {
+        TagClass.None => null,
+        TagClass.Str => "tag:yaml.org,2002:str",
+        TagClass.Int => "tag:yaml.org,2002:int",
+        TagClass.Float => "tag:yaml.org,2002:float",
+        TagClass.Bool => "tag:yaml.org,2002:bool",
+        TagClass.Null => "tag:yaml.org,2002:null",
+        _ => "tag:example.com,2000:other",
+    };
 
     /// <summary>Builds the models of all documents from the document tree.</summary>
     public static List<Model> FromState(DocState s)
@@ -241,9 +253,10 @@ internal sealed class Model
                             _ => "folded",
                         };
                         m.Tag = s.HasTag(i) ? Encoding.UTF8.GetString(s.RawTag(i)) : null;
+                        m.Resolved = ResolvedOf(s, i);
                         m.Anchor = s.HasAnchor(i) ? Encoding.UTF8.GetString(s.AnchorName(i)) : null;
                         m.Raw = s.ScalarString(i);
-                        (m.Type, m.Text) = Resolve((ScalarStyle)n.Style == ScalarStyle.Plain, m.Tag, m.Raw);
+                        (m.Type, m.Text) = Resolve((ScalarStyle)n.Style == ScalarStyle.Plain, m.Tag, m.Resolved, m.Raw);
                         break;
                     default:
                         m.Kind = n.Kind == NodeKind.Mapping ? "map" : "seq";

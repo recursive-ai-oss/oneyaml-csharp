@@ -249,6 +249,14 @@ internal ref struct YamlInput
                 throw EncodingError(body, mark, bigEndian, wide, ex.Index);
             }
 
+            if (mark == 0 && charCount > 0 && chars[0] >= 0x80)
+            {
+                // Without a mark the width is told from the null bytes of an ASCII first character, so a
+                // stream may not begin with anything else (YAML 1.2.2, 5.2). Writing such a stream back would
+                // also lose the way it was recognised.
+                throw YamlException.At(YamlErrorCategory.Encoding, "A UTF-16 or UTF-32 input without a byte order mark must begin with an ASCII character.", body, 0);
+            }
+
             long size = CountUtf8(chars.AsSpan(0, charCount));
             if (size > limits.MaxInputBytes)
             {

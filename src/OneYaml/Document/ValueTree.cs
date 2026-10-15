@@ -46,6 +46,7 @@ internal struct VNode
 internal sealed class ValueTree
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private int _maxIntegerDigits = int.MaxValue;
     private VNode[] _nodes = new VNode[4];
 
     public int Count { get; private set; }
@@ -289,12 +290,13 @@ internal sealed class ValueTree
     /// <summary>Flattens a JSON value. A number is an integer unless it has a fraction or an exponent.</summary>
     /// <param name="value">The value; <see langword="null"/> is JSON null.</param>
     /// <param name="maxDepth">How deeply the value may nest.</param>
+    /// <param name="maxIntegerDigits">The most digits an integer may have, <see cref="YamlLimits.MaxIntegerDigits"/>.</param>
     /// <param name="dropNulls">Leave out object members that are null, at every level reached through objects only (the merge patch rule for a missing target).</param>
     /// <returns>The tree.</returns>
     /// <exception cref="YamlException">The value nests too deeply or holds a value with no YAML form (<see cref="YamlErrorCategory.PatchInvalid"/>).</exception>
-    public static ValueTree FromJsonNode(JsonNode? value, int maxDepth, bool dropNulls = false)
+    public static ValueTree FromJsonNode(JsonNode? value, int maxDepth, bool dropNulls = false, int maxIntegerDigits = int.MaxValue)
     {
-        var tree = new ValueTree();
+        var tree = new ValueTree { _maxIntegerDigits = maxIntegerDigits };
         var stack = new List<JsonFrame>();
         tree.AddJson(value, stack, maxDepth, dropNulls);
         while (stack.Count > 0)
@@ -374,7 +376,7 @@ internal sealed class ValueTree
                 Add(Make(ScalarKind.Null, "null"u8.ToArray()));
                 return;
             default:
-                Add(JsonScalar((JsonValue)value));
+                Add(JsonScalar((JsonValue)value, _maxIntegerDigits));
                 return;
         }
     }
@@ -390,7 +392,7 @@ internal sealed class ValueTree
         stack.Add(frame);
     }
 
-    private static VNode JsonScalar(JsonValue v)
+    private static VNode JsonScalar(JsonValue v, int maxIntegerDigits)
     {
         if (v.TryGetValue(out JsonElement e))
         {
@@ -404,7 +406,7 @@ internal sealed class ValueTree
                 case JsonValueKind.False:
                     return Make(ScalarKind.Bool, "false"u8.ToArray());
                 case JsonValueKind.Number:
-                    return JsonNumber(e.GetRawText());
+                    return JsonNumber(e.GetRawText(), maxIntegerDigits);
                 case JsonValueKind.Null:
                     return Make(ScalarKind.Null, "null"u8.ToArray());
                 default:
@@ -497,7 +499,7 @@ internal sealed class ValueTree
         return Make(ScalarKind.Float, FloatText(d, single));
     }
 
-    private static VNode JsonNumber(string raw)
+    private static VNode JsonNumber(string raw, int maxIntegerDigits)
     {
         if (raw.AsSpan().IndexOfAny('.', 'e', 'E') >= 0)
         {
@@ -507,6 +509,12 @@ internal sealed class ValueTree
             }
 
             return FiniteFloat(d, single: false);
+        }
+
+        // Reading a very long integer takes more than linear time, so it is refused before it is read.
+        if (raw.Length - (raw.StartsWith('-') ? 1 : 0) > maxIntegerDigits)
+        {
+            throw new YamlException("The integer has more digits than the configured limit.", YamlErrorCategory.Limit, 0, 0, -1);
         }
 
         if (!BigInteger.TryParse(raw, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out BigInteger big))

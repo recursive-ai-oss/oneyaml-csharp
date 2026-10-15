@@ -107,8 +107,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
             return _index;
         }
 
-        var budget = new AliasBudget(s, _doc!.Limits);
-        budget.Charge(s, _index, s.Node(_index).Aux);
+        // One budget for the whole walk from a root, so a traversal that follows aliases without end hits the limit.
+        _doc!.Walk.Charge(s, _index, s.Node(_index).Aux);
         via = true;
         return s.Node(_index).Aux;
     }
@@ -227,30 +227,30 @@ public sealed class YamlNode : IEquatable<YamlNode>
     // ---- Reading values ----
 
     /// <summary>Reads a scalar as a CLR value.</summary>
-    /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
+    /// <typeparam name="T">A string, boolean, integer, floating-point, big integer, character, date or time, or GUID type, or <see cref="object"/>.</typeparam>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node is not a scalar of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
     public T GetValue<T>()
     {
         DocState s = State();
         int t = Followed(s, out _);
-        if (NodeValues.TryGet(s, t, out T value, out string? problem, _doc?.Limits.MaxIntegerDigits ?? int.MaxValue))
+        if (NodeValues.TryGet(s, t, _doc!.BindOptions, out T value, out YamlException? error))
         {
             return value;
         }
 
-        throw YamlException.At(YamlErrorCategory.Binding, problem ?? "The value cannot be read as that type.", s.Text, s.Node(t).Start);
+        throw error!;
     }
 
     /// <summary>Reads a scalar as a CLR value, if it has that type.</summary>
-    /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
+    /// <typeparam name="T">A string, boolean, integer, floating-point, big integer, character, date or time, or GUID type, or <see cref="object"/>.</typeparam>
     /// <param name="value">The value, or the default.</param>
     /// <returns><see langword="true"/> if the node is a scalar of that type.</returns>
     public bool TryGetValue<T>(out T value)
     {
         DocState s = State();
         int t = Followed(s, out _);
-        return NodeValues.TryGet(s, t, out value, out _, _doc?.Limits.MaxIntegerDigits ?? int.MaxValue);
+        return NodeValues.TryGet(s, t, _doc!.BindOptions, out value, out _);
     }
 
     /// <summary>Binds the node to a type with the reflection binder, as <see cref="YamlSerializer"/> would bind the same text.</summary>
@@ -261,7 +261,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
     [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
     [RequiresDynamicCode("Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
-    public T? Deserialize<T>(YamlSerializerOptions? options = null) => YamlSerializer.Deserialize<T>(ExpandedUtf8(), options);
+    public T? Deserialize<T>(YamlSerializerOptions? options = null) => NodeReplay.Bind(State(), _index, (options ?? YamlSerializerOptions.Default).GetTypeInfo<T>());
 
     /// <summary>Binds the node to a type using generated metadata.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -269,17 +269,10 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
     /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
-    public T? Deserialize<T>(YamlTypeInfo<T> typeInfo) => YamlSerializer.Deserialize<T>(ExpandedUtf8(), typeInfo);
-
-    // The node as standalone flow text with aliases expanded (charged to the alias budget), so the binder
-    // sees the same value the node reads as, whatever anchors lie outside it.
-    private byte[] ExpandedUtf8()
+    public T? Deserialize<T>(YamlTypeInfo<T> typeInfo)
     {
-        ValueTree tree = new();
-        AppendTo(tree);
-        using var buffer = new ByteBuffer(256);
-        ValueWriter.WriteFlow(buffer, tree, 0);
-        return buffer.WrittenSpan.ToArray();
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return NodeReplay.Bind(State(), _index, typeInfo);
     }
 
     // ---- Children ----
@@ -351,6 +344,13 @@ public sealed class YamlNode : IEquatable<YamlNode>
             ArgumentNullException.ThrowIfNull(key);
             ValueTree v = ValueOf(value);
             DocState s = State();
+            if (IsEmptyRoot(s))
+            {
+                // The root of a stream with no content becomes the mapping on its first write.
+                _doc!.Swap(Editor.Replace(s, _doc.Limits, _index, ValueTree.Wrap(StrictUtf8Bytes(key), v)));
+                return;
+            }
+
             int container = WriteContainer(s, NodeKind.Mapping);
             _doc!.Swap(PointerOps.WriteIn(s, _doc.Limits, container, StrictUtf8Bytes(key), v, PointerOps.Mode.Set));
         }
@@ -379,6 +379,12 @@ public sealed class YamlNode : IEquatable<YamlNode>
         {
             ValueTree v = ValueOf(value);
             DocState s = State();
+            if (index == 0 && IsEmptyRoot(s))
+            {
+                _doc!.Swap(Editor.Replace(s, _doc.Limits, _index, ValueTree.Wrap(null, v)));
+                return;
+            }
+
             int container = WriteContainer(s, NodeKind.Sequence);
             if (index < 0)
             {
@@ -388,6 +394,9 @@ public sealed class YamlNode : IEquatable<YamlNode>
             _doc!.Swap(PointerOps.WriteIn(s, _doc.Limits, container, Encoding.ASCII.GetBytes(index.ToString(System.Globalization.CultureInfo.InvariantCulture)), v, PointerOps.Mode.Set));
         }
     }
+
+    // A document root with no text at all: nothing is written yet, so a write may give it a kind.
+    private bool IsEmptyRoot(DocState s) => !_viaAlias && s.Node(_index).Parent < 0 && (s.Node(_index).Flags & NodeFlags.Empty) != 0 && s.Node(_index).Kind == NodeKind.Scalar && !s.HasTag(_index) && !s.HasAnchor(_index);
 
     // The collection an indexer writes into; writing through an alias is refused.
     private int WriteContainer(DocState s, NodeKind expected)
@@ -504,7 +513,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <returns><see langword="true"/> if they are not equal.</returns>
     public static bool operator !=(YamlNode? left, YamlNode? right) => !(left == right);
 
-    /// <summary>A sequence of nodes that can be enumerated without allocating.</summary>
+    /// <summary>The nodes of a collection. The enumerator is a struct; each node it returns is a new view.</summary>
     public readonly struct ItemEnumerable : IEnumerable<YamlNode>
     {
         private readonly YamlNode _node;
@@ -535,13 +544,23 @@ public sealed class YamlNode : IEquatable<YamlNode>
         internal ItemEnumerator(YamlNode node)
         {
             _node = node;
+            Current = default!;
+            if (node is null)
+            {
+                // default(ItemEnumerable): nothing to enumerate.
+                _via = false;
+                _step = 1;
+                _next = 0;
+                _remaining = 0;
+                return;
+            }
+
             DocState s = node.State();
             int t = node.Followed(s, out _via);
             ref readonly CstNode n = ref s.Node(t);
             _step = n.Kind == NodeKind.Mapping ? 2 : 1;
             _remaining = n.Kind is NodeKind.Mapping or NodeKind.Sequence ? n.Count : 0;
             _next = t + 1;
-            Current = default!;
             if (_step == 2 && _remaining > 0)
             {
                 _next = t + 1 + s.Node(t + 1).Size;
@@ -582,7 +601,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         }
     }
 
-    /// <summary>The entries of a mapping, enumerable without allocating.</summary>
+    /// <summary>The entries of a mapping. The enumerator is a struct; each key and value it returns is a new view.</summary>
     public readonly struct EntryEnumerable : IEnumerable<KeyValuePair<YamlNode, YamlNode>>
     {
         private readonly YamlNode _node;
@@ -612,12 +631,21 @@ public sealed class YamlNode : IEquatable<YamlNode>
         internal EntryEnumerator(YamlNode node)
         {
             _node = node;
+            Current = default;
+            if (node is null)
+            {
+                // default(EntryEnumerable): nothing to enumerate.
+                _via = false;
+                _next = 0;
+                _remaining = 0;
+                return;
+            }
+
             DocState s = node.State();
             int t = node.Followed(s, out _via);
             ref readonly CstNode n = ref s.Node(t);
             _remaining = n.Kind == NodeKind.Mapping ? n.Count : 0;
             _next = t + 1;
-            Current = default!;
         }
 
         /// <inheritdoc />

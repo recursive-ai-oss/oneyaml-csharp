@@ -91,7 +91,7 @@ internal sealed partial class DocState
         ReadOnlySpan<byte> tag = RawTag(node);
         if (!tag.IsEmpty)
         {
-            CoreTag core = CoreSchema.ParseTag(StripVerbatim(tag));
+            CoreTag core = ExplicitCoreTag(node);
             if (core != CoreTag.Unknown)
             {
                 ReadOnlySpan<byte> text = DecodedScalar(node, out byte[]? rented);
@@ -136,23 +136,20 @@ internal sealed partial class DocState
         }
     }
 
-    private static ReadOnlySpan<byte> StripVerbatim(ReadOnlySpan<byte> tag)
-    {
-        if (tag.Length > 3 && tag[0] == (byte)'!' && tag[1] == (byte)'<' && tag[^1] == (byte)'>')
-        {
-            return tag.Slice(2, tag.Length - 3);
-        }
-
-        return tag;
-    }
-
     /// <summary>The Core tag a node was given explicitly, or <see cref="CoreTag.Unknown"/>.</summary>
     /// <param name="node">Any node.</param>
     /// <returns>The tag.</returns>
     public CoreTag ExplicitCoreTag(int node)
     {
-        ReadOnlySpan<byte> tag = RawTag(node);
-        return tag.IsEmpty ? CoreTag.Unknown : CoreSchema.ParseTag(StripVerbatim(tag));
+        return TagClassOf(node) switch
+        {
+            TagClass.Str => CoreTag.Str,
+            TagClass.Int => CoreTag.Int,
+            TagClass.Float => CoreTag.Float,
+            TagClass.Bool => CoreTag.Bool,
+            TagClass.Null => CoreTag.Null,
+            _ => CoreTag.Unknown,
+        };
     }
 
     /// <summary>Follows an alias to the node it names. Other nodes are returned as they are.</summary>

@@ -324,16 +324,6 @@ internal static class CoreSchema
     }
 
     /// <summary>
-    /// Finds the Core scalar tag for a tag as written, where <c>!!</c> is taken to be the default
-    /// handle. A document can redefine <c>!!</c> with <c>%TAG</c>, so a caller that has the resolved
-    /// tag must use <see cref="ParseResolvedTag"/> instead.
-    /// </summary>
-    /// <param name="tag">The tag as <c>tag:yaml.org,2002:int</c>, <c>!!int</c> or the non-specific <c>!</c>.</param>
-    /// <returns>The tag, or <see cref="CoreTag.Unknown"/>.</returns>
-    public static CoreTag ParseTag(ReadOnlySpan<byte> tag) =>
-        tag.StartsWith("!!"u8) ? ParseName(tag.Slice(2)) : ParseResolvedTag(tag);
-
-    /// <summary>
     /// Finds the Core scalar tag for a tag whose handle is already resolved. The shorthand
     /// <c>!!int</c> is not accepted, because it may name a different tag in a document that
     /// redefines the handle.

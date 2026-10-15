@@ -340,24 +340,6 @@ public sealed partial class CoreSchemaTests
     public void TryParseBool_refuses_other_text(string text) => Assert.False(CoreSchema.TryParseBool(U8(text), out _));
 
     [Theory]
-    [InlineData("tag:yaml.org,2002:str", "Str")]
-    [InlineData("tag:yaml.org,2002:int", "Int")]
-    [InlineData("tag:yaml.org,2002:float", "Float")]
-    [InlineData("tag:yaml.org,2002:bool", "Bool")]
-    [InlineData("tag:yaml.org,2002:null", "Null")]
-    [InlineData("!!str", "Str")]
-    [InlineData("!!int", "Int")]
-    [InlineData("!", "Str")]
-    [InlineData("!!timestamp", "Unknown")]
-    [InlineData("!!binary", "Unknown")]
-    [InlineData("!local", "Unknown")]
-    [InlineData("tag:yaml.org,2002:map", "Unknown")]
-    [InlineData("tag:example.com,2000:int", "Unknown")]
-    [InlineData("", "Unknown")]
-    public void ParseTag_knows_the_core_scalar_tags(string tag, string expected) =>
-        Assert.Equal(Enum.Parse<CoreTag>(expected), CoreSchema.ParseTag(U8(tag)));
-
-    [Theory]
     [InlineData("tag:yaml.org,2002:int", "Int")]
     [InlineData("tag:yaml.org,2002:str", "Str")]
     [InlineData("!", "Str")]

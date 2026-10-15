@@ -4,330 +4,208 @@ using OneYaml.Schema;
 
 namespace OneYaml.Documents;
 
-/// <summary>Reads a scalar node as a CLR value under the Core schema.</summary>
+/// <summary>
+/// Reads a scalar node as a CLR value. The conversion is the binder's own: the node is replayed to
+/// the same converters <see cref="YamlSerializer"/> uses, so both read a scalar to the same value or
+/// the same error.
+/// </summary>
 internal static class NodeValues
 {
+    private static readonly StringConverter s_String = new();
+    private static readonly BooleanConverter s_Boolean = new();
+    private static readonly Int32Converter s_Int32 = new();
+    private static readonly Int64Converter s_Int64 = new();
+    private static readonly Int16Converter s_Int16 = new();
+    private static readonly SByteConverter s_SByte = new();
+    private static readonly ByteConverter s_Byte = new();
+    private static readonly UInt16Converter s_UInt16 = new();
+    private static readonly UInt32Converter s_UInt32 = new();
+    private static readonly UInt64Converter s_UInt64 = new();
+    private static readonly BigIntegerConverter s_Big = new();
+    private static readonly DoubleConverter s_Double = new();
+    private static readonly SingleConverter s_Single = new();
+    private static readonly DecimalConverter s_Decimal = new();
+    private static readonly CharConverter s_Char = new();
+    private static readonly GuidConverter s_Guid = new();
+    private static readonly DateTimeConverter s_DateTime = new();
+    private static readonly DateTimeOffsetConverter s_DateTimeOffset = new();
+    private static readonly DateOnlyConverter s_DateOnly = new();
+    private static readonly TimeOnlyConverter s_TimeOnly = new();
+    private static readonly TimeSpanConverter s_TimeSpan = new();
+
     /// <summary>Converts a scalar.</summary>
-    /// <typeparam name="T">The wanted type: a string, boolean, integer, floating-point or big integer type (or the nullable form of the common ones), or <see cref="object"/>.</typeparam>
+    /// <typeparam name="T">The wanted type: a string, boolean, integer, floating-point, big integer, character, date or time, GUID type (or the nullable form of a value type), or <see cref="object"/>.</typeparam>
     /// <param name="s">The document.</param>
-    /// <param name="node">A scalar node (aliases already followed).</param>
+    /// <param name="node">A node (aliases already followed).</param>
+    /// <param name="options">Options carrying the limits.</param>
     /// <param name="value">The value.</param>
-    /// <param name="problem">Why the scalar cannot be that type.</param>
-    /// <param name="maxIntegerDigits">The most digits an integer may have before it is read as a number of any size.</param>
-    /// <returns>Whether the scalar holds a value of the type.</returns>
-    /// <exception cref="YamlException">The integer has more digits than <paramref name="maxIntegerDigits"/> (<see cref="YamlErrorCategory.Limit"/>).</exception>
-    public static bool TryGet<T>(DocState s, int node, out T value, out string? problem, int maxIntegerDigits = int.MaxValue)
+    /// <param name="error">Why the node cannot be that type.</param>
+    /// <returns>Whether the node holds a value of the type.</returns>
+    /// <exception cref="YamlException">A limit is exceeded (<see cref="YamlErrorCategory.Limit"/>).</exception>
+    public static bool TryGet<T>(DocState s, int node, YamlSerializerOptions options, out T value, out YamlException? error)
     {
         value = default!;
-        problem = null;
-        if (s.Node(node).Kind != NodeKind.Scalar)
+        error = null;
+        ref readonly CstNode n = ref s.Node(node);
+        if (n.Kind != NodeKind.Scalar)
         {
-            problem = "The node is not a scalar.";
+            error = YamlException.At(YamlErrorCategory.Binding, "The node is not a scalar.", s.Text, n.Start);
             return false;
         }
 
         ScalarKind kind = s.KindOf(node, out bool valid);
         if (!valid)
         {
-            problem = "The scalar's tag does not fit its text.";
+            error = YamlException.At(YamlErrorCategory.Binding, "The scalar's tag does not fit its text.", s.Text, n.Start);
             return false;
-        }
-
-        if (typeof(T) == typeof(string))
-        {
-            if (kind == ScalarKind.Null && !s.HasTag(node) && (ScalarStyleOf(s, node) == Parsing.ScalarStyle.Plain))
-            {
-                value = default!;
-                return true;
-            }
-
-            value = (T)(object)s.ScalarString(node);
-            return true;
-        }
-
-        if (typeof(T) == typeof(object))
-        {
-            return TryObject(s, node, kind, out value, out problem, maxIntegerDigits);
         }
 
         if (kind == ScalarKind.Null)
         {
-            if (default(T) is null || typeof(T) == typeof(int?) || typeof(T) == typeof(long?) || typeof(T) == typeof(double?) || typeof(T) == typeof(bool?))
+            // A null is a null for every type that can hold one.
+            if (default(T) is null)
             {
-                value = default!;
                 return true;
             }
 
-            problem = "The scalar is null.";
+            error = YamlException.At(YamlErrorCategory.Binding, "The scalar is null.", s.Text, n.Start);
             return false;
         }
 
-        ReadOnlySpan<byte> text = s.DecodedScalar(node, out byte[]? rented);
+        AnchorBook book = NodeReplay.Record(s, node, out int count);
+        var reader = new Utf8YamlReader(s.Text, options, book, count);
         try
         {
-            return TryTyped(s, node, text, kind, out value, out problem, maxIntegerDigits);
+            reader.BeginReplay();
+            return TryLeaf(ref reader, options, out value, out error);
         }
         finally
         {
-            DocState.ReleaseDecoded(rented);
+            reader.Dispose();
         }
     }
 
-    // Refuse a very long integer before parsing it: converting one takes more than linear time.
-    private static void CheckDigits(DocState s, int node, ReadOnlySpan<byte> text, int maxIntegerDigits)
+    private static bool TryLeaf<T>(ref Utf8YamlReader r, YamlSerializerOptions o, out T value, out YamlException? error)
     {
-        if (!CoreSchema.IsWithinIntegerDigits(text, maxIntegerDigits))
-        {
-            throw YamlException.At(YamlErrorCategory.Limit, "The integer has more digits than the configured limit.", s.Text, s.Node(node).Start);
-        }
-    }
-
-    private static Parsing.ScalarStyle ScalarStyleOf(DocState s, int node) => (Parsing.ScalarStyle)s.Node(node).Style;
-
-    private static bool TryObject<T>(DocState s, int node, ScalarKind kind, out T value, out string? problem, int maxIntegerDigits)
-    {
-        problem = null;
         value = default!;
-        if (kind == ScalarKind.String)
+        error = null;
+        Type type = typeof(T);
+        Type u = Nullable.GetUnderlyingType(type) ?? type;
+        try
         {
-            value = (T)(object)s.ScalarString(node);
+            object? boxed;
+            if (u == typeof(object))
+            {
+                boxed = r.ReadGenericScalar();
+            }
+            else if (!TryRead(ref r, o, u, out boxed))
+            {
+                error = r.CreateException("The scalar is not of the requested type.");
+                return false;
+            }
+
+            value = (T)boxed!;
             return true;
         }
-
-        ReadOnlySpan<byte> text = s.DecodedScalar(node, out byte[]? rented);
-        try
+        catch (YamlException ex) when (ex.Category == YamlErrorCategory.Binding)
         {
-            switch (kind)
-            {
-                case ScalarKind.Null:
-                    return true;
-                case ScalarKind.Bool:
-                    if (CoreSchema.TryParseBool(text, out bool b))
-                    {
-                        value = (T)(object)b;
-                        return true;
-                    }
-
-                    problem = "The boolean cannot be read.";
-                    return false;
-                case ScalarKind.Int:
-                    if (CoreSchema.TryParseInt64(text, out long l))
-                    {
-                        value = (T)(object)l;
-                        return true;
-                    }
-
-                    CheckDigits(s, node, text, maxIntegerDigits);
-                    if (CoreSchema.TryParseBigInteger(text, out BigInteger big))
-                    {
-                        value = (T)(object)big;
-                        return true;
-                    }
-
-                    problem = "The integer cannot be read.";
-                    return false;
-                default:
-                    if (CoreSchema.TryParseDouble(text, out double d))
-                    {
-                        value = (T)(object)d;
-                        return true;
-                    }
-
-                    problem = "The number cannot be read.";
-                    return false;
-            }
-        }
-        finally
-        {
-            DocState.ReleaseDecoded(rented);
-        }
-    }
-
-    private static bool TryTyped<T>(DocState s, int node, ReadOnlySpan<byte> text, ScalarKind kind, out T value, out string? problem, int maxIntegerDigits)
-    {
-        value = default!;
-        problem = null;
-        if (typeof(T) == typeof(bool) || typeof(T) == typeof(bool?))
-        {
-            if (kind == ScalarKind.Bool && CoreSchema.TryParseBool(text, out bool b))
-            {
-                value = (T)(object)b;
-                return true;
-            }
-
-            problem = "The scalar is not a boolean.";
+            error = ex;
             return false;
         }
-
-        if (kind == ScalarKind.Int)
-        {
-            if (typeof(T) == typeof(BigInteger) || typeof(T) == typeof(BigInteger?))
-            {
-                CheckDigits(s, node, text, maxIntegerDigits);
-                if (CoreSchema.TryParseBigInteger(text, out BigInteger big))
-                {
-                    value = (T)(object)big;
-                    return true;
-                }
-
-                problem = "The integer cannot be read.";
-                return false;
-            }
-
-            if (!CoreSchema.TryParseInt64(text, out long l))
-            {
-                // Beyond 64 bits: only unsigned 64-bit, floating-point and decimal can still hold it.
-                CheckDigits(s, node, text, maxIntegerDigits);
-                if (!CoreSchema.TryParseBigInteger(text, out BigInteger huge))
-                {
-                    problem = "The integer cannot be read.";
-                    return false;
-                }
-
-                if (typeof(T) == typeof(ulong) && huge >= 0 && huge <= ulong.MaxValue)
-                {
-                    value = (T)(object)(ulong)huge;
-                    return true;
-                }
-
-                if (typeof(T) == typeof(double))
-                {
-                    value = (T)(object)(double)huge;
-                    return true;
-                }
-
-                if (typeof(T) == typeof(decimal) && huge >= (BigInteger)decimal.MinValue && huge <= (BigInteger)decimal.MaxValue)
-                {
-                    value = (T)(object)(decimal)huge;
-                    return true;
-                }
-
-                problem = "The integer is too large for the type.";
-                return false;
-            }
-
-            return FromInt64(l, out value, out problem);
-        }
-
-        if (kind == ScalarKind.Float)
-        {
-            if (!CoreSchema.TryParseDouble(text, out double d))
-            {
-                problem = "The number cannot be read.";
-                return false;
-            }
-
-            if (typeof(T) == typeof(double) || typeof(T) == typeof(double?))
-            {
-                value = (T)(object)d;
-                return true;
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                value = (T)(object)(float)d;
-                return true;
-            }
-
-            if (typeof(T) == typeof(decimal) && Math.Abs(d) < 7.9e28 && !double.IsNaN(d))
-            {
-                value = (T)(object)(decimal)d;
-                return true;
-            }
-        }
-
-        problem = "The scalar is not of the requested type.";
-        return false;
     }
 
-    private static bool FromInt64<T>(long l, out T value, out string? problem)
+    private static bool TryRead(ref Utf8YamlReader r, YamlSerializerOptions o, Type u, out object? v)
     {
-        value = default!;
-        problem = null;
-        bool ok = true;
-        if (typeof(T) == typeof(long) || typeof(T) == typeof(long?))
+        v = null;
+        if (u == typeof(string))
         {
-            value = (T)(object)l;
+            v = s_String.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(int) || typeof(T) == typeof(int?))
+        else if (u == typeof(bool))
         {
-            ok = l is >= int.MinValue and <= int.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(int)l;
-            }
+            v = s_Boolean.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(short))
+        else if (u == typeof(int))
         {
-            ok = l is >= short.MinValue and <= short.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(short)l;
-            }
+            v = s_Int32.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(sbyte))
+        else if (u == typeof(long))
         {
-            ok = l is >= sbyte.MinValue and <= sbyte.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(sbyte)l;
-            }
+            v = s_Int64.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(byte))
+        else if (u == typeof(short))
         {
-            ok = l is >= 0 and <= byte.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(byte)l;
-            }
+            v = s_Int16.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(ushort))
+        else if (u == typeof(sbyte))
         {
-            ok = l is >= 0 and <= ushort.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(ushort)l;
-            }
+            v = s_SByte.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(uint))
+        else if (u == typeof(byte))
         {
-            ok = l is >= 0 and <= uint.MaxValue;
-            if (ok)
-            {
-                value = (T)(object)(uint)l;
-            }
+            v = s_Byte.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(ulong))
+        else if (u == typeof(ushort))
         {
-            ok = l >= 0;
-            if (ok)
-            {
-                value = (T)(object)(ulong)l;
-            }
+            v = s_UInt16.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(double) || typeof(T) == typeof(double?))
+        else if (u == typeof(uint))
         {
-            value = (T)(object)(double)l;
+            v = s_UInt32.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(float))
+        else if (u == typeof(ulong))
         {
-            value = (T)(object)(float)l;
+            v = s_UInt64.Read(ref r, u, o);
         }
-        else if (typeof(T) == typeof(decimal))
+        else if (u == typeof(BigInteger))
         {
-            value = (T)(object)(decimal)l;
+            v = s_Big.Read(ref r, u, o);
+        }
+        else if (u == typeof(double))
+        {
+            v = s_Double.Read(ref r, u, o);
+        }
+        else if (u == typeof(float))
+        {
+            v = s_Single.Read(ref r, u, o);
+        }
+        else if (u == typeof(decimal))
+        {
+            v = s_Decimal.Read(ref r, u, o);
+        }
+        else if (u == typeof(char))
+        {
+            v = s_Char.Read(ref r, u, o);
+        }
+        else if (u == typeof(Guid))
+        {
+            v = s_Guid.Read(ref r, u, o);
+        }
+        else if (u == typeof(DateTime))
+        {
+            v = s_DateTime.Read(ref r, u, o);
+        }
+        else if (u == typeof(DateTimeOffset))
+        {
+            v = s_DateTimeOffset.Read(ref r, u, o);
+        }
+        else if (u == typeof(DateOnly))
+        {
+            v = s_DateOnly.Read(ref r, u, o);
+        }
+        else if (u == typeof(TimeOnly))
+        {
+            v = s_TimeOnly.Read(ref r, u, o);
+        }
+        else if (u == typeof(TimeSpan))
+        {
+            v = s_TimeSpan.Read(ref r, u, o);
         }
         else
         {
-            problem = "The scalar is not of the requested type.";
             return false;
         }
 
-        if (!ok)
-        {
-            problem = "The integer does not fit the type.";
-        }
-
-        return ok;
+        return true;
     }
 }
