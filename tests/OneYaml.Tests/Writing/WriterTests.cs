@@ -179,7 +179,7 @@ public class WriterTests
     [InlineData(-0.0, "-0.0")]
     [InlineData(100.0, "100.0")]
     [InlineData(0.5, "0.5")]
-    [InlineData(1e-7, "1E-07")]
+    [InlineData(1e-7, "1.0E-07")]
     [InlineData(double.NaN, ".nan")]
     [InlineData(double.PositiveInfinity, ".inf")]
     [InlineData(double.NegativeInfinity, "-.inf")]

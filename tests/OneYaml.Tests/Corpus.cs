@@ -86,6 +86,17 @@ internal static class Corpus
 
     internal static JsonDocument ReadJson(string path) => JsonDocument.Parse(File.ReadAllBytes(path));
 
+    /// <summary>
+    /// Keeps the ids of the cases that belong to one tier: cases whose generated input is a megabyte or more run in
+    /// the slow tier, the rest in the fast one.
+    /// </summary>
+    internal static IEnumerable<string> Tier(IEnumerable<string> ids, bool large) =>
+        ids.Where(id =>
+        {
+            using JsonDocument doc = ReadJson(Path.Combine(KitCaseDirectory(id), "case.json"));
+            return (KitInput.RecipeSize(doc.RootElement) >= KitInput.LargeBytes) == large;
+        });
+
     /// <summary>Wraps ids for a Theory; a lone placeholder row lets the test report a skip when the data is missing.</summary>
     internal static IEnumerable<object[]> Rows(IEnumerable<string> ids)
     {

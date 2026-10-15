@@ -17,7 +17,9 @@ public class KitValueTests
         ["schema/quoted-and-plain-keys-differ-by-type"] = (YamlErrorCategory.DuplicateKey, "same key twice"),
     };
 
-    public static IEnumerable<object[]> Cases() => Corpus.Rows(ValueCaseIds("schema", "safety", "parse", "diagnostics"));
+    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: false));
+
+    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: true));
 
     private static IEnumerable<string> ValueCaseIds(params string[] categories)
     {
@@ -54,7 +56,14 @@ public class KitValueTests
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void Case_gives_the_expected_value_or_error(string id)
+    public void Case_gives_the_expected_value_or_error(string id) => Run(id);
+
+    [Theory]
+    [Trait("Category", "Slow")]
+    [MemberData(nameof(LargeCases))]
+    public void Large_generated_case_gives_the_expected_value_or_error(string id) => Run(id);
+
+    private static void Run(string id)
     {
         if (id.Length == 0)
         {
@@ -64,8 +73,7 @@ public class KitValueTests
         string dir = Corpus.KitCaseDirectory(id);
         using JsonDocument doc = Corpus.ReadJson(Path.Combine(dir, "case.json"));
         JsonElement root = doc.RootElement;
-        string inputName = root.TryGetProperty("input", out JsonElement named) ? named.GetString()! : "input.yaml";
-        byte[] input = File.ReadAllBytes(Path.Combine(dir, inputName));
+        byte[] input = KitInput.Read(dir, root);
         JsonElement expect = root.GetProperty("expect");
         if (s_modelDeviations.TryGetValue(id, out (YamlErrorCategory Category, string Message) deviation))
         {
@@ -122,8 +130,15 @@ public class KitValueTests
         Assert.True(GC.GetAllocatedBytesForCurrentThread() - before < memory, "allocated more than the bound");
         if (error is not null)
         {
-            Assert.True(expect.TryGetProperty("error", out JsonElement want) && want.GetString() == "limit" && error.Category == YamlErrorCategory.Limit,
-                $"expected a value or a limit error, got {error.Category}: {error.Message}");
+            // The allowed refusals are one category name or a list of names.
+            var allowed = new List<string>();
+            if (expect.TryGetProperty("error", out JsonElement want))
+            {
+                allowed.AddRange(want.ValueKind == JsonValueKind.Array ? want.EnumerateArray().Select(x => x.GetString()!) : [want.GetString()!]);
+            }
+
+            Assert.True(allowed.Any(name => CategoryOf(name) == error.Category),
+                $"expected a value or one of [{string.Join(", ", allowed)}], got {error.Category}: {error.Message}");
             return;
         }
 
@@ -154,18 +169,19 @@ public class KitValueTests
         }
     }
 
+    private static YamlErrorCategory CategoryOf(string category) => category switch
+    {
+        "syntax" => YamlErrorCategory.Syntax,
+        "encoding" => YamlErrorCategory.Encoding,
+        "limit" => YamlErrorCategory.Limit,
+        "duplicate-key" or "duplicate_key" or "duplicate" => YamlErrorCategory.DuplicateKey,
+        _ => throw new InvalidOperationException("unknown error category " + category),
+    };
+
     private static void AssertCategory(YamlException ex, JsonElement expect)
     {
         string category = expect.TryGetProperty("category", out JsonElement c) ? c.GetString()! : "any";
-        YamlErrorCategory? want = category switch
-        {
-            "any" => null,
-            "syntax" => YamlErrorCategory.Syntax,
-            "encoding" => YamlErrorCategory.Encoding,
-            "limit" => YamlErrorCategory.Limit,
-            "duplicate-key" or "duplicate_key" or "duplicate" => YamlErrorCategory.DuplicateKey,
-            _ => throw new InvalidOperationException("unknown error category " + category),
-        };
+        YamlErrorCategory? want = category == "any" ? null : CategoryOf(category);
         if (want is not null)
         {
             Assert.Equal(want, ex.Category);
