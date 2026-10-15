@@ -82,7 +82,13 @@ internal sealed class ByteBuffer : IBufferWriter<byte>, IDisposable
             return;
         }
 
-        byte[] bigger = ArrayPool<byte>.Shared.Rent(checked(Math.Max(_array.Length * 2, _count + extra)));
+        long needed = (long)_count + extra;
+        if (needed > System.Array.MaxLength)
+        {
+            throw new YamlException("The text is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+
+        byte[] bigger = ArrayPool<byte>.Shared.Rent((int)Math.Min(Math.Max((long)_array.Length * 2, needed), System.Array.MaxLength));
         Buffer.BlockCopy(_array, 0, bigger, 0, _count);
         ArrayPool<byte>.Shared.Return(_array);
         _array = bigger;

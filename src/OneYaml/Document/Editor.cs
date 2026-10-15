@@ -101,24 +101,15 @@ internal static partial class Editor
             };
         }
 
-        ReadOnlySpan<byte> name = raw;
-        if (name.Length > 3 && name[1] == (byte)'<' && name[^1] == (byte)'>')
+        TagClass kind = s.TagClassOf(node);
+        if (kind == TagClass.Map)
         {
-            name = name.Slice(2, name.Length - 3);
+            return nv.Kind == VKind.Mapping;
         }
 
-        if (name.StartsWith("!!"u8) || name.StartsWith("tag:yaml.org,2002:"u8))
+        if (kind == TagClass.Seq)
         {
-            ReadOnlySpan<byte> bare = name.StartsWith("!!"u8) ? name.Slice(2) : name.Slice(18);
-            if (bare.SequenceEqual("map"u8))
-            {
-                return nv.Kind == VKind.Mapping;
-            }
-
-            if (bare.SequenceEqual("seq"u8))
-            {
-                return nv.Kind == VKind.Sequence;
-            }
+            return nv.Kind == VKind.Sequence;
         }
 
         // A tag the schema does not know makes its scalar read as text, so it fits only a string.
@@ -225,8 +216,7 @@ internal static partial class Editor
                 && Utf8YamlWriter.CanWriteBlock(sv.Text, ownerCol, contentIndent))
             {
                 ReadOnlySpan<byte> header = HeaderComment(s, node);
-                var chomp = (Chomping)n.Chomp;
-                BlockScalar.Write(body, sv.Text, pref == ScalarWriteStyle.Folded, ownerCol, contentIndent, chomp, header, out bool keepsBlanks);
+                BlockScalar.Write(body, sv.Text, pref == ScalarWriteStyle.Folded, ownerCol, contentIndent, HeaderOf(src, n.Start), header, out bool keepsBlanks);
                 valueEndsWithBreak = true;
                 if (keepsBlanks)
                 {
@@ -287,9 +277,38 @@ internal static partial class Editor
                 edit.Write((byte)'\n');
             }
         }
+        else if (parent >= 0 && !inFlow && !hasProps && slotStart >= 0 && n.Start > slotStart && HasCommentIn(src, slotStart, n.Start))
+        {
+            // A comment sits between the key (or dash) and a value on a later line. It stays, and only the
+            // value's own lines are replaced.
+            regionStart = s.LineStart(n.Start);
+            int col = n.Start - regionStart;
+            if (newBlockNonEmpty)
+            {
+                using var lines = new ByteBuffer();
+                ValueWriter.WriteBlock(lines, v, 0, col, false, lay);
+                ReadOnlySpan<byte> text = lines.WrittenSpan;
+                if (!oldEndsWithBreak)
+                {
+                    text = text.Slice(0, text.Length - 1);
+                }
+
+                edit.Write(text);
+            }
+            else
+            {
+                edit.WriteSpaces(col);
+                edit.Write(body.WrittenSpan);
+                if (oldEndsWithBreak && !valueEndsWithBreak)
+                {
+                    edit.Write((byte)'\n');
+                }
+            }
+        }
         else
         {
             bool root = parent < 0;
+            bool endsAtBreak = false;
             regionStart = root ? (hasProps || hasTag ? s.PropStart(node) : n.Start) : slotStart;
             if (root && newBlockNonEmpty)
             {
@@ -315,6 +334,9 @@ internal static partial class Editor
                     if (regionStart > 0 && !DocState.IsBreak(src[regionStart - 1]))
                     {
                         edit.Write((byte)'\n');
+
+                        // The break that ends the marker's line is still there, so the new lines need no final one.
+                        endsAtBreak = regionStart < src.Length && DocState.IsBreak(src[regionStart]);
                     }
                 }
             }
@@ -358,7 +380,7 @@ internal static partial class Editor
 
                 ReadOnlySpan<byte> text = lines.WrittenSpan;
                 // An empty root has no line of its own yet, so the new lines keep their final break.
-                if (!oldEndsWithBreak && !(root && (n.Flags & NodeFlags.Empty) != 0))
+                if ((!oldEndsWithBreak && !(root && (n.Flags & NodeFlags.Empty) != 0)) || (endsAtBreak && (n.Flags & NodeFlags.Empty) != 0))
                 {
                     text = text.Slice(0, text.Length - 1);
                 }
@@ -384,6 +406,38 @@ internal static partial class Editor
         ValueWriter.WriteWithBreaks(edit.WrittenSpan, lay.Nl, final);
         return Commit(s, limits, regionStart, regionEnd, final);
     }
+
+    // The header of the block scalar whose indicator character sits at an offset: its chomping and indentation indicator.
+    private static BlockHeader HeaderOf(ReadOnlySpan<byte> src, int at)
+    {
+        BlockChomping chomping = BlockChomping.Clip;
+        int indicator = 0;
+        for (int i = at + 1; i < src.Length && i < at + 4; i++)
+        {
+            byte b = src[i];
+            if (b == (byte)'+')
+            {
+                chomping = BlockChomping.Keep;
+            }
+            else if (b == (byte)'-')
+            {
+                chomping = BlockChomping.Strip;
+            }
+            else if (b is >= (byte)'1' and <= (byte)'9')
+            {
+                indicator = b - '0';
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        return new BlockHeader(chomping, indicator);
+    }
+
+    // Between a key (or dash) and a value on a later line only blanks and comments can lie.
+    private static bool HasCommentIn(ReadOnlySpan<byte> src, int from, int to) => src.Slice(from, to - from).IndexOf((byte)'#') >= 0;
 
     // A value for an explicit key that has none: "? a" gets a line ": value" under it.
     private static DocState ReplaceBareExplicit(DocState s, YamlLimits limits, int node, ValueTree v)
@@ -494,30 +548,30 @@ internal static class BlockScalar
     /// <param name="folded">Whether to write a folded scalar.</param>
     /// <param name="parentIndent">Column of the owning key or dash.</param>
     /// <param name="contentIndent">Column of the lines.</param>
-    /// <param name="old">The chomping the scalar had before.</param>
+    /// <param name="old">The header the scalar had before, kept as far as the new value allows.</param>
     /// <param name="headerSuffix">A comment to put after the header, or empty.</param>
     /// <param name="keepsBlanks">Whether the new value keeps trailing blank lines, which the caller must not leave behind.</param>
-    public static void Write(ByteBuffer o, ReadOnlySpan<byte> text, bool folded, int parentIndent, int contentIndent, Chomping old, ReadOnlySpan<byte> headerSuffix, out bool keepsBlanks)
+    public static void Write(ByteBuffer o, ReadOnlySpan<byte> text, bool folded, int parentIndent, int contentIndent, BlockHeader old, ReadOnlySpan<byte> headerSuffix, out bool keepsBlanks)
     {
         ReadOnlySpan<byte> body = text.TrimEnd((byte)'\n');
         int trailing = text.Length - body.Length;
+        BlockHeader chosen = Utf8YamlWriter.ResolveHeader(text, parentIndent, contentIndent, old);
         o.Write(folded ? (byte)'>' : (byte)'|');
-        if (body.TrimStart((byte)'\n')[0] == (byte)' ')
+        if (chosen.IndentIndicator != 0)
         {
-            o.Write((byte)('0' + (contentIndent - parentIndent)));
+            o.Write((byte)('0' + chosen.IndentIndicator));
         }
 
-        bool keep = trailing >= 2 || (trailing == 1 && old == Chomping.Keep);
-        if (trailing == 0)
+        if (chosen.Chomping == BlockChomping.Strip)
         {
             o.Write((byte)'-');
         }
-        else if (keep)
+        else if (chosen.Chomping == BlockChomping.Keep)
         {
             o.Write((byte)'+');
         }
 
-        keepsBlanks = keep;
+        keepsBlanks = chosen.Chomping == BlockChomping.Keep;
         o.Write(headerSuffix);
         o.Write((byte)'\n');
 

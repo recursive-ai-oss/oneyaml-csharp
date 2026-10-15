@@ -12,7 +12,7 @@ namespace OneYaml.Documents;
 /// </summary>
 internal sealed partial class DocState : IDisposable
 {
-    private const int PropWidth = 5;
+    private const int PropWidth = 6;
 
     private byte[] _buf;
     private CstNode[] _nodes;
@@ -49,6 +49,9 @@ internal sealed partial class DocState : IDisposable
 
     public int DocCount { get; private set; }
 
+    /// <summary>Whether the stream holds no document and <see cref="DocCount"/> counts the empty one made up for edits.</summary>
+    public bool NoRealDocument { get; private set; }
+
     public int CommentCount { get; private set; }
 
     /// <summary>Whether any alias occurs in the stream.</summary>
@@ -67,6 +70,13 @@ internal sealed partial class DocState : IDisposable
     public bool HasAnchor(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth)] >= 0;
 
     public bool HasTag(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth) + 2] >= 0;
+
+    /// <summary>What the node's tag means once its handle is resolved, <see cref="TagClass.None"/> when it has no tag.</summary>
+    public TagClass TagClassOf(int node)
+    {
+        int p = _nodes[node].Props;
+        return p < 0 || _props[(p * PropWidth) + 2] < 0 ? TagClass.None : (TagClass)_props[(p * PropWidth) + 5];
+    }
 
     /// <summary>The anchor name (without <c>&amp;</c>) of a node, empty when it has none.</summary>
     public ReadOnlySpan<byte> AnchorName(int node)
@@ -292,7 +302,7 @@ internal sealed partial class DocState : IDisposable
                             if (reader.HasAnchor || reader.HasTag)
                             {
                                 n.Props = AddProps(ref reader, src);
-                                if (reader.HasAnchor)
+                                if (reader.HasAnchor && reader.TokenType == YamlTokenType.Scalar)
                                 {
                                     anchors.Set(src, reader.AnchorStart, reader.Anchor.Length, idx);
                                 }
@@ -319,6 +329,7 @@ internal sealed partial class DocState : IDisposable
                                 else if (reader.ScalarStyle == ScalarStyle.Plain && reader.End == reader.Start)
                                 {
                                     n.Flags |= NodeFlags.Empty;
+                                    n.Aux = reader.Start;
                                     PlaceEmpty(src, idx, parent, prev, isKey);
                                 }
                             }
@@ -361,6 +372,7 @@ internal sealed partial class DocState : IDisposable
                             int idx = openNode[open];
                             ref CstNode n = ref _nodes[idx];
                             n.Size = NodeCount - idx;
+                            n.Aux = reader.Start;
                             if (n.IsFlow && (n.Flags & NodeFlags.Pair) == 0)
                             {
                                 n.End = reader.End;
@@ -369,6 +381,13 @@ internal sealed partial class DocState : IDisposable
                             {
                                 int last = openLast[open];
                                 n.End = last >= 0 ? _nodes[last].End : n.Start;
+                            }
+
+                            if (HasAnchor(idx))
+                            {
+                                // An anchor takes effect when its node is complete, so a node cannot refer to itself.
+                                int row = n.Props * PropWidth;
+                                anchors.Set(src, _props[row], _props[row + 1], idx);
                             }
 
                             if (!AllowDuplicateKeys && n.Kind == NodeKind.Mapping && n.Count > 2)
@@ -383,9 +402,11 @@ internal sealed partial class DocState : IDisposable
 
             if (DocCount == 0)
             {
-                // An empty stream, or one that holds only comments, still has one empty document.
+                // An empty stream, or one that holds only comments, has no document. One empty document is
+                // made up so that a write has somewhere to go; the public list hides it.
                 _docs[0] = new DocInfo { Root = -1, StartPos = src.Length, StartEnd = src.Length, EndPos = src.Length };
                 DocCount = 1;
+                NoRealDocument = true;
             }
 
             for (int d = 0; d < DocCount; d++)
@@ -399,6 +420,7 @@ internal sealed partial class DocState : IDisposable
                     e.Size = 1;
                     e.Flags = NodeFlags.Empty;
                     e.Start = e.End = _docs[d].StartEnd;
+                    e.Aux = NoRealDocument ? 0 : _docs[d].StartEnd;
                     _docs[d].Root = at;
                 }
             }
@@ -488,6 +510,7 @@ internal sealed partial class DocState : IDisposable
         int a = reader.HasAnchor ? reader.AnchorStart : -1;
         int aLen = reader.HasAnchor ? reader.Anchor.Length : 0;
         int t = reader.HasTag ? reader.TagStart : -1;
+        int tagClass = reader.HasTag ? (int)Utf8YamlReader.ClassifyResolvedTag(reader.GetResolvedTag()) : 0;
         int tLen = reader.HasTag ? reader.RawTag.Length : 0;
         int first = int.MaxValue;
         if (a >= 0)
@@ -506,6 +529,7 @@ internal sealed partial class DocState : IDisposable
         _props[at + 2] = t;
         _props[at + 3] = tLen;
         _props[at + 4] = first;
+        _props[at + 5] = tagClass;
         PropCountRows++;
         _ = src;
         return row;
@@ -598,19 +622,20 @@ internal sealed partial class DocState : IDisposable
         return i;
     }
 
-    // A small hash map from anchor names to nodes, with open addressing. Anchors are rare, so
-    // nothing is allocated until the first one.
+    // A small hash map from anchor names to nodes, with open addressing, on pooled arrays. Anchors are
+    // rare, so nothing is rented until the first one.
     private sealed class AnchorMap : IDisposable
     {
-        private int[] _table = [];
-        private int[] _entries = []; // per entry: hash, start, length, node
+        private int[]? _table;
+        private int _tableSize; // a power of two; the rented array may be longer
+        private int[]? _entries; // per entry: hash, start, length, node
         private int _count;
 
         public void Clear()
         {
             if (_count != 0)
             {
-                Array.Clear(_table);
+                Array.Clear(_table!, 0, _tableSize);
                 _count = 0;
             }
         }
@@ -623,17 +648,17 @@ internal sealed partial class DocState : IDisposable
             }
 
             int hash = Hash(name);
-            int mask = _table.Length - 1;
+            int mask = _tableSize - 1;
             for (int slot = hash & mask; ; slot = (slot + 1) & mask)
             {
-                int e = _table[slot];
+                int e = _table![slot];
                 if (e == 0)
                 {
                     return -1;
                 }
 
                 int at = (e - 1) * 4;
-                if (_entries[at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
+                if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
                 {
                     return _entries[at + 3];
                 }
@@ -643,14 +668,16 @@ internal sealed partial class DocState : IDisposable
         public void Set(ReadOnlySpan<byte> src, int start, int length, int node)
         {
             ReadOnlySpan<byte> name = src.Slice(start, length);
-            if (_table.Length == 0)
+            if (_table is null)
             {
-                _table = new int[16];
-                _entries = new int[16 * 4];
+                _tableSize = 16;
+                _table = ArrayPool<int>.Shared.Rent(_tableSize);
+                Array.Clear(_table, 0, _tableSize);
+                _entries = ArrayPool<int>.Shared.Rent(16 * 4);
             }
 
             int hash = Hash(name);
-            int mask = _table.Length - 1;
+            int mask = _tableSize - 1;
             for (int slot = hash & mask; ; slot = (slot + 1) & mask)
             {
                 int e = _table[slot];
@@ -660,7 +687,7 @@ internal sealed partial class DocState : IDisposable
                 }
 
                 int at = (e - 1) * 4;
-                if (_entries[at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
+                if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
                 {
                     // An anchor may be redefined; aliases after this point mean the new node.
                     _entries[at + 3] = node;
@@ -668,15 +695,18 @@ internal sealed partial class DocState : IDisposable
                 }
             }
 
-            if ((_count + 1) * 2 > _table.Length)
+            if ((_count + 1) * 2 > _tableSize)
             {
-                Rehash(src);
-                mask = _table.Length - 1;
+                Rehash();
+                mask = _tableSize - 1;
             }
 
-            if ((_count + 1) * 4 > _entries.Length)
+            if ((_count + 1) * 4 > _entries!.Length)
             {
-                Array.Resize(ref _entries, _entries.Length * 2);
+                int[] bigger = ArrayPool<int>.Shared.Rent(_entries.Length * 2);
+                Array.Copy(_entries, bigger, _count * 4);
+                ArrayPool<int>.Shared.Return(_entries);
+                _entries = bigger;
             }
 
             int w = _count * 4;
@@ -695,14 +725,15 @@ internal sealed partial class DocState : IDisposable
             }
         }
 
-        private void Rehash(ReadOnlySpan<byte> src)
+        private void Rehash()
         {
-            _ = src;
-            int[] bigger = new int[_table.Length * 2];
-            int mask = bigger.Length - 1;
+            int size = _tableSize * 2;
+            int[] bigger = ArrayPool<int>.Shared.Rent(size);
+            Array.Clear(bigger, 0, size);
+            int mask = size - 1;
             for (int i = 0; i < _count; i++)
             {
-                for (int slot = _entries[i * 4] & mask; ; slot = (slot + 1) & mask)
+                for (int slot = _entries![i * 4] & mask; ; slot = (slot + 1) & mask)
                 {
                     if (bigger[slot] == 0)
                     {
@@ -712,7 +743,9 @@ internal sealed partial class DocState : IDisposable
                 }
             }
 
+            ArrayPool<int>.Shared.Return(_table!);
             _table = bigger;
+            _tableSize = size;
         }
 
         private static int Hash(ReadOnlySpan<byte> name)
@@ -728,6 +761,13 @@ internal sealed partial class DocState : IDisposable
 
         public void Dispose()
         {
+            if (_table is not null)
+            {
+                ArrayPool<int>.Shared.Return(_table);
+                ArrayPool<int>.Shared.Return(_entries!);
+                _table = null;
+                _entries = null;
+            }
         }
     }
 }

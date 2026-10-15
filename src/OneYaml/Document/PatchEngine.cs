@@ -231,7 +231,7 @@ internal static class PatchEngine
                 throw Invalid("The operation '" + name + "' needs a \"value\".");
             }
 
-            value = ValueTree.FromJsonNode(v, limits.MaxDepth);
+            value = ValueTree.FromJsonNode(v, limits.MaxDepth, maxIntegerDigits: limits.MaxIntegerDigits);
         }
 
         return new PatchStep(kind, path, from, value);
@@ -696,7 +696,7 @@ internal static class PatchEngine
         }
 
         // Anything else replaces what is there (or fills in what is missing), without the null members.
-        ValueTree value = ValueTree.FromJsonNode(patch, limits.MaxDepth, dropNulls: true);
+        ValueTree value = ValueTree.FromJsonNode(patch, limits.MaxDepth, dropNulls: true, maxIntegerDigits: limits.MaxIntegerDigits);
         Pointer p = Pointer.FromTokens(tokens);
         Swap(ref cur, original, PointerOps.Write(cur, limits, document, p, value, PointerOps.Mode.Add));
         Finish(tokens, popToken);

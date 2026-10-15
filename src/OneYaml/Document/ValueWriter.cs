@@ -48,6 +48,49 @@ internal static class ValueWriter
         return w.WriteString(n.Text, preferred, ctx, StyleMode.Edit, parentIndent, contentIndent);
     }
 
+    /// <summary>
+    /// Writes a mapping key. A key too long to be implicit is written as <c>? key</c>: in block
+    /// context the colon follows on a line of its own (this method writes it), in flow context the
+    /// caller writes the colon as it does for any key.
+    /// </summary>
+    /// <param name="o">The destination.</param>
+    /// <param name="key">A scalar node of a value tree.</param>
+    /// <param name="preferred">The style to keep if it can hold the key.</param>
+    /// <param name="ctx">A key context.</param>
+    /// <param name="col">Column of the entry.</param>
+    /// <param name="step">Columns a nested mapping is indented by.</param>
+    public static void WriteKey(ByteBuffer o, in VNode key, ScalarWriteStyle preferred, EmitContext ctx, int col, int step)
+    {
+        ScalarWriteStyle used = WriteScalar(o, key, preferred, ctx, col, col + step);
+        bool flow = ctx == EmitContext.FlowKey;
+        if (used != ScalarWriteStyle.ExplicitKeyRequired)
+        {
+            if (!flow)
+            {
+                o.Write((byte)':');
+            }
+
+            return;
+        }
+
+        // The explicit form has no length limit, so the key is written as a value would be.
+        o.Write("? "u8);
+        ScalarWriteStyle k = WriteScalar(o, key, ScalarWriteStyle.Plain, flow ? EmitContext.FlowValue : EmitContext.BlockValue, col, col + step);
+        if (flow)
+        {
+            o.Write((byte)' ');
+            return;
+        }
+
+        if (!EndsWithBreak(k))
+        {
+            o.Write((byte)'\n');
+        }
+
+        o.WriteSpaces(col);
+        o.Write((byte)':');
+    }
+
     /// <summary>Whether a scalar written in this style ends with a line break of its own.</summary>
     /// <param name="style">The style.</param>
     /// <returns><see langword="true"/> for the block styles.</returns>
@@ -94,8 +137,7 @@ internal static class ValueWriter
             stack[top] = f;
             if (f.IsMap)
             {
-                WriteScalar(o, v[next], stack.Count == 1 ? keyStyle : ScalarWriteStyle.Plain, EmitContext.BlockKey, f.Col, f.Col + layout.Step);
-                o.Write((byte)':');
+                WriteKey(o, v[next], stack.Count == 1 ? keyStyle : ScalarWriteStyle.Plain, EmitContext.BlockKey, f.Col, layout.Step);
                 next += v[next].Size;
             }
             else
@@ -172,7 +214,7 @@ internal static class ValueWriter
 
                 if (f.IsMap)
                 {
-                    WriteScalar(o, v[next], ScalarWriteStyle.Plain, EmitContext.FlowKey, 0, 0);
+                    WriteKey(o, v[next], ScalarWriteStyle.Plain, EmitContext.FlowKey, 0, 0);
                     o.Write(": "u8);
                     next += v[next].Size;
                     f.Remaining -= 2;

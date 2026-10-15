@@ -30,21 +30,43 @@ public sealed class YamlDocument : IDisposable
     private DocState? _state;
     private readonly YamlLimits _limits;
     private int _version;
+    private AliasBudget _walk;
+    private YamlSerializerOptions? _bindOptions;
 
     private YamlDocument(DocState state, YamlLimits limits)
     {
         _state = state;
         _limits = limits;
         Documents = new DocumentList(this);
+        ResetWalk();
     }
 
-    /// <summary>The documents of the stream, in order. An empty stream has one empty document.</summary>
+    /// <summary>The documents of the stream, in order. A stream with no document (an empty text, or only comments) has none.</summary>
     public IReadOnlyList<YamlNode> Documents { get; }
 
-    /// <summary>The root of the first document.</summary>
-    public YamlNode Root => Documents[0];
+    /// <summary>
+    /// The root of the first document. A stream with no document has an implicit empty one: it reads as
+    /// null, and the first write to it makes the document.
+    /// </summary>
+    public YamlNode Root
+    {
+        get
+        {
+            DocState s = State;
+            ResetWalk();
+            return new YamlNode(this, s.Doc(0).Root, _version, false);
+        }
+    }
 
     internal YamlLimits Limits => _limits;
+
+    // The alias budget of the walk that started at the last root taken, shared by every view derived from it.
+    internal ref AliasBudget Walk => ref _walk;
+
+    internal void ResetWalk() => _walk = new AliasBudget(State, _limits);
+
+    // Options for reading scalars through the binder's converters, carrying this document's limits.
+    internal YamlSerializerOptions BindOptions => _bindOptions ??= ReferenceEquals(_limits, YamlLimits.Default) ? YamlSerializerOptions.Default : new YamlSerializerOptions { Limits = _limits };
 
     internal int Version => _version;
 
@@ -96,6 +118,7 @@ public sealed class YamlDocument : IDisposable
     public static YamlDocument Parse(Stream stream, YamlDocumentOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -106,6 +129,7 @@ public sealed class YamlDocument : IDisposable
             }
 
             buffer.Advance(n);
+            CheckSize(buffer.Count, max);
         }
 
         return Parse(buffer.WrittenSpan, options);
@@ -120,6 +144,7 @@ public sealed class YamlDocument : IDisposable
     public static async Task<YamlDocument> LoadAsync(Stream stream, YamlDocumentOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
+        long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -130,9 +155,19 @@ public sealed class YamlDocument : IDisposable
             }
 
             buffer.Advance(n);
+            CheckSize(buffer.Count, max);
         }
 
         return Parse(buffer.WrittenSpan, options);
+    }
+
+    // Stops reading as soon as the input passes the limit, so an endless stream cannot fill memory first.
+    private static void CheckSize(int length, long max)
+    {
+        if (length > max)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
     }
 
     /// <summary>Returns the pooled memory the document holds. Views taken from it must not be used afterwards.</summary>
@@ -265,6 +300,7 @@ public sealed class YamlDocument : IDisposable
             _state?.Dispose();
             _state = next;
             _version++;
+            ResetWalk();
         }
     }
 
@@ -300,8 +336,11 @@ public sealed class YamlDocument : IDisposable
     internal void Write(string path, object? value, int document, PointerOps.Mode mode)
     {
         Pointer p = Pointer.Parse(path);
-        DocState s = Current(document);
+
+        // Build the value before taking the state: a value that reads this document while it is built
+        // could otherwise leave the edit working on a state that has been replaced.
         ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth);
+        DocState s = Current(document);
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
     }
 
@@ -422,6 +461,7 @@ public sealed class YamlDocument : IDisposable
             throw YamlException.At(YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", s.Text, 0);
         }
 
+        ResetWalk();
         return new YamlNode(this, node, _version, false);
     }
 
@@ -445,7 +485,7 @@ public sealed class YamlDocument : IDisposable
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
         int node = PointerOps.Find(s, _limits, document, p);
-        if (node >= 0 && NodeValues.TryGet(s, node, out value, out _, _limits.MaxIntegerDigits))
+        if (node >= 0 && NodeValues.TryGet(s, node, BindOptions, out value, out _))
         {
             return true;
         }
@@ -465,18 +505,19 @@ public sealed class YamlDocument : IDisposable
             _doc = doc;
         }
 
-        public int Count => _doc.State.DocCount;
+        public int Count => _doc.State.NoRealDocument ? 0 : _doc.State.DocCount;
 
         public YamlNode this[int index]
         {
             get
             {
                 DocState s = _doc.State;
-                if ((uint)index >= (uint)s.DocCount)
+                if ((uint)index >= (uint)Count)
                 {
                     throw new ArgumentOutOfRangeException(nameof(index));
                 }
 
+                _doc.ResetWalk();
                 return new YamlNode(_doc, s.Doc(index).Root, _doc._version, false);
             }
         }

@@ -198,7 +198,7 @@ internal static partial class Editor
         if (key is not null)
         {
             var kn = new VNode { Kind = VKind.Scalar, Scalar = ScalarKind.String, Size = 1, Text = key };
-            ValueWriter.WriteScalar(text, kn, keyPref, EmitContext.FlowKey, 0, 0);
+            ValueWriter.WriteKey(text, kn, keyPref, EmitContext.FlowKey, 0, 0);
             text.Write(": "u8);
         }
 
@@ -228,6 +228,11 @@ internal static partial class Editor
         {
             int last = LastChild(s, coll);
             pos = s.Node(last).End;
+            if (TryAppendAfterComment(s, limits, last, map, text.WrittenSpan, lay.Nl, out DocState? appended))
+            {
+                return appended!;
+            }
+
             edit.Write(", "u8);
             edit.Write(text.WrittenSpan);
         }
@@ -242,6 +247,63 @@ internal static partial class Editor
         using var final = new ByteBuffer(edit.Count + 8);
         ValueWriter.WriteWithBreaks(edit.WrittenSpan, lay.Nl, final);
         return Commit(s, limits, pos, pos, final);
+    }
+
+    // The last item of a flow collection is on a line of its own and ends with a comment: the new item
+    // goes on the next line, after the comment, in the same column. The last item gets its comma, and the
+    // new one a comma of its own only if the last had one.
+    private static bool TryAppendAfterComment(DocState s, YamlLimits limits, int last, bool map, ReadOnlySpan<byte> item, string nl, out DocState? next)
+    {
+        next = null;
+        ReadOnlySpan<byte> src = s.Text;
+        int end = s.Node(last).End;
+        int entryAt = map ? s.EntryStart(s.PrevSibling(last)) : s.PropStart(last);
+        if (!s.StartsLine(entryAt))
+        {
+            return false;
+        }
+
+        int p = end;
+        while (p < src.Length && src[p] == (byte)' ')
+        {
+            p++;
+        }
+
+        bool comma = p < src.Length && src[p] == (byte)',';
+        if (comma)
+        {
+            p++;
+            while (p < src.Length && src[p] == (byte)' ')
+            {
+                p++;
+            }
+        }
+
+        if (p >= src.Length || src[p] != (byte)'#' || !s.IsCommentAt(p))
+        {
+            return false;
+        }
+
+        int lineEnd = s.LineBreakAt(p);
+        using var text = new ByteBuffer(item.Length + 16);
+        if (!comma)
+        {
+            text.Write((byte)',');
+        }
+
+        text.Write(src.Slice(end, lineEnd - end));
+        text.Write((byte)'\n');
+        text.WriteSpaces(s.Column(entryAt));
+        text.Write(item);
+        if (comma)
+        {
+            text.Write((byte)',');
+        }
+
+        using var final = new ByteBuffer(text.Count + 8);
+        ValueWriter.WriteWithBreaks(text.WrittenSpan, nl, final);
+        next = Commit(s, limits, end, lineEnd, final);
+        return true;
     }
 
     /// <summary>Removes an entry: a mapping value with its key, or a sequence item.</summary>
@@ -288,6 +350,29 @@ internal static partial class Editor
         {
             int from;
             int to;
+            int entryAt = map ? s.EntryStart(first) : s.PropStart(first);
+            int after = end;
+            while (after < src.Length && src[after] == (byte)' ')
+            {
+                after++;
+            }
+
+            if (after < src.Length && src[after] == (byte)',')
+            {
+                after++;
+                while (after < src.Length && src[after] == (byte)' ')
+                {
+                    after++;
+                }
+            }
+
+            if (s.StartsLine(entryAt) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
+            {
+                // The item has its lines to itself, its own comment included: they go, and nothing else moves.
+                using var lines = new ByteBuffer(1);
+                return Commit(s, limits, s.OwnedCommentsStart(s.LineStart(entryAt)), s.PastLine(after), lines);
+            }
+
             if (prevEntry < 0)
             {
                 from = s.PropStart(first);

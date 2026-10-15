@@ -412,6 +412,11 @@ public ref partial struct Utf8YamlReader
             }
 
             ref TapeEvent e = ref book.Tape[f.Pos++];
+            if (_countReplayed && book.FrameCount == 1)
+            {
+                CountReplayed(in e);
+            }
+
             if (e.Type == YamlTokenType.Alias)
             {
                 // The charge for this expansion was taken with the outer alias.
