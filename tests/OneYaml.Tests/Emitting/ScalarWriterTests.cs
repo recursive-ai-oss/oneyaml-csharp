@@ -404,18 +404,7 @@ public sealed class ScalarWriterTests
             writer.WriteNull();
         }
 
-        for (int i = 0; i < 3; i++)
-        {
-            RunAll();
-        }
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 500; i++)
-        {
-            RunAll();
-        }
-
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        SteadyState.AssertAllocatesNothing(RunAll, 500);
     }
 
     [Theory]

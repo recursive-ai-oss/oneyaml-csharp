@@ -394,20 +394,7 @@ public sealed partial class CoreSchemaTests
             "true"u8.ToArray(), "null"u8.ToArray(), "0xFF"u8.ToArray(), ".inf"u8.ToArray(), "2001-12-14"u8.ToArray(), ""u8.ToArray()];
         long sink = 0;
 
-        // Warm up so JIT and static initialisation are not counted.
-        for (int i = 0; i < 3; i++)
-        {
-            sink += Run(inputs);
-        }
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 1000; i++)
-        {
-            sink += Run(inputs);
-        }
-
-        long after = GC.GetAllocatedBytesForCurrentThread();
-        Assert.Equal(0, after - before);
+        SteadyState.AssertAllocatesNothing(() => sink += Run(inputs), 1000);
         Assert.NotEqual(-1, sink);
 
         static long Run(byte[][] inputs)

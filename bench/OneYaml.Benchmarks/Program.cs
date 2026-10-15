@@ -27,6 +27,18 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length > 0 && args[0] == "--load-loop")
+        {
+            LoadLoop.Loop(args[1], int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture));
+            return 0;
+        }
+
+        if (args.Length > 0 && args[0] == "--load-hash")
+        {
+            LoadLoop.Hash(args.Skip(1).ToArray());
+            return 0;
+        }
+
         if (args.Length > 0 && args[0] == "--typed-loop")
         {
             DumpHash.TypedLoop(args[1], int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture));

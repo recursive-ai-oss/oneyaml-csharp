@@ -447,12 +447,36 @@ public ref partial struct Utf8YamlReader
         }
     }
 
+    // Whether the scalar is surely a string without looking at its value: untagged, and either quoted or a block
+    // scalar, or plain with a first byte that no Core null, boolean or number starts with. This is most scalars, and
+    // they skip the scratch buffer and the resolver.
+    private readonly bool IsPlainlyText()
+    {
+        if (Tag != TagClass.None)
+        {
+            return false;
+        }
+
+        if (Style != ScalarStyle.Plain)
+        {
+            return true;
+        }
+
+        return ContentEnd > ContentStart && _src[ContentStart] is not ((byte)'~' or (byte)'n' or (byte)'N' or (byte)'t' or (byte)'T'
+            or (byte)'f' or (byte)'F' or (byte)'+' or (byte)'-' or (byte)'.' or (>= (byte)'0' and <= (byte)'9'));
+    }
+
     private static readonly object s_true = true;
     private static readonly object s_false = false;
 
     // The scalar as the generic model has it: null, bool, long (else BigInteger), double or string.
     internal object? ReadGenericScalar()
     {
+        if (IsPlainlyText())
+        {
+            return GetSharedString();
+        }
+
         byte[]? rented = null;
         try
         {
@@ -502,6 +526,11 @@ public ref partial struct Utf8YamlReader
     // every spelling of the same value (so 1 and 0x1 are one key). Null for string keys.
     internal readonly string? KeyIdentity()
     {
+        if (IsPlainlyText())
+        {
+            return null;
+        }
+
         byte[]? rented = null;
         try
         {

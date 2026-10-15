@@ -197,6 +197,21 @@ public class EquivalenceTests
     }
 
     [Fact]
+    public void Reading_every_document_of_bytes_is_the_same_through_a_context()
+    {
+        var context = new ModelsContext();
+        foreach (string yaml in new[] { "", "a: 1\nb: [1, 2.5, true, ~, x]\n", "- &a [1]\n- *a\n", "--- 1\n--- two\n", "a: 1\na: 2\n", "? [a]\n: b\n" })
+        {
+            foreach (byte[] bytes in new[] { Encoding.UTF8.GetBytes(yaml), Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(yaml)).ToArray() })
+            {
+                string reflected = Run(() => YamlSerializer.DeserializeAll<object>(bytes));
+                string generated = Run(() => YamlSerializer.DeserializeAll(bytes, context.Object));
+                Assert.Equal(reflected, generated);
+            }
+        }
+    }
+
+    [Fact]
     public void Suite_and_kit_inputs_read_the_same_through_a_context()
     {
         string? suite = Corpus.SuiteDirectory;
