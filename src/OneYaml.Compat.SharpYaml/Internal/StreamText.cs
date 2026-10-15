@@ -28,7 +28,22 @@ internal static class StreamText
         {
             // Name the first bad position: the text before it decodes, so its lines and characters can be counted.
             int good = Math.Clamp(error.Index, 0, bytes.Length - mark);
-            string head = new UTF8Encoding(false, false).GetString(bytes, mark, good);
+            // Decode it in the encoding that was detected: counting the raw bytes of UTF-16 or UTF-32 would put NULs in the
+            // columns. Some decoders report the end of a bad unit rather than its start (a lone UTF-16 high surrogate is
+            // only known to be bad when the next unit arrives), so step back until the prefix decodes cleanly.
+            string head = string.Empty;
+            for (int length = good, tries = 0; length >= 0 && tries < 8; length--, tries++)
+            {
+                try
+                {
+                    head = encoding.GetString(bytes, mark, length);
+                    break;
+                }
+                catch (DecoderFallbackException)
+                {
+                }
+            }
+
             Mark at = MarkAfter(head);
             throw new SyntaxErrorException(sourceName, at, at, "The input is not valid in its character encoding.");
         }

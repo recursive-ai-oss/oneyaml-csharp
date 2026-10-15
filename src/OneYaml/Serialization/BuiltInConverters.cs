@@ -481,16 +481,10 @@ internal sealed class HalfConverter : YamlConverter<Half>
 
     public override Half Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
-        NumberStatus s = reader.TryReadDouble(out double v);
+        NumberStatus s = reader.TryReadHalf(out Half h);
         if (s == NumberStatus.Ok)
         {
-            Half h = (Half)v;
-            if (!Half.IsInfinity(h) || double.IsInfinity(v))
-            {
-                return h;
-            }
-
-            s = NumberStatus.OutOfRange;
+            return h;
         }
 
         throw BindingErrors.Number(in reader, s, "a number");

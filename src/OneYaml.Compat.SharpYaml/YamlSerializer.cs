@@ -120,28 +120,47 @@ public static class YamlSerializer
             {
                 return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
             }
-            catch (Oy.YamlException) when (TrimLastLine(yaml, ref cut))
+            catch (Oy.YamlException) when (TrimTrailingLines(yaml, ref cut))
             {
             }
         }
     }
 
-    // Drops the last line of the prefix when it is a directive, a comment or blank; false when it is anything else.
-    // This runs only after the prefix failed to read as it stands: SharpYaml takes a % line after a block collection
-    // for the directive of the next document, while after a scalar the same line is part of the scalar and the
-    // prefix reads without any trimming.
-    private static bool TrimLastLine(ReadOnlySpan<char> yaml, ref int cut)
+    // Drops the trailing run of directive, comment and blank lines from the prefix in one step, so a first document
+    // followed by thousands of such lines is parsed twice at most. Blank lines that come before the first comment or
+    // directive stay, because they can belong to a block scalar that keeps its trailing line breaks. False when the run
+    // holds no comment or directive, or when nothing would be left. This runs only after the prefix failed to read as it
+    // stands; a directive-looking line inside a scalar is part of the text and never gets here.
+    private static bool TrimTrailingLines(ReadOnlySpan<char> yaml, ref int cut)
     {
-        ReadOnlySpan<char> head = yaml[..cut];
-        int end = head.TrimEnd("\r\n").Length;
-        int start = head[..end].LastIndexOfAny('\n', '\r') + 1;
-        ReadOnlySpan<char> line = head[start..end];
-        if (start == 0 || !(line.IsWhiteSpace() || line[0] is '%' or '#'))
+        ReadOnlySpan<char> rest = yaml[..cut];
+        int firstMarked = -1;
+        while (!rest.IsEmpty)
+        {
+            int end = rest.TrimEnd("\r\n").Length;
+            int start = rest[..end].LastIndexOfAny('\n', '\r') + 1;
+            ReadOnlySpan<char> line = rest[start..end];
+            if (line.IsWhiteSpace())
+            {
+                rest = rest[..start];
+                continue;
+            }
+
+            if (line[0] is not ('%' or '#'))
+            {
+                break;
+            }
+
+            firstMarked = start;
+            rest = rest[..start];
+        }
+
+        if (firstMarked <= 0)
         {
             return false;
         }
 
-        cut = start;
+        cut = firstMarked;
         return true;
     }
 
@@ -158,7 +177,7 @@ public static class YamlSerializer
                 {
                     return Oy.YamlSerializer.Deserialize(yaml[..cut], info);
                 }
-                catch (Oy.YamlException) when (TrimLastLine(yaml, ref cut))
+                catch (Oy.YamlException) when (TrimTrailingLines(yaml, ref cut))
                 {
                 }
                 catch (Oy.YamlException)

@@ -61,7 +61,8 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
     // resolve the types of those members, and a type that contains itself would never finish.
     private static bool IsLeaf(Type type) =>
         type == typeof(Guid) || type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(DateOnly)
-        || type == typeof(TimeOnly) || type == typeof(TimeSpan) || type == typeof(Uri) || type == typeof(System.Numerics.BigInteger);
+        || type == typeof(TimeOnly) || type == typeof(TimeSpan) || type == typeof(Uri) || type == typeof(System.Numerics.BigInteger)
+        || type == typeof(Int128) || type == typeof(UInt128) || type == typeof(Half);
 
     private static bool MaybeObject(Type type) =>
         !(type.IsPrimitive || type.IsArray || type.IsPointer || type.IsByRef || type.IsInterface || type.IsAbstract

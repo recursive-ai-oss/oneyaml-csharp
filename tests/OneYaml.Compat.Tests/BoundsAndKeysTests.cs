@@ -269,4 +269,59 @@ public class BoundsAndKeysTests
             Assert.True(visits <= 20, visits.ToString());
         }
     }
+
+    [Fact]
+    public void Loading_complex_keys_that_share_one_large_anchor_takes_time_in_proportion_to_the_input()
+    {
+        var sb = new StringBuilder("base: &a [");
+        for (int i = 0; i < 100_000; i++)
+        {
+            sb.Append(i).Append(i < 99_999 ? "," : "]\n");
+        }
+
+        for (int i = 0; i < 1000; i++)
+        {
+            sb.Append("? [*a, ").Append(i).Append("]\n: x\n");
+        }
+
+        var stream = new Cm.YamlStream();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        stream.Load(new StringReader(sb.ToString()));
+        watch.Stop();
+
+        Assert.Equal(1001, ((Cm.YamlMappingNode)stream.Documents[0].RootNode).Children.Count);
+        // Each key walked the whole anchor again, which took many seconds.
+        Assert.True(watch.ElapsedMilliseconds < 3000, watch.ElapsedMilliseconds.ToString());
+    }
+
+    [Fact]
+    public void Equal_models_that_contain_themselves_hash_alike()
+    {
+        var c = new Cm.YamlSequenceNode();
+        var d = new Cm.YamlSequenceNode();
+        c.Add(d);
+        d.Add(c);
+        var d2 = new Cm.YamlSequenceNode();
+        d2.Add(c);
+        var x = new Cm.YamlSequenceNode(c, d);
+        var y = new Cm.YamlSequenceNode(c, d2);
+
+        Assert.True(x.Equals(y));
+        Assert.Equal(x.GetHashCode(), y.GetHashCode());
+        Assert.True(d.Equals(d2));
+        Assert.Equal(d.GetHashCode(), d2.GetHashCode());
+    }
+
+    [Fact]
+    public void Hashing_a_model_past_the_node_limit_returns_a_hash_instead_of_throwing()
+    {
+        var big = new Cm.YamlSequenceNode();
+        for (int i = 0; i < 1_100_000; i++)
+        {
+            big.Add(new Cm.YamlScalarNode("v"));
+        }
+
+        var set = new HashSet<Cm.YamlNode> { big };
+        Assert.Contains(big, set);
+    }
 }

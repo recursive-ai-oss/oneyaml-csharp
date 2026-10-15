@@ -44,7 +44,7 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 | Block scalars that keep trailing lines lose or gain a line break in the real library | `\|+\n a\n\n` (`JEF9/02`, `L24T/01`) |
 | Plain scalars that start or end in an indicator are misread by the real library | `652Z`, `4ABK`, `HM87/01` |
 | A line that starts with `%` after the first line of a document, with another document following, is part of the first document. The real library fails on a block scalar that holds one | `Deserialize<string>("--- \|\nfoo\n%bar\n---\nx\n")` gives `"foo\n%bar\n"`; `"a\n%x\n%y\n---\nb\n"` gives `"a %x %y"` |
-| A stream with bytes that are not valid in its encoding ends in a `SyntaxErrorException`; the real library throws a `DecoderFallbackException`, which is not a `YamlException` | `Deserialize<Plain>(stream)` with a stray `0xFF` byte |
+| A stream with bytes that are not valid in its encoding ends in a `SyntaxErrorException`; the real library throws a `DecoderFallbackException` (not a `YamlException`) for UTF-8 input, and for UTF-16 or UTF-32 input with a byte order mark it silently replaces the bad bytes with U+FFFD. The error mark counts characters of the detected encoding | `Deserialize<Plain>(stream)` with a stray `0xFF` byte |
 | Aliases into `object` are refused by the real library unless `ReferenceHandling` is `Preserve`; here they are followed within the alias budget | `a: &x [1]\nb: *x` into `object` |
 
 ## Intended differences
@@ -54,11 +54,11 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 | YAML 1.2 Core only: `1_000` and `0b11` are text, not numbers (the real library reads them as numbers) | `Deserialize<int>("1_000")` throws here (real: 1000) |
 | A hexadecimal integer is accepted into a `double` member | `Deserialize<Holder>("Score: 0x10")` |
 | A very large integer in an `object` read is a `BigInteger` (real: `double`) | `Deserialize<object>("123456789012345678901234567890")` |
-| Whole doubles are written with a fraction so they read back as doubles | `Serialize(100.0)` gives `100.0` (real: `100`) |
+| Whole doubles and halves are written with a fraction so they read back as floats, and an exponent form carries one too | `Serialize(100.0)` gives `100.0` (real: `100`); `Serialize(Half.Epsilon)` gives `6.0E-08` (real: `6E-08`) |
 | 1.1 look-alikes are quoted on output so any reader sees a string | `Serialize("y")` gives `'y'`; also `'Y'`, `'on'` |
 | Member order is base class first, fields before properties; `Sorted` order applies to members only | `Serialize(new Derived())` |
 | Quoted `"5"` and `"true"` are read into numbers and booleans (kept from the real library's lenient reads) | `Deserialize<int>("\"5\"")` gives 5 |
-| A number whose digits overflow the type is an error, quoted or not; the real library turns it into infinity, which changes the value. `.inf` and `-.inf` still read as infinity | `Deserialize<double>("1e400")` and `Deserialize<float>("1e39")` throw here (real: `∞`) |
+| A number whose digits overflow the type is an error, quoted or not; the real library turns it into infinity, which changes the value. Plain `.inf` and `-.inf` still read as infinity (a quoted `".inf"` is refused; the real library reads it as infinity) | `Deserialize<double>("1e400")`, `Deserialize<float>("1e39")` and `Deserialize<Half>("1e10")` throw here (real: `∞`) |
 | A stream in UTF-16 or UTF-32 without a byte order mark is detected from its first characters, as YAML 1.2 says (the real library fails) | `Deserialize<Plain>(stream)` over `a: b` in UTF-16 |
 | A null read into a non-nullable value type is the default at the top level too, as it already is for a member (real: `YamlException` at the top level) | `Deserialize<int>("null")` gives 0 |
 | Enums are written by name regardless of the naming policy | `Serialize(Mood.Happy, new() { PropertyNamingPolicy = CamelCase })` |

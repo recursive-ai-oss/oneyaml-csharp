@@ -307,19 +307,40 @@ public abstract class YamlNode
         }
 
         int visits = 0;
-        return StructureHash(this, ref visits);
+        if (HashScope.Active)
+        {
+            // While a model loads, every key shares one memo, so a node shared by many keys is hashed once.
+            return StructureHash(this, ref visits, HashScope.Memo, throwOnLimit: true) ?? Begin(this);
+        }
+
+        // Outside a load a hash never throws: past the limits it falls back to the node's own kind, tag and size.
+        return StructureHash(this, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance), throwOnLimit: false) ?? Begin(this);
     }
 
     // The hash covers the whole structure, so keys that agree on a long prefix still hash apart. Each distinct node is
     // hashed once however often it is shared (the result is remembered per node), and every distinct node is charged to
     // the visit budget, so hashing a key costs time in proportion to its size in memory and never to its size as a tree.
     // The walk keeps its own stack, so depth cannot overflow the thread stack.
-    internal static int StructureHash(YamlNode root, ref int visits)
+    // A model that contains itself, or that is past the limits, has no structural hash that equal nodes are sure to
+    // share, so those give null (or throw when asked to) and the caller falls back to the shallow hash of the root.
+    internal static int StructureHash(YamlNode root, ref int visits) =>
+        StructureHash(root, ref visits, new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance), throwOnLimit: false) ?? Begin(root);
+
+    internal static int? StructureHash(YamlNode root, ref int visits, Dictionary<YamlNode, int> done, bool throwOnLimit)
     {
-        var done = new Dictionary<YamlNode, int>(ReferenceEqualityComparer.Instance);
+        if (done.TryGetValue(root, out int cached))
+        {
+            return cached;
+        }
+
         var open = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
         var frames = new List<(YamlNode Node, int Next, int Acc)>();
-        frames.Add((root, 0, Begin(root, ref visits)));
+        if (!Charge(0, ref visits, throwOnLimit))
+        {
+            return null;
+        }
+
+        frames.Add((root, 0, Begin(root)));
         open.Add(root);
         while (true)
         {
@@ -347,32 +368,51 @@ public abstract class YamlNode
             }
             else if (open.Contains(child))
             {
-                // A node that contains itself: a fixed contribution keeps equal shapes hashing alike.
-                frames[top] = (node, next + 1, HashCode.Combine(acc, -1));
+                // The node contains itself. Its unrolled tree is endless, so only a hash that ignores the
+                // contents can be the same for every node equal to it.
+                return null;
             }
             else if (child is YamlScalarNode scalar)
             {
-                Guard(frames.Count, ref visits);
+                if (!Charge(frames.Count, ref visits, throwOnLimit))
+                {
+                    return null;
+                }
+
                 int h = HashCode.Combine(scalar.NodeType, scalar.Tag.Value, scalar.Value);
                 done[child] = h;
                 frames[top] = (node, next + 1, HashCode.Combine(acc, h));
             }
             else
             {
-                if (frames.Count > MaxDepth)
+                if (!Charge(frames.Count, ref visits, throwOnLimit))
                 {
-                    throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
+                    return null;
                 }
 
                 open.Add(child);
-                frames.Add((child, 0, Begin(child, ref visits)));
+                frames.Add((child, 0, Begin(child)));
             }
         }
     }
 
-    private static int Begin(YamlNode node, ref int visits)
+    private static bool Charge(int depth, ref int visits, bool throwOnLimit)
     {
-        Guard(0, ref visits);
+        if (depth > MaxDepth || ++visits > MaxVisits)
+        {
+            if (throwOnLimit)
+            {
+                throw new MaximumRecursionLevelReachedException("The node tree is nested or shared more deeply than the limits allow.");
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int Begin(YamlNode node)
+    {
         return node switch
         {
             YamlSequenceNode q => HashCode.Combine(node.NodeType, node.Tag.Value, q.Children.Count),
@@ -501,6 +541,34 @@ public abstract class YamlNode
         }
 
         return true;
+    }
+}
+
+// Shares one hash memo across the keys of one load. The nodes it holds are complete and unchanged while the load runs.
+// A struct on purpose: a load that never hashes a collection key must not allocate for it.
+internal readonly struct HashScope : IDisposable
+{
+    [ThreadStatic]
+    private static int s_depth;
+
+    [ThreadStatic]
+    private static Dictionary<YamlNode, int>? s_memo;
+
+    public HashScope()
+    {
+        s_depth++;
+    }
+
+    public static bool Active => s_depth > 0;
+
+    public static Dictionary<YamlNode, int> Memo => s_memo ??= new(ReferenceEqualityComparer.Instance);
+
+    public void Dispose()
+    {
+        if (--s_depth == 0)
+        {
+            s_memo = null;
+        }
     }
 }
 
