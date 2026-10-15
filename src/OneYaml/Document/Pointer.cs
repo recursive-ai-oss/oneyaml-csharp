@@ -298,7 +298,7 @@ internal static class PointerOps
 
         if (s.Node(node).Kind == NodeKind.Scalar)
         {
-            throw Path(s, YamlErrorCategory.PatchPath, "A scalar has no children to address.", node);
+            throw Path(s, YamlErrorCategory.PatchPath, "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.", node);
         }
 
         return node;
@@ -334,7 +334,9 @@ internal static class PointerOps
         }
 
         int docRoot = s.Doc(document).Root;
-        if (p.Count == 1 && mode != Mode.Replace && s.IsEmptyRoot(docRoot))
+        // An add is an RFC 6902 add: its parent has to exist, and the root of a document that is there
+        // (a marker alone, say) is a null. Only a stream with no document yet is given one by an add.
+        if (p.Count == 1 && mode != Mode.Replace && s.IsEmptyRoot(docRoot) && (mode == Mode.Set || s.NoRealDocument))
         {
             // A stream with no content takes its first member or item here, as an indexer does:
             // "-" and "0" start a sequence, any other token a mapping.
