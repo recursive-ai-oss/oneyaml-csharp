@@ -400,7 +400,7 @@ internal static class PointerOps
         if (p.Count == 0)
         {
             int r = s.Doc(document).Root;
-            return new Destination(s.PropStart(r), r, r + s.Node(r).Size);
+            return new Destination(s.PropStart(r), r, r + s.Node(r).Size, r);
         }
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
@@ -415,15 +415,15 @@ internal static class PointerOps
         bool replaces = child >= 0 && (s.Node(container).Kind == NodeKind.Mapping || mode != Mode.Add);
         if (replaces)
         {
-            return new Destination(s.PropStart(child), child, child + s.Node(child).Size);
+            return new Destination(s.PropStart(child), child, child + s.Node(child).Size, child);
         }
 
         if (s.Node(container).Kind == NodeKind.Sequence && position >= 0 && position < s.Node(container).Count)
         {
-            return new Destination(s.PropStart(s.ChildAt(container, position)), -1, -1);
+            return new Destination(s.PropStart(s.ChildAt(container, position)), -1, -1, container);
         }
 
-        return new Destination(s.Node(container).End, -1, -1);
+        return new Destination(s.Node(container).End, -1, -1, container);
     }
 
     /// <summary>Removes the entry a pointer names.</summary>

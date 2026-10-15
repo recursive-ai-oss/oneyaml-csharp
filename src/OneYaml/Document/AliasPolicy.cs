@@ -8,7 +8,8 @@ namespace OneYaml.Documents;
 /// <param name="Position">The offset in the text where the new text starts.</param>
 /// <param name="ReplacedFirst">The first node the write replaces, or -1 when it only inserts.</param>
 /// <param name="ReplacedEnd">Just after the last node the write replaces.</param>
-internal readonly record struct Destination(int Position, int ReplacedFirst, int ReplacedEnd);
+/// <param name="Within">The node the new text lands in or replaces: the collection that receives it, or the replaced node.</param>
+internal readonly record struct Destination(int Position, int ReplacedFirst, int ReplacedEnd, int Within);
 
 /// <summary>
 /// Decides whether an alias inside a value that is copied or moved can stay an alias at its new place.
@@ -67,6 +68,13 @@ internal sealed class AliasPolicy
         }
 
         if (_state.PropStart(target) >= _dest.Position)
+        {
+            return false;
+        }
+
+        // An anchor takes effect when its node is complete: an alias placed inside the anchored node
+        // itself would name an anchor that is not defined yet.
+        if (target <= _dest.Within && _dest.Within < target + _state.Node(target).Size)
         {
             return false;
         }

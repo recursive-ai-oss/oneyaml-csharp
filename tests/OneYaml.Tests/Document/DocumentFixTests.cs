@@ -53,7 +53,7 @@ public class DocumentFixTests
     }
 
     [Fact]
-    public void Removing_the_first_flow_item_on_its_own_line_removes_its_comment()
+    public void Removing_the_first_flow_item_keeps_the_second_one_and_its_comment()
     {
         Assert.Equal("s: [\n  b # two\n  ]\n", Edit("s: [\n  a, # one\n  b # two\n  ]\n", d => d.Remove("/s/0")));
     }

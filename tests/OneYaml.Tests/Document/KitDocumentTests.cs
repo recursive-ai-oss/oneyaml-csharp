@@ -14,9 +14,13 @@ public class KitDocumentTests
 
     public static IEnumerable<object[]> LargeRoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: true));
 
-    public static IEnumerable<object[]> EditCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("edit", _ => true), large: false));
+    // The edit cases, and the safety cases that apply a patch.
+    private static IEnumerable<string> PatchableCaseIds() =>
+        KitCaseIds("edit", _ => true).Concat(KitCaseIds("safety", c => c.GetProperty("operation").GetProperty("type").GetString() == "patch"));
 
-    public static IEnumerable<object[]> LargeEditCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("edit", _ => true), large: true));
+    public static IEnumerable<object[]> EditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: false));
+
+    public static IEnumerable<object[]> LargeEditCases() => Corpus.Rows(Corpus.Tier(PatchableCaseIds(), large: true));
 
     public static IEnumerable<object[]> SuiteCases() => Corpus.Rows(Corpus.SuiteCaseIds());
 
@@ -243,10 +247,23 @@ public class KitDocumentTests
         foreach (Action<YamlDocument> run in forms)
         {
             using YamlDocument doc = YamlDocument.Parse(input, options);
-            if (kind == "error")
+            // A bounded case allows the limit error, and, when the case lists one, the accepted result as well.
+            // Any other error means the work was refused for another reason.
+            JsonElement accept = default;
+            bool acceptsResult = kind == "bounded" && expect.TryGetProperty("accept", out accept);
+            if (kind == "error" || (kind == "bounded" && !acceptsResult))
             {
+                long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var clock = System.Diagnostics.Stopwatch.StartNew();
                 var ex = Assert.Throws<YamlException>(() => run(doc));
-                Assert.Equal(CategoryOf(expect.GetProperty("category").GetString()!), ex.Category);
+                string wanted = kind == "bounded" ? expect.GetProperty("error").GetString()! : expect.GetProperty("category").GetString()!;
+                Assert.Equal(CategoryOf(wanted), ex.Category);
+                if (kind == "bounded")
+                {
+                    Assert.True(clock.Elapsed.TotalSeconds < expect.GetProperty("time_seconds").GetDouble(), "the refusal took too long");
+                    Assert.True(GC.GetAllocatedBytesForCurrentThread() - allocatedBefore < expect.GetProperty("memory_mb").GetInt64() * 1024 * 1024, "the refusal allocated more than the bound");
+                }
+
                 if (!merge && patch.ValueKind == JsonValueKind.Array && patch.GetArrayLength() > 0 && index < doc.Documents.Count)
                 {
                     Assert.NotNull(ex.OperationIndex);
@@ -261,6 +278,26 @@ public class KitDocumentTests
                 AssertEqualBytes(input, doc.ToBytes(), "document after the failed patch");
                 AssertSameModel(input, doc);
                 _ = doc.Root.Kind;
+                continue;
+            }
+
+            if (acceptsResult)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    run(doc);
+                }
+                catch (YamlException ex)
+                {
+                    Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+                    AssertEqualBytes(input, doc.ToBytes(), "document after the refused patch");
+                    continue;
+                }
+
+                Assert.True(clock.Elapsed.TotalSeconds < expect.GetProperty("time_seconds").GetDouble(), "the patch took too long");
+                byte[] want = File.ReadAllBytes(Path.Combine(dir, accept.GetProperty("file").GetString()!));
+                AssertEqualBytes(want, doc.ToBytes(), "patched document");
                 continue;
             }
 
@@ -323,6 +360,7 @@ public class KitDocumentTests
         "patch-invalid" => YamlErrorCategory.PatchInvalid,
         "refused-alias" => YamlErrorCategory.RefusedAlias,
         "refused-ambiguous" => YamlErrorCategory.RefusedAmbiguous,
+        "limit" => YamlErrorCategory.Limit,
         _ => throw new InvalidOperationException(name),
     };
 
