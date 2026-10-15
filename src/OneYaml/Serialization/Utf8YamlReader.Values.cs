@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
+using OneYaml.Documents;
 using OneYaml.Parsing;
 using OneYaml.Schema;
 
@@ -557,7 +558,7 @@ public ref partial struct Utf8YamlReader
                     CheckIntegerLength(t);
                     return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? "i" + Convert.ToHexString(big.ToByteArray()) : null;
                 case ScalarKind.Float:
-                    return CoreSchema.TryParseDouble(t, out double d) ? "f" + d.ToString("R", CultureInfo.InvariantCulture) : null;
+                    return FloatKeyIdentity.Of(t);
                 default:
                     return null;
             }
