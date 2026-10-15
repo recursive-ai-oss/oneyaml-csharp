@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Text;
 using OneYaml.Parsing;
 
@@ -26,6 +28,89 @@ internal struct MemberSet
             _high![(index / 64) - 1] |= 1UL << (index % 64);
         }
     }
+}
+
+// The keys a mapping holds that no member takes. They are kept so that a repeated one is still an error:
+// the same key twice is invalid whether or not the type has a member for it.
+internal struct SkippedKeys
+{
+    private const int Inline = 16;
+
+    private SkipKey[]? _items;
+    private int _count;
+    private HashSet<string>? _many;
+
+    public static SkipKey Capture(ref Utf8YamlReader reader)
+    {
+        if (!reader.Escaped)
+        {
+            return new SkipKey(reader.ContentStart, reader.ContentEnd - reader.ContentStart, null);
+        }
+
+        byte[]? rented = null;
+        try
+        {
+            Span<byte> scratch = stackalloc byte[128];
+            return new SkipKey(0, 0, reader.Text(scratch, ref rented).ToArray());
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    // Returns false when the key was seen before.
+    public bool Add(SkipKey key, ReadOnlySpan<byte> source)
+    {
+        if (_many is not null)
+        {
+            return _many.Add(Encoding.UTF8.GetString(key.Bytes(source)));
+        }
+
+        _items ??= ArrayPool<SkipKey>.Shared.Rent(Inline);
+        ReadOnlySpan<byte> bytes = key.Bytes(source);
+        for (int i = 0; i < _count; i++)
+        {
+            if (_items[i].Bytes(source).SequenceEqual(bytes))
+            {
+                return false;
+            }
+        }
+
+        if (_count == Inline)
+        {
+            // Many unmapped keys: switch to a hash set so the check stays linear in the mapping size.
+            _many = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < _count; i++)
+            {
+                _many.Add(Encoding.UTF8.GetString(_items[i].Bytes(source)));
+            }
+
+            Release();
+            return _many.Add(Encoding.UTF8.GetString(bytes));
+        }
+
+        _items[_count++] = key;
+        return true;
+    }
+
+    public void Release()
+    {
+        if (_items is not null)
+        {
+            ArrayPool<SkipKey>.Shared.Return(_items, clearArray: true);
+            _items = null;
+            _count = 0;
+        }
+    }
+}
+
+internal readonly struct SkipKey(int start, int length, byte[]? decoded)
+{
+    public ReadOnlySpan<byte> Bytes(ReadOnlySpan<byte> source) => decoded ?? source.Slice(start, length);
 }
 
 // Binds a mapping to a class or struct through the members and constructor in its metadata.
@@ -105,6 +190,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         bool merging)
     {
         YamlTypeInfo<T> info = _info;
+        var skipped = default(SkippedKeys);
         while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
         {
             if (reader.Type != YamlTokenType.Scalar)
@@ -125,6 +211,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
             int keyStart = reader.Start;
             int index = FindMember(ref reader, info);
+            SkipKey skippedKey = index < 0 ? SkippedKeys.Capture(ref reader) : default;
             if (!reader.Read())
             {
                 throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
@@ -135,6 +222,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 if (options.UnmappedMemberHandling == YamlUnmappedMemberHandling.Disallow)
                 {
                     throw YamlException.At(YamlErrorCategory.Binding, $"The key is not a member of {ConverterGuards.DescribeType(typeof(T))}.", reader.Source, keyStart);
+                }
+
+                if (!skipped.Add(skippedKey, reader.Source))
+                {
+                    throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
                 }
 
                 reader.Skip();
@@ -172,6 +264,8 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 p.ReadBoxed(ref reader, slots);
             }
         }
+
+        skipped.Release();
     }
 
     private void ReadMerge(

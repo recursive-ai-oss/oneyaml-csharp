@@ -16,6 +16,33 @@ internal sealed class InitOnly
     public string? Note { get; set; }
 }
 
+// An init-only member declared on a base class closed over a type argument, and on a generic struct.
+internal class GenericInitBase<T>
+{
+    public T? Value { get; init; }
+
+    public string? Label { get; init; }
+}
+
+internal sealed class GenericInitDerived : GenericInitBase<int>
+{
+    public string? Extra { get; set; }
+}
+
+internal struct GenericInitStruct<T>
+{
+    public T? Item { get; init; }
+}
+
+// Only some keys are members; the others are skipped while reading.
+internal sealed class FewMembers
+{
+    public string? Keep { get; set; }
+
+    [YamlIgnore]
+    public string? Hidden { get; set; }
+}
+
 internal struct InitStruct
 {
     public string Name { get; init; }

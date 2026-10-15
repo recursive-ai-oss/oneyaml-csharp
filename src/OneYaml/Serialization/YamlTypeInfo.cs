@@ -525,6 +525,39 @@ public static class YamlMetadataServices
         return new YamlPropertyInfoImpl<TDeclaring, TProperty>(values);
     }
 
+    /// <summary>
+    /// Gets the setter of an init-only property that generated code cannot reach directly, for a property declared on a
+    /// generic type (for example a base class closed over a type argument).
+    /// </summary>
+    /// <typeparam name="TDeclaring">The type that declares the property.</typeparam>
+    /// <typeparam name="TProperty">The property type.</typeparam>
+    /// <param name="name">The property name.</param>
+    /// <returns>A delegate that sets the property.</returns>
+    /// <exception cref="ArgumentException">The type has no public property with that name and a public setter.</exception>
+    public static Action<TDeclaring, TProperty> CreateInitOnlySetter<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] TDeclaring, TProperty>(string name)
+        where TDeclaring : class
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return InitOnlySetterMethod<TDeclaring>(name).CreateDelegate<Action<TDeclaring, TProperty>>();
+    }
+
+    /// <summary>As <see cref="CreateInitOnlySetter{TDeclaring, TProperty}"/>, for a property of a struct.</summary>
+    /// <typeparam name="TDeclaring">The struct that declares the property.</typeparam>
+    /// <typeparam name="TProperty">The property type.</typeparam>
+    /// <param name="name">The property name.</param>
+    /// <returns>A delegate that sets the property.</returns>
+    /// <exception cref="ArgumentException">The type has no public property with that name and a public setter.</exception>
+    public static YamlRefSetter<TDeclaring, TProperty> CreateInitOnlyRefSetter<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] TDeclaring, TProperty>(string name)
+        where TDeclaring : struct
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return InitOnlySetterMethod<TDeclaring>(name).CreateDelegate<YamlRefSetter<TDeclaring, TProperty>>();
+    }
+
+    private static MethodInfo InitOnlySetterMethod<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] TDeclaring>(string name) =>
+        typeof(TDeclaring).GetProperty(name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)?.SetMethod
+        ?? throw new ArgumentException($"{typeof(TDeclaring).Name} has no public property '{name}' with a setter.", nameof(name));
+
     /// <summary>Describes an object type.</summary>
     /// <typeparam name="T">The type.</typeparam>
     /// <param name="options">The options the metadata belongs to.</param>
