@@ -24,6 +24,8 @@ public class DocumentBenchmarks
     private (string Op, string Path, object? Value)[] _ops = [];
     private YamlDocument? _doc;
     private YamlSyntaxTree? _tree;
+    private string _setPath = string.Empty;
+    private int _setCount;
 
     [Params("reference-a", "records-4k", "openapi-petstore", "helm-ingress-nginx", "compose-merge-2k", "openapi-100k")]
     public string Workload { get; set; } = string.Empty;
@@ -41,6 +43,35 @@ public class DocumentBenchmarks
         _ops = File.Exists(script) ? ReadOps(File.ReadAllText(script)) : [];
         _doc = YamlDocument.Parse(_bytes);
         _tree = YamlSyntaxTree.Parse(_text, Trivia);
+        _setPath = FirstTextLeaf(_doc.Root, string.Empty) ?? string.Empty;
+    }
+
+    // A path to the last text value in the file, for the single-edit row.
+    private static string? FirstTextLeaf(YamlNode node, string path)
+    {
+        if (node.Kind == YamlNodeKind.Scalar && path.Length > 0 && node.TryGetValue<string>(out string? s) && s is { Length: > 0 } && !char.IsDigit(s[0]) && s is not ("true" or "false" or "null"))
+        {
+            return path;
+        }
+
+        string? found = null;
+        if (node.Kind == YamlNodeKind.Mapping)
+        {
+            foreach (KeyValuePair<YamlNode, YamlNode> e in node.Entries)
+            {
+                found = FirstTextLeaf(e.Value, path + "/" + e.Key.GetValue<string>().Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)) ?? found;
+            }
+        }
+        else if (node.Kind == YamlNodeKind.Sequence)
+        {
+            int i = 0;
+            foreach (YamlNode item in node.Items)
+            {
+                found = FirstTextLeaf(item, path + "/" + i++) ?? found;
+            }
+        }
+
+        return found;
     }
 
     [GlobalCleanup]
@@ -86,6 +117,9 @@ public class DocumentBenchmarks
 
     [Benchmark(Description = "SharpYaml unchanged write")]
     public byte[] EmitSharpYaml() => Encoding.UTF8.GetBytes(_tree!.ToFullString());
+
+    [Benchmark(Description = "OneYaml one Set on a parsed document")]
+    public void SetOneYaml() => _doc!.Set(_setPath, (_setCount++ & 1) == 0 ? "alpha" : "beta");
 
     [Benchmark(Description = "OneYaml parse + edit script + write")]
     public byte[] EditOneYaml()

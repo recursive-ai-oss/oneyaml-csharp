@@ -34,16 +34,16 @@ internal sealed partial class DocState : IDisposable
     }
 
     /// <summary>Whether a mapping may hold the same key twice.</summary>
-    public bool AllowDuplicateKeys { get; }
+    public bool AllowDuplicateKeys { get; private set; }
 
     /// <summary>The number of bytes of text.</summary>
-    public int Length { get; }
+    public int Length { get; private set; }
 
     /// <summary>The encoding the stream arrived in, written back on output.</summary>
-    public YamlEncoding Encoding { get; }
+    public YamlEncoding Encoding { get; private set; }
 
     /// <summary>Whether the stream began with a byte order mark.</summary>
-    public bool HasByteOrderMark { get; }
+    public bool HasByteOrderMark { get; private set; }
 
     public int NodeCount { get; private set; }
 

@@ -16,8 +16,10 @@ internal readonly record struct TextEdit(int Start, int End, int TextStart, int 
 internal sealed partial class DocState
 {
     /// <summary>
-    /// Builds the state that results from replacing spans of this state's text. This state is not
-    /// changed; if the result does not parse, nothing is returned and nothing leaks.
+    /// Builds the state that results from replacing spans of this state's text. A state that is not
+    /// <see cref="Exclusive"/> is not changed; if the result does not parse, nothing is returned and nothing
+    /// leaks. An exclusive state may be updated in place and returned. Only the part of the text around the
+    /// edit is parsed when that is safe; otherwise the whole text is.
     /// </summary>
     /// <param name="old">The state to edit.</param>
     /// <param name="edits">Replacements sorted by position and not overlapping.</param>
@@ -25,6 +27,21 @@ internal sealed partial class DocState
     /// <param name="limits">The limits for parsing the result.</param>
     /// <returns>The new state.</returns>
     public static DocState Rebuild(DocState old, ReadOnlySpan<TextEdit> edits, ReadOnlySpan<byte> texts, YamlLimits limits)
+    {
+        // Most edits sit inside one small collection: parse only that and splice the result in.
+        DocState? spliced = TrySplice(old, edits, texts, limits, out int reparsed);
+        if (spliced is not null)
+        {
+            RebuildObserver?.Invoke(spliced, limits, reparsed);
+            return spliced;
+        }
+
+        DocState full = RebuildAll(old, edits, texts, limits);
+        RebuildObserver?.Invoke(full, limits, -1);
+        return full;
+    }
+
+    private static DocState RebuildAll(DocState old, ReadOnlySpan<TextEdit> edits, ReadOnlySpan<byte> texts, YamlLimits limits)
     {
         long length = old.Length;
         foreach (TextEdit e in edits)
@@ -71,19 +88,18 @@ internal sealed partial class DocState
     public int PrevSibling(int node)
     {
         int parent = _nodes[node].Parent;
-        if (parent < 0)
+        if (parent < 0 || node == parent + 1)
         {
             return -1;
         }
 
-        int c = parent + 1;
-        int prev = -1;
-        while (c < node)
+        // The node just before this one in the array is the last of the previous sibling's subtree.
+        int c = node - 1;
+        while (_nodes[c].Parent != parent)
         {
-            prev = c;
-            c += _nodes[c].Size;
+            c = _nodes[c].Parent;
         }
 
-        return c == node ? prev : -1;
+        return c;
     }
 }
