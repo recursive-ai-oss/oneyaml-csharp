@@ -85,6 +85,7 @@ internal readonly partial struct Utf8YamlWriter
     /// <param name="mode">Whose reading a plain scalar must survive.</param>
     /// <param name="parentIndent">Column of the owning key or dash, for block scalars.</param>
     /// <param name="contentIndent">Column of the block scalar's lines.</param>
+    /// <param name="validUtf8">The caller has checked that the bytes are well-formed UTF-8, so the scan need not.</param>
     /// <returns>
     /// The style to write with, or <see cref="ScalarWriteStyle.ExplicitKeyRequired"/> when the
     /// scalar is a key that is too long to be an implicit one in any style.
@@ -95,9 +96,10 @@ internal readonly partial struct Utf8YamlWriter
         EmitContext context,
         StyleMode mode,
         int parentIndent = 0,
-        int contentIndent = 2)
+        int contentIndent = 2,
+        bool validUtf8 = false)
     {
-        ScalarWriteStyle style = ChooseStyleCore(text, preferred, context, mode, parentIndent, contentIndent);
+        ScalarWriteStyle style = ChooseStyleCore(text, preferred, context, mode, parentIndent, contentIndent, validUtf8);
         if (context is EmitContext.BlockKey or EmitContext.FlowKey && IsTooLongForImplicitKey(text, style))
         {
             return ScalarWriteStyle.ExplicitKeyRequired;
@@ -112,9 +114,10 @@ internal readonly partial struct Utf8YamlWriter
         EmitContext context,
         StyleMode mode,
         int parentIndent,
-        int contentIndent)
+        int contentIndent,
+        bool validUtf8)
     {
-        TextTraits traits = ScalarText.Analyze(text);
+        TextTraits traits = ScalarText.Analyze(text, validUtf8);
         switch (preferred)
         {
             case ScalarWriteStyle.DoubleQuoted:
@@ -155,6 +158,7 @@ internal readonly partial struct Utf8YamlWriter
     /// <param name="parentIndent">Column of the owning key or dash, for block scalars.</param>
     /// <param name="contentIndent">Column of the block scalar's lines.</param>
     /// <param name="existingHeader">The header the scalar has now, kept for a block style while it still reads back exactly.</param>
+    /// <param name="validUtf8">The caller has checked that the bytes are well-formed UTF-8, so the scan need not.</param>
     /// <returns>
     /// The style used. A block style means the text ended with a line break.
     /// <see cref="ScalarWriteStyle.ExplicitKeyRequired"/> means a key too long to be implicit:
@@ -167,9 +171,10 @@ internal readonly partial struct Utf8YamlWriter
         StyleMode mode,
         int parentIndent = 0,
         int contentIndent = 2,
-        BlockHeader existingHeader = default)
+        BlockHeader existingHeader = default,
+        bool validUtf8 = false)
     {
-        ScalarWriteStyle style = ChooseStyle(text, preferred, context, mode, parentIndent, contentIndent);
+        ScalarWriteStyle style = ChooseStyle(text, preferred, context, mode, parentIndent, contentIndent, validUtf8);
         switch (style)
         {
             case ScalarWriteStyle.ExplicitKeyRequired:
@@ -189,6 +194,30 @@ internal readonly partial struct Utf8YamlWriter
         }
 
         return style;
+    }
+
+    /// <summary>
+    /// Writes the text of a key that is too long to be implicit, for the place after <c>? </c>. The explicit form has no
+    /// length limit, so the key is written as a value would be, except that a block scalar is never used: the key stays
+    /// on its line, in double quotes when it has line breaks or characters that need escaping.
+    /// </summary>
+    /// <param name="text">The key's UTF-8 bytes.</param>
+    /// <param name="flow">Whether the key sits inside <c>{ }</c>.</param>
+    public void WriteExplicitKeyText(ReadOnlySpan<byte> text, bool flow = false)
+    {
+        ScalarWriteStyle style = ChooseStyle(text, ScalarWriteStyle.Plain, flow ? EmitContext.FlowValue : EmitContext.BlockValue, StyleMode.Dump);
+        switch (style)
+        {
+            case ScalarWriteStyle.Plain:
+                WriteRaw(text);
+                break;
+            case ScalarWriteStyle.SingleQuoted:
+                WriteSingleQuotedCore(text);
+                break;
+            default:
+                WriteDoubleQuoted(text);
+                break;
+        }
     }
 
     /// <summary>Tells whether a string can be written plain and read back as the same string.</summary>

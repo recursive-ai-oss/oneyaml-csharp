@@ -10,9 +10,13 @@ namespace OneYaml.Tests.Document;
 /// <summary>Runs the kit's round-trip and edit cases, and the corpora, through the document.</summary>
 public class KitDocumentTests
 {
-    public static IEnumerable<object[]> RoundTripCases() => Corpus.Rows(KitCaseIds("roundtrip", _ => true));
+    public static IEnumerable<object[]> RoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: false));
 
-    public static IEnumerable<object[]> EditCases() => Corpus.Rows(KitCaseIds("edit", _ => true));
+    public static IEnumerable<object[]> LargeRoundTripCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("roundtrip", _ => true), large: true));
+
+    public static IEnumerable<object[]> EditCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("edit", _ => true), large: false));
+
+    public static IEnumerable<object[]> LargeEditCases() => Corpus.Rows(Corpus.Tier(KitCaseIds("edit", _ => true), large: true));
 
     public static IEnumerable<object[]> SuiteCases() => Corpus.Rows(Corpus.SuiteCaseIds());
 
@@ -91,7 +95,14 @@ public class KitDocumentTests
 
     [Theory]
     [MemberData(nameof(RoundTripCases))]
-    public void Round_trip_case_writes_the_input_back_byte_for_byte(string id)
+    public void Round_trip_case_writes_the_input_back_byte_for_byte(string id) => RunRoundTrip(id);
+
+    [Theory]
+    [Trait("Category", "Slow")]
+    [MemberData(nameof(LargeRoundTripCases))]
+    public void Large_generated_round_trip_case_writes_the_input_back_byte_for_byte(string id) => RunRoundTrip(id);
+
+    private static void RunRoundTrip(string id)
     {
         if (id.Length == 0)
         {
@@ -99,7 +110,8 @@ public class KitDocumentTests
         }
 
         string dir = Corpus.KitCaseDirectory(id);
-        byte[] input = File.ReadAllBytes(Path.Combine(dir, "input.yaml"));
+        using JsonDocument caseDoc = Corpus.ReadJson(Path.Combine(dir, "case.json"));
+        byte[] input = KitInput.Read(dir, caseDoc.RootElement);
         byte[] expected = File.ReadAllBytes(Path.Combine(dir, "expected.yaml"));
         using YamlDocument doc = YamlDocument.Parse(input);
         AssertEqualBytes(expected, doc.ToBytes(), "round trip");
@@ -189,7 +201,14 @@ public class KitDocumentTests
 
     [Theory]
     [MemberData(nameof(EditCases))]
-    public void Edit_case_gives_the_expected_bytes_or_error(string id)
+    public void Edit_case_gives_the_expected_bytes_or_error(string id) => RunEdit(id);
+
+    [Theory]
+    [Trait("Category", "Slow")]
+    [MemberData(nameof(LargeEditCases))]
+    public void Large_generated_edit_case_gives_the_expected_bytes_or_error(string id) => RunEdit(id);
+
+    private static void RunEdit(string id)
     {
         if (id.Length == 0)
         {
@@ -203,7 +222,7 @@ public class KitDocumentTests
         bool merge = operation.TryGetProperty("format", out JsonElement format) && format.GetString() == "merge-patch";
         JsonElement patch = operation.GetProperty("patch");
         int index = operation.TryGetProperty("document", out JsonElement di) ? di.GetInt32() : 0;
-        byte[] input = File.ReadAllBytes(Path.Combine(dir, "input.yaml"));
+        byte[] input = KitInput.Read(dir, root);
         JsonElement expect = root.GetProperty("expect");
         string kind = expect.GetProperty("kind").GetString()!;
         var options = new YamlDocumentOptions { AllowDuplicateKeys = true };

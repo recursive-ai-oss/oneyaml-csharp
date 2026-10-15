@@ -99,34 +99,18 @@ public sealed partial class Utf8YamlEmitter
     private void WriteKey(ReadOnlySpan<byte> utf8)
     {
         ref Frame f = ref KeyFrame();
-        if (utf8.Length <= ShortKeyBytes)
+        StartEntry(ref f);
+        if (_w.WriteString(utf8, ScalarWriteStyle.Plain, EmitContext.BlockKey, StyleMode.Dump, validUtf8: true) == ScalarWriteStyle.ExplicitKeyRequired)
         {
-            StartEntry(ref f);
-            _w.WriteString(utf8, ScalarWriteStyle.Plain, EmitContext.BlockKey, StyleMode.Dump);
-            _w.WriteByte((byte)':');
-        }
-        else
-        {
-            // An implicit key may take 1,024 characters at most; a longer one is written with "? ".
-            ArrayBufferWriter<byte> scratch = Scratch();
-            new Utf8YamlWriter(scratch).WriteString(utf8, ScalarWriteStyle.Plain, EmitContext.BlockKey, StyleMode.Dump);
-            int characters = Encoding.UTF8.GetCharCount(scratch.WrittenSpan);
-            StartEntry(ref f);
-            if (characters <= Utf8YamlWriter.MaxImplicitKeyLength)
-            {
-                _w.WriteRaw(scratch.WrittenSpan);
-                _w.WriteByte((byte)':');
-            }
-            else
-            {
-                _w.WriteRaw("? "u8);
-                _w.WriteRaw(scratch.WrittenSpan);
-                _w.WriteByte((byte)'\n');
-                _w.WriteSpaces(f.Indent);
-                _w.WriteByte((byte)':');
-            }
+            // An implicit key may take 1,024 characters at most; a longer one is written with "? ", and
+            // the colon goes on a line of its own.
+            _w.WriteRaw("? "u8);
+            _w.WriteExplicitKeyText(utf8);
+            _w.WriteByte((byte)'\n');
+            _w.WriteSpaces(f.Indent);
         }
 
+        _w.WriteByte((byte)':');
         f.KeyPending = true;
     }
 
@@ -233,7 +217,7 @@ public sealed partial class Utf8YamlEmitter
         }
         else
         {
-            style = _w.WriteString(utf8, ScalarWriteStyle.Plain, EmitContext.BlockValue, StyleMode.Dump, parentIndent, parentIndent + _indentSize);
+            style = _w.WriteString(utf8, ScalarWriteStyle.Plain, EmitContext.BlockValue, StyleMode.Dump, parentIndent, parentIndent + _indentSize, validUtf8: true);
         }
 
         if (style < ScalarWriteStyle.Literal)

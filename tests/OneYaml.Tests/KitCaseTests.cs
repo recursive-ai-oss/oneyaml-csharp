@@ -7,11 +7,20 @@ namespace OneYaml.Tests;
 /// <summary>Runs the kit's parse, safety and diagnostics cases that ask for events.</summary>
 public class KitCaseTests
 {
-    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"));
+    public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: false));
+
+    public static IEnumerable<object[]> LargeCases() => Corpus.Rows(Corpus.Tier(Corpus.KitEventCaseIds("parse", "safety", "diagnostics"), large: true));
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void Case_gives_the_expected_events_or_error(string id)
+    public void Case_gives_the_expected_events_or_error(string id) => Run(id);
+
+    [Theory]
+    [Trait("Category", "Slow")]
+    [MemberData(nameof(LargeCases))]
+    public void Large_generated_case_gives_the_expected_events_or_error(string id) => Run(id);
+
+    private static void Run(string id)
     {
         if (id.Length == 0)
         {
@@ -21,8 +30,7 @@ public class KitCaseTests
         string dir = Corpus.KitCaseDirectory(id);
         using JsonDocument doc = Corpus.ReadJson(Path.Combine(dir, "case.json"));
         JsonElement root = doc.RootElement;
-        string inputName = root.TryGetProperty("input", out JsonElement named) ? named.GetString()! : "input.yaml";
-        byte[] input = File.ReadAllBytes(Path.Combine(dir, inputName));
+        byte[] input = KitInput.Read(dir, root);
         JsonElement expect = root.GetProperty("expect");
         string kind = expect.GetProperty("kind").GetString()!;
         switch (kind)
@@ -31,7 +39,7 @@ public class KitCaseTests
                 {
                     EventText.Result result = EventText.Read(input);
                     Assert.True(result.Error is null, $"unexpected error: {result.Error?.Message}");
-                    Assert.Equal(ReadEvents(Path.Combine(dir, expect.GetProperty("file").GetString()!)), result.Events.ToArray());
+                    Assert.Equal(ExpectedEvents(dir, expect), result.Events.ToArray());
                     break;
                 }
 
@@ -55,6 +63,17 @@ public class KitCaseTests
                 Assert.Fail("unknown expectation kind " + kind);
                 break;
         }
+    }
+
+    // An events expectation names a file or describes the text of one with a recipe.
+    private static string[] ExpectedEvents(string dir, JsonElement expectation)
+    {
+        if (expectation.TryGetProperty("recipe", out JsonElement recipe))
+        {
+            return KitInput.BuildText(recipe).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        return ReadEvents(Path.Combine(dir, expectation.GetProperty("file").GetString()!));
     }
 
     private static string[] ReadEvents(string path) => File.ReadAllText(path).Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -122,7 +141,7 @@ public class KitCaseTests
         Assert.True(expect.TryGetProperty("accept", out JsonElement accept), "the input is accepted but the case allows only an error");
         if (accept.GetProperty("kind").GetString() == "events")
         {
-            Assert.Equal(ReadEvents(Path.Combine(dir, accept.GetProperty("file").GetString()!)), result.Events.ToArray());
+            Assert.Equal(ExpectedEvents(dir, accept), result.Events.ToArray());
         }
     }
 }
