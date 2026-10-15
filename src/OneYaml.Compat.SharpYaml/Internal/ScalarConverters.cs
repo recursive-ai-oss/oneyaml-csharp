@@ -39,7 +39,7 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
         catch (Oy.YamlException) when (_parse is not null && reader.TokenType == Oy.YamlTokenKind.Scalar)
         {
             string text = reader.GetString();
-            if (LooksLikeNumberOrBool(text) && _parse(text, out T value))
+            if (LooksLikeNumberOrBool(text) && _parse(text, out T value) && IsFinite(value))
             {
                 return value;
             }
@@ -49,6 +49,16 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
     }
 
     public override void Write(Oy.Utf8YamlEmitter writer, T value, Oy.YamlSerializerOptions options) => _inner.Write(writer, value, options);
+
+    // A finite literal that overflows the type (1e400, or 1e39 as a float) parses to infinity; that would change the
+    // value, so it stays an error. This also keeps the fallback to quoted scalars in practice: a plain scalar the engine
+    // refused while the text has the shape of a number is one that overflows, and an overflowing integer fails to parse.
+    private static bool IsFinite(T value) => value switch
+    {
+        double d => double.IsFinite(d),
+        float f => float.IsFinite(f),
+        _ => true,
+    };
 
     // The shape check keeps the fallback to what a quoted number or boolean looks like: nothing the engine refused for
     // a better reason (a hexadecimal float, a word such as "Infinity") gets in through the parser's own leniency.

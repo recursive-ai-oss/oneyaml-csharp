@@ -25,13 +25,38 @@ public class SharpYamlTypedTests
         ["Double[] System.Double[]"] = "double-fraction",
     };
 
-    private static bool IsKnown(string label) =>
-        Known.ContainsKey(label)
-        || (label.Contains(" <- ", StringComparison.Ordinal) && (label.StartsWith("Int32", StringComparison.Ordinal) || label.StartsWith("Mood", StringComparison.Ordinal) || label.StartsWith("Boolean", StringComparison.Ordinal) || label.StartsWith("Double", StringComparison.Ordinal)));
+    static SharpYamlTypedTests()
+    {
+        AddNullInputs(Known);
+    }
 
+    // An empty text, a bare null and a text with only a comment, read into a value type: the real library fails (with a
+    // NullReferenceException for the first and last), the compat package gives the default value.
+    private static void AddNullInputs(Dictionary<string, string> known)
+    {
+        foreach (string type in new[] { "Int32", "Mood", "Boolean", "Double" })
+        {
+            known[$"{type} <- "] = "top-level-null";
+            known[$"{type} <- ~"] = "top-level-null";
+            known[$"{type} <- # only a comment"] = "top-level-null";
+        }
+    }
+
+    // A listed label must still differ: an entry that no longer matches is a failure, so the list cannot go stale.
     private static void Same(List<string> bad, string label, string expected, string actual)
     {
-        if (!string.Equals(expected, actual, StringComparison.Ordinal) && !IsKnown(label))
+        bool differs = !string.Equals(expected, actual, StringComparison.Ordinal);
+        if (Known.ContainsKey(label))
+        {
+            if (!differs)
+            {
+                bad.Add($"{label}\n   listed as a difference ({Known[label]}) but both libraries now agree");
+            }
+
+            return;
+        }
+
+        if (differs)
         {
             bad.Add($"{label}\n   real:   {expected}\n   compat: {actual}");
         }

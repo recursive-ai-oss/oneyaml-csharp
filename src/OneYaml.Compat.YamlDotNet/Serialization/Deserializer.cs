@@ -123,7 +123,7 @@ public sealed class Deserializer : IDeserializer
         ArgumentNullException.ThrowIfNull(type);
         if (parser is not Parser own)
         {
-            throw new NotSupportedException("Only parsers created by this library can be read from.");
+            throw new NotSupportedException("Only parsers created by this library can be read from. See docs/compat/yamldotnet.md for the parts of YamlDotNet that are not covered.");
         }
 
         // Like YamlDotNet: take a stream start and a document start if they are there, read one value, then take the document end.

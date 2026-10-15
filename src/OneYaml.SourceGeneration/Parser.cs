@@ -25,6 +25,9 @@ internal sealed class Parser
         "System.TimeSpan",
         "System.Uri",
         "System.Numerics.BigInteger",
+        "System.Int128",
+        "System.UInt128",
+        "System.Half",
     ];
 
     private static readonly string[] s_reserved =
@@ -494,6 +497,8 @@ internal sealed class Parser
             case SpecialType.System_UInt32:
             case SpecialType.System_Int64:
             case SpecialType.System_UInt64:
+            case SpecialType.System_IntPtr:
+            case SpecialType.System_UIntPtr:
             case SpecialType.System_Single:
             case SpecialType.System_Double:
             case SpecialType.System_Decimal:

@@ -9,7 +9,9 @@ internal static class ErrorMap
 {
     private const string MoreThanOneDocument = "The stream holds more than one document";
 
-    // The engine refuses a stream with several documents; SharpYaml reads the first and ignores the rest.
+    // The engine refuses a stream with several documents; SharpYaml reads the first and ignores the rest. The public
+    // exception carries no separate flag for this case, so the category and the start of the message identify it; a
+    // test pins the message so a change in the engine's wording fails there.
     public static bool IsMultiDocument(Oy.YamlException error) =>
         error.Category == Oy.YamlErrorCategory.Syntax && error.Message.StartsWith(MoreThanOneDocument, StringComparison.Ordinal);
 

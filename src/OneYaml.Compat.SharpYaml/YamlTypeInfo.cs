@@ -68,8 +68,8 @@ public sealed class ReflectionYamlTypeInfoResolver : IYamlTypeInfoResolver
     /// <param name="type">The type.</param>
     /// <param name="options">The options in force.</param>
     /// <returns>The metadata.</returns>
-    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Reflection-based binding is this resolver's purpose; a program that must not use it never asks for it.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Reflection-based binding is this resolver's purpose; a program that must not use it never asks for it.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "The reflection path is guarded by the OneYaml.YamlSerializer.IsReflectionEnabledByDefault feature switch, checked in the options before any reflection runs; with the switch off the trimmer folds the check away and removes this path.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "The reflection path is guarded by the OneYaml.YamlSerializer.IsReflectionEnabledByDefault feature switch, checked in the options before any reflection runs; with the switch off the trimmer folds the check away and removes this path.")]
     public YamlTypeInfo? GetTypeInfo(Type type, YamlSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(type);
