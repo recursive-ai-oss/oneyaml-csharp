@@ -37,9 +37,12 @@ public class ReaderBehaviorTests
     }
 
     [Fact]
-    public void A_byte_order_mark_inside_a_scalar_is_content()
+    public void A_byte_order_mark_is_content_inside_a_quoted_scalar_and_an_error_in_a_plain_one()
     {
-        Assert.Equal(["+STR", "+DOC", "+MAP", "=VAL :a", "=VAL :x\uFEFFy", "-MAP", "-DOC", "-STR"], Events("a: x\uFEFFy\n"));
+        Assert.Equal(["+STR", "+DOC", "+MAP", "=VAL :a", "=VAL \"x\uFEFFy", "-MAP", "-DOC", "-STR"], Events("a: \"x\uFEFFy\"\n"));
+        YamlException ex = Fails("a: x\uFEFFy\n");
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Equal(5, ex.Column);
     }
 
     [Fact]
@@ -170,6 +173,8 @@ public class ReaderBehaviorTests
     [InlineData("-\t-\n")]
     [InlineData("a: |\n\t\nb: 1\n")]
     [InlineData("- [\n\tfoo,\n foo\n ]\n")]
+    [InlineData("\t? a\n")]
+    [InlineData("\t: a\n")]
     public void A_tab_is_not_indentation(string yaml)
     {
         Assert.Equal(YamlErrorCategory.Syntax, Fails(yaml).Category);

@@ -6,13 +6,18 @@ namespace OneYaml.Parsing;
 internal ref partial struct YamlReader
 {
     // A place where an implicit mapping key may start. Only the keys of open flow levels and
-    // the current block line are kept, oldest first, so staleness checks cost O(1) per token.
+    // the current block line are kept, oldest first. A key remembers how far its characters have
+    // been counted, so staleness checks cost O(1) per token however long a token is.
     private struct SimpleKey
     {
         public int Level;
         public int TokenNumber;
         public int Offset;
         public int Column;
+
+        // Characters of the key counted so far, up to ScanPos (see WithinImplicitKey).
+        public int ScanPos;
+        public int Chars;
         public bool Required;
         public bool TabBefore;
 
@@ -47,6 +52,10 @@ internal ref partial struct YamlReader
     private int _keyTail;
     private int _staleCursor;
 
+    // Set when the text holds a character that is only allowed inside quoted scalars.
+    private bool _hasNonPrintable;
+    private int _commentsOnlyUntil = -1;
+
     // For each open flow collection: 1 when it is a mapping, 0 when it is a sequence.
     private byte[] _flowKinds;
 
@@ -65,6 +74,9 @@ internal ref partial struct YamlReader
     private int _commentCount;
 
     private static readonly SearchValues<byte> s_lineBreaks = SearchValues.Create("\n\r"u8);
+
+    // Lead bytes of DEL, the C1 controls, U+FFFE, U+FFFF and the byte order mark.
+    private static readonly SearchValues<byte> s_nonPrintableLead = SearchValues.Create([0x7F, 0xC2, 0xEF]);
 
     // ---- Character classes ----
 
@@ -233,18 +245,29 @@ internal ref partial struct YamlReader
 
     // ---- Simple keys ----
 
-    private int CountChars(int from, int to)
+    // Whether the key, which started on this line, is still no longer than an implicit key may
+    // be. Counting resumes where the last check stopped and ends as soon as the limit is passed,
+    // so the work for one key is bounded by the limit, not by the length of the text after it.
+    private bool WithinImplicitKey(ref SimpleKey key)
     {
-        int n = 0;
-        for (int i = from; i < to; i++)
+        int n = key.Chars;
+        int i = key.ScanPos;
+        int to = _pos;
+        while (i < to)
         {
-            if ((_src[i] & 0xC0) != 0x80)
+            if ((_src[i] & 0xC0) != 0x80 && ++n > MaxImplicitKey)
             {
-                n++;
+                key.Chars = n;
+                key.ScanPos = i;
+                return false;
             }
+
+            i++;
         }
 
-        return n;
+        key.Chars = n;
+        key.ScanPos = to;
+        return true;
     }
 
     private void RemoveStaleKeys()
@@ -260,7 +283,7 @@ internal ref partial struct YamlReader
             }
 
             bool sameLine = key.Offset >= _lineStart;
-            if (sameLine && (_pos - key.Offset <= MaxImplicitKey || CountChars(key.Offset, _pos) <= MaxImplicitKey))
+            if (sameLine && (_pos - key.Offset <= MaxImplicitKey || WithinImplicitKey(ref key)))
             {
                 break;
             }
@@ -346,6 +369,7 @@ internal ref partial struct YamlReader
             TokenNumber = _tokensParsed + (_qTail - _qHead),
             Offset = _pos,
             Column = column,
+            ScanPos = _pos,
             Required = required,
             TabBefore = _tabBefore,
             Lenient = _flowLevel > 0 && _flowKinds[_flowLevel - 1] == 1,
@@ -475,6 +499,7 @@ internal ref partial struct YamlReader
 
                 int rel = s[q..].IndexOfAny(s_lineBreaks);
                 int end = rel < 0 ? len : q + rel;
+                CheckChars(q, end);
                 RecordComment(q, end);
                 _pos = end;
                 continue;
@@ -484,7 +509,7 @@ internal ref partial struct YamlReader
             {
                 if (tab && spaces <= _indent)
                 {
-                    throw Error("A tab cannot be used as indentation.", p + spaces);
+                    throw Error("A tab cannot be used as indentation.", q);
                 }
 
                 if (_flowLevel > 0 && spaces <= _indent)
@@ -500,10 +525,124 @@ internal ref partial struct YamlReader
     }
 
     // A byte order mark is allowed where a document may start: after a document end marker
-    // or in front of a document start marker.
-    private readonly bool BomAllowedAt(int after)
+    // or in front of a document start marker. It may also stand in front of a comment line
+    // when only comment lines follow, up to the next marker or the end of the input.
+    private bool BomAllowedAt(int after)
     {
-        return _afterDocumentEnd || IsDocumentMarkerAt(after, (byte)'-');
+        return _afterDocumentEnd || IsDocumentMarkerAt(after, (byte)'-') || OnlyCommentsFollow(after);
+    }
+
+    // Whether only blank lines, comments and further marks stand between here and the end of
+    // the input or the next document marker. A stretch that passed is remembered, so a run of
+    // such lines is read once.
+    private bool OnlyCommentsFollow(int from)
+    {
+        if (from <= _commentsOnlyUntil)
+        {
+            return true;
+        }
+
+        int p = from;
+        while (true)
+        {
+            p = SkipBlanks(p);
+            byte c = At(p);
+            if (c == (byte)'#')
+            {
+                int rel = _src[p..].IndexOfAny(s_lineBreaks);
+                p = rel < 0 ? _src.Length : p + rel;
+                c = At(p);
+            }
+
+            if (p >= _src.Length)
+            {
+                break;
+            }
+
+            if (c != (byte)'\n' && c != (byte)'\r')
+            {
+                return false;
+            }
+
+            p += c == (byte)'\r' && At(p + 1) == (byte)'\n' ? 2 : 1;
+            if (At(p) == 0xEF && At(p + 1) == 0xBB && At(p + 2) == 0xBF)
+            {
+                p += 3;
+            }
+
+            if (IsDocumentMarkerAt(p, (byte)'-') || IsDocumentMarkerAt(p, (byte)'.'))
+            {
+                break;
+            }
+        }
+
+        _commentsOnlyUntil = p;
+        return true;
+    }
+
+    // ---- Characters that are only allowed in quoted scalars ----
+
+    // Text outside quoted scalars may hold only printable characters and no byte order mark
+    // (YAML 1.2.2 productions 1 and 27). Such characters are rare, so one look at the start
+    // tells whether any per-token work is needed at all.
+    private void CheckChars(int from, int to)
+    {
+        if (!_hasNonPrintable)
+        {
+            return;
+        }
+
+        ReadOnlySpan<byte> s = _src;
+        int i = from;
+        while (i < to)
+        {
+            int rel = s[i..to].IndexOfAny(s_nonPrintableLead);
+            if (rel < 0)
+            {
+                return;
+            }
+
+            i += rel;
+            if (IsNonPrintableAt(s, i, out bool mark))
+            {
+                throw Error(
+                    mark
+                        ? "A byte order mark is only allowed at the start of a document or inside a quoted string."
+                        : "The text contains a character YAML does not allow here.",
+                    i);
+            }
+
+            i++;
+        }
+    }
+
+    // DEL, the C1 controls except U+0085, U+FFFE, U+FFFF and the byte order mark.
+    private static bool IsNonPrintableAt(ReadOnlySpan<byte> s, int i, out bool mark)
+    {
+        mark = false;
+        byte b = s[i];
+        if (b == 0x7F)
+        {
+            return true;
+        }
+
+        if (b == 0xC2)
+        {
+            return i + 1 < s.Length && s[i + 1] is >= 0x80 and <= 0x9F and not 0x85;
+        }
+
+        if (b == 0xEF && i + 2 < s.Length)
+        {
+            if (s[i + 1] == 0xBB && s[i + 2] == 0xBF)
+            {
+                mark = true;
+                return true;
+            }
+
+            return s[i + 1] == 0xBF && s[i + 2] is 0xBE or 0xBF;
+        }
+
+        return false;
     }
 
     // A marker at the start of a line, allowing a byte order mark in front of it.
@@ -714,6 +853,13 @@ internal ref partial struct YamlReader
 
     private void FetchFlowStart(TokenKind kind)
     {
+        // Every open block and flow collection is one level for the parser, which would refuse
+        // this one; saying so here stops a long run of brackets from filling the queue first.
+        if (_flowLevel + _indentCount >= _limits.MaxDepth)
+        {
+            throw LimitError("The nesting depth is larger than the configured limit.", _pos);
+        }
+
         SaveSimpleKey();
         if (_flowLevel == _flowKinds.Length)
         {
@@ -804,17 +950,16 @@ internal ref partial struct YamlReader
 
             // The key's tokens are already queued: mark the first one so the parser sees the
             // mapping start (when the key opens a new block mapping) and the key before it.
+            // Nothing is marked until the indentation is known to be valid: a token marked as a
+            // key would otherwise reach the parser with the error still waiting behind it.
             int slot = _qHead + (key.TokenNumber - _tokensParsed);
-            _queue[slot].Pre |= 2;
-            if (RollIndent(key.Column))
+            bool newMapping = RollIndent(key.Column);
+            if (newMapping && key.TabBefore)
             {
-                if (key.TabBefore)
-                {
-                    throw Error("A tab cannot be used to indent a block collection.", key.Offset);
-                }
-
-                _queue[slot].Pre |= 1;
+                throw Error("A tab cannot be used to indent a block collection.", key.Offset);
             }
+
+            _queue[slot].Pre |= newMapping ? (byte)3 : (byte)2;
 
             _simpleKeyAllowed = false;
         }
@@ -862,6 +1007,12 @@ internal ref partial struct YamlReader
             throw Error(kind == TokenKind.Alias ? "An alias needs a name." : "An anchor needs a name.", start + 1);
         }
 
+        if (kind == TokenKind.Anchor)
+        {
+            CheckPropertyEnd(p, "An anchor must be followed by whitespace.");
+        }
+
+        CheckChars(start + 1, p);
         Token t = default;
         t.Kind = kind;
         t.Start = start;
@@ -902,6 +1053,7 @@ internal ref partial struct YamlReader
             }
 
             CheckTagText(start + 2, p);
+            CheckChars(start + 2, p);
             t.Flags = 1;
             t.ContentStart = start + 2;
             t.ContentEnd = p;
@@ -934,7 +1086,7 @@ internal ref partial struct YamlReader
                 {
                     if (!IsHex(At(p + 1)) || !IsHex(At(p + 2)))
                     {
-                        throw Error("A '%' in a tag must be followed by two hexadecimal digits.", p);
+                        throw Error("A '%' in a tag must be followed by two hexadecimal digits.", BadPercentAt(p));
                     }
 
                     p += 3;
@@ -954,16 +1106,30 @@ internal ref partial struct YamlReader
             t.ContentEnd = p;
         }
 
-        byte after = At(p);
-        if (!IsBlankZ(after) && !IsFlowIndicator(after))
-        {
-            throw Error("A tag must be followed by whitespace.", p);
-        }
-
+        CheckPropertyEnd(p, "A tag must be followed by whitespace.");
         t.End = p;
         Enqueue(in t);
         _pos = p;
     }
+
+    // A node property is separated from what it marks by white space or a line break. Only
+    // where the node is empty may it be followed by the end of the input or, in a flow
+    // collection, by a comma or a closing bracket. An opening bracket or brace is never
+    // accepted: it would glue the collection to the property.
+    private void CheckPropertyEnd(int p, string message)
+    {
+        byte after = At(p);
+        if (IsBlankZ(after) || (_flowLevel > 0 && after is (byte)',' or (byte)']' or (byte)'}'))
+        {
+            return;
+        }
+
+        throw Error(message, p);
+    }
+
+    // Position of the first character that is not a hexadecimal digit among the two after a '%'.
+    private readonly int BadPercentAt(int percent)
+        => IsHex(At(percent + 1)) ? percent + 2 : percent + 1;
 
     private void CheckTagText(int from, int to)
     {
@@ -971,7 +1137,7 @@ internal ref partial struct YamlReader
         {
             if (_src[i] == (byte)'%' && (!IsHex(At(i + 1)) || !IsHex(At(i + 2))))
             {
-                throw Error("A '%' in a tag must be followed by two hexadecimal digits.", i);
+                throw Error("A '%' in a tag must be followed by two hexadecimal digits.", BadPercentAt(i));
             }
         }
     }
@@ -1077,6 +1243,7 @@ internal ref partial struct YamlReader
             }
 
             CheckTagText(prefixStart, p);
+            CheckChars(prefixStart, p);
             t.X = prefixStart;
             t.Y = p;
         }
@@ -1090,7 +1257,9 @@ internal ref partial struct YamlReader
 
             // Unknown directives are skipped to the end of their line.
             int rel = s[p..].IndexOfAny(s_lineBreaks);
-            p = rel < 0 ? s.Length : p + rel;
+            int lineEnd = rel < 0 ? s.Length : p + rel;
+            CheckChars(p, lineEnd);
+            p = lineEnd;
         }
 
         // Only whitespace and a comment may follow on the line.
@@ -1105,6 +1274,7 @@ internal ref partial struct YamlReader
         {
             int rel = s[q..].IndexOfAny(s_lineBreaks);
             int end = rel < 0 ? s.Length : q + rel;
+            CheckChars(q, end);
             RecordComment(q, end);
             q = end;
         }

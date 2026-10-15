@@ -131,7 +131,10 @@ internal ref partial struct YamlReader
                 spaces++;
             }
 
-            if (c == (byte)'#' || (!flow && spaces < indentRequired))
+            // A line that starts with a byte order mark is not text of the scalar. In a flow
+            // collection a continuation line needs the same indentation as any other line there;
+            // a tab does not count towards it.
+            if (c == (byte)'#' || (!flow && spaces < indentRequired) || (flow && spaces <= _indent) || (q == newLine && IsBomAt(q)))
             {
                 break;
             }
@@ -156,6 +159,7 @@ internal ref partial struct YamlReader
         }
 
         CheckScalarSize(end - start, start);
+        CheckChars(start, end);
         Token t = default;
         t.Kind = TokenKind.Scalar;
         t.Style = (byte)ScalarStyle.Plain;
@@ -165,6 +169,20 @@ internal ref partial struct YamlReader
         Enqueue(in t);
         _pos = end;
         _lineStart = lineStart;
+    }
+
+    private bool IsBomAt(int i) => At(i) == 0xEF && At(i + 1) == 0xBB && At(i + 2) == 0xBF;
+
+    // Whether only blanks stand between i and the end of the line or the input.
+    private bool BlankToEol(int i)
+    {
+        while (IsBlank(At(i)))
+        {
+            i++;
+        }
+
+        byte c = At(i);
+        return i >= _src.Length || c == (byte)'\n' || c == (byte)'\r';
     }
 
     // A quoted scalar's continuation line must not start a document and, when it has text,
@@ -429,6 +447,7 @@ internal ref partial struct YamlReader
 
             int rel = s[p..].IndexOfAny(s_lineBreaks);
             int end = rel < 0 ? len : p + rel;
+            CheckChars(p, end);
             RecordComment(p, end);
             p = end;
         }
@@ -500,6 +519,7 @@ internal ref partial struct YamlReader
         }
 
         // Consume lines that belong to the scalar: indented lines and blank lines.
+        bool hadText = false;
         while (p < len)
         {
             int spaces = 0;
@@ -521,8 +541,10 @@ internal ref partial struct YamlReader
                 {
                     p = len;
                 }
-                else if (d == (byte)'\t')
+                else if (d == (byte)'\t' && !(hadText && BlankToEol(p + spaces)))
                 {
+                    // Once the text has set the indentation, a line of only white space after it is
+                    // a comment line, not content; anything else here is a tab used as indentation.
                     throw Error("A tab cannot be used as indentation after a block scalar.", p + spaces);
                 }
 
@@ -541,9 +563,12 @@ internal ref partial struct YamlReader
                 break;
             }
 
+            hadText = true;
             int eol = p + spaces + rel;
             p = eol + (s[eol] == (byte)'\r' && At(eol + 1) == (byte)'\n' ? 2 : 1);
         }
+
+        CheckChars(bodyStart, p);
 
         CheckScalarSize(p - bodyStart, start);
         Token t = default;
