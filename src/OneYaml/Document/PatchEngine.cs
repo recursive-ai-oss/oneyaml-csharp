@@ -323,15 +323,15 @@ internal static class PatchEngine
 
     private static void Test(DocState s, YamlLimits limits, int document, in Pointer path, ValueTree expected, ref AliasBudget budget)
     {
-        int node = PointerOps.Find(s, limits, document, path);
+        int node = PointerOps.Find(s, limits, document, path, out int failedAt, out int failedIn);
         if (node < 0)
         {
-            throw At(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", s.Doc(document).Root);
+            throw PointerOps.Unresolved(s, path, failedAt, failedIn);
         }
 
         if (!DataEquals(s, node, expected, ref budget))
         {
-            throw At(s, YamlErrorCategory.PatchTest, "The value in the document is not the value the test expects.", node);
+            throw At(s, YamlErrorCategory.PatchTest, $"The value at '{path}' is not the value the test expects.", node);
         }
     }
 

@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -15,7 +16,8 @@ namespace OneYaml;
 /// <summary>
 /// A YAML stream held with all its text, comments and layout. Writing it back returns the input
 /// byte for byte; an edit changes only the text of the value it touches. A document is not
-/// thread-safe, and every edit invalidates the <see cref="YamlNode"/> views taken before it.
+/// thread-safe. A <see cref="YamlNode"/> view stays valid across edits, the way a <c>JsonNode</c> does: it
+/// follows its node when other entries are added or removed, and throws only once its node is gone.
 /// </summary>
 /// <remarks>
 /// Pointer methods address a value with an RFC 6901 JSON Pointer. A pointer token names a mapping
@@ -29,7 +31,9 @@ public sealed class YamlDocument : IDisposable
 
     private DocState? _state;
     private readonly YamlLimits _limits;
-    private int _version;
+    private int _editCount;
+    private WeakReference<EditEpoch>? _head;
+    private DocumentList? _documents;
     private AliasBudget _walk;
     private YamlSerializerOptions? _bindOptions;
 
@@ -37,12 +41,11 @@ public sealed class YamlDocument : IDisposable
     {
         _state = state;
         _limits = limits;
-        Documents = new DocumentList(this);
         ResetWalk();
     }
 
     /// <summary>The documents of the stream, in order. A stream with no document (an empty text, or only comments) has none.</summary>
-    public IReadOnlyList<YamlNode> Documents { get; }
+    public IReadOnlyList<YamlNode> Documents => _documents ??= new DocumentList(this);
 
     /// <summary>
     /// The root of the first document. A stream with no document has an implicit empty one: it reads as
@@ -59,7 +62,7 @@ public sealed class YamlDocument : IDisposable
         {
             DocState s = State;
             ResetWalk();
-            return new YamlNode(this, s.Doc(0).Root, _version, false);
+            return new YamlNode(this, s.Doc(0).Root, Track(), false);
         }
     }
 
@@ -73,7 +76,38 @@ public sealed class YamlDocument : IDisposable
     // Options for reading scalars through the binder's converters, carrying this document's limits.
     internal YamlSerializerOptions BindOptions => _bindOptions ??= ReferenceEquals(_limits, YamlLimits.Default) ? YamlSerializerOptions.Default : new YamlSerializerOptions { Limits = _limits };
 
-    internal int Version => _version;
+    // How many edits the document has had. A view whose epoch has a lower number follows the edits made since.
+    internal int EditCount => _editCount;
+
+    // Called when a view is handed out; returns the epoch it starts in. While any view is alive, edits note
+    // what they did to the nodes. The document holds the latest epoch only weakly: views hold it (and, through
+    // it, every later one), so once the last view is gone the epoch is collected and edits stop noting anything.
+    // A document that is only edited by pointer never gets here and pays nothing.
+    internal EditEpoch Track()
+    {
+        if (_head is not null && _head.TryGetTarget(out EditEpoch? epoch))
+        {
+            return epoch;
+        }
+
+        epoch = new EditEpoch { Number = _editCount };
+        if (_head is null)
+        {
+            _head = new WeakReference<EditEpoch>(epoch);
+        }
+        else
+        {
+            _head.SetTarget(epoch);
+        }
+
+        return epoch;
+    }
+
+    private bool ViewsMayExist(out EditEpoch? head)
+    {
+        head = null;
+        return _head is not null && _head.TryGetTarget(out head);
+    }
 
     internal DocState State => _state ?? throw new ObjectDisposedException(nameof(YamlDocument));
 
@@ -140,13 +174,13 @@ public sealed class YamlDocument : IDisposable
         return Parse(buffer.WrittenSpan, options);
     }
 
-    /// <summary>Reads a stream to its end asynchronously and parses it.</summary>
+    /// <summary>Reads a stream to its end asynchronously and parses it. This is <see cref="Parse(Stream, YamlDocumentOptions?)"/> without blocking.</summary>
     /// <param name="stream">The stream.</param>
     /// <param name="options">Options, or <see langword="null"/> for the defaults.</param>
     /// <param name="cancellationToken">A token to cancel reading.</param>
     /// <returns>The document.</returns>
     /// <exception cref="YamlException">The stream is not valid text or YAML, or exceeds a limit.</exception>
-    public static async Task<YamlDocument> LoadAsync(Stream stream, YamlDocumentOptions? options = null, CancellationToken cancellationToken = default)
+    public static async Task<YamlDocument> ParseAsync(Stream stream, YamlDocumentOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
@@ -175,12 +209,11 @@ public sealed class YamlDocument : IDisposable
         }
     }
 
-    /// <summary>Returns the pooled memory the document holds. Views taken from it must not be used afterwards.</summary>
+    /// <summary>Returns the pooled memory the document holds. Using the document or a view of it afterwards throws <see cref="ObjectDisposedException"/>.</summary>
     public void Dispose()
     {
         _state?.Dispose();
         _state = null;
-        _version++;
     }
 
     // ---- Writing ----
@@ -261,6 +294,25 @@ public sealed class YamlDocument : IDisposable
         stream.Write(ToBytes());
     }
 
+    /// <summary>Writes the stream to a stream asynchronously, in the encoding it was read in.</summary>
+    /// <param name="stream">The destination.</param>
+    /// <param name="cancellationToken">A token to cancel writing.</param>
+    /// <returns>A task that completes when everything is written.</returns>
+    public async Task WriteToAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        DocState s = State;
+        if (s.Encoding == YamlEncoding.Utf8)
+        {
+            // The text lives in pooled memory the next edit may give back, so it is copied for the awaited write.
+            byte[] bytes = ToUtf8Bytes();
+            await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        await stream.WriteAsync(ToBytes(), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Writes the stream to a buffer writer, in the encoding it was read in.</summary>
     /// <param name="writer">The destination.</param>
     public void WriteTo(IBufferWriter<byte> writer)
@@ -298,13 +350,44 @@ public sealed class YamlDocument : IDisposable
         return s;
     }
 
+    // Notes the edits of the operation that is about to run, when views exist that have to follow them.
+    internal void BeginEdit(DocState s)
+    {
+        s.Trace = ViewsMayExist(out _) ? new EditTrace() : null;
+    }
+
+    // Patches report a document index outside the stream as a patch error, like every other way a patch can fail.
+    private DocState CurrentForPatch(int document)
+    {
+        DocState s = State;
+        if ((uint)document >= (uint)s.DocCount)
+        {
+            throw PointerOps.NoSuchDocumentForPatch(document, s.NoRealDocument ? 0 : s.DocCount);
+        }
+
+        return s;
+    }
+
     internal void Swap(DocState next)
     {
-        if (!ReferenceEquals(next, _state))
+        DocState? old = _state;
+        if (!ReferenceEquals(next, old))
         {
-            _state?.Dispose();
+            _editCount++;
+            if (old is not null && ViewsMayExist(out EditEpoch? head))
+            {
+                // The edits the operation noted must account for every node that appeared or went; if they do
+                // not (or nothing was noted), views cannot be followed and are told so.
+                EditTrace? trace = old.Trace;
+                NodeEdit[]? edits = trace is not null && trace.NetDelta == next.NodeCount - old.NodeCount ? trace.ToArray() : null;
+                var epoch = new EditEpoch { Edits = edits, Number = _editCount };
+                head!.Next = epoch;
+                _head!.SetTarget(epoch);
+            }
+
+            old?.Dispose();
+            next.Trace = null;
             _state = next;
-            _version++;
             ResetWalk();
         }
     }
@@ -318,7 +401,7 @@ public sealed class YamlDocument : IDisposable
     /// </summary>
     /// <param name="path">An RFC 6901 pointer. The empty pointer replaces the whole document's root.</param>
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, or a dictionary or sequence of these.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     /// <exception cref="YamlException">The pointer names nothing (<see cref="YamlErrorCategory.PatchPath"/>), matches two keys, or goes through an alias. The document is unchanged.</exception>
     public void Set(string path, object? value, int document = 0)
@@ -334,7 +417,7 @@ public sealed class YamlDocument : IDisposable
     /// </summary>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The value, as for <see cref="Set"/>.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     /// <exception cref="YamlException">The pointer is invalid or its parent does not exist, or it goes through an alias. The document is unchanged.</exception>
     public void Add(string path, object? value, int document = 0)
@@ -348,10 +431,73 @@ public sealed class YamlDocument : IDisposable
 
         // Build the value before taking the state: a value that reads this document while it is built
         // could otherwise leave the edit working on a state that has been replaced.
-        ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth);
+        ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth, _limits);
+        Write(p, v, document, mode);
+    }
+
+    private void Write(in Pointer p, ValueTree v, int document, PointerOps.Mode mode)
+    {
         DocState s = Current(document);
+        BeginEdit(s);
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
     }
+
+    /// <summary>
+    /// Sets the value a pointer names to a value of any type <paramref name="typeInfo"/> describes, written the way
+    /// <see cref="YamlSerializer"/> writes it. Placement and styling are those of <see cref="Set(string, object?, int)"/>.
+    /// </summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="document"/> is outside the stream.</exception>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The pointer names nothing, matches two keys, or goes through an alias. The document is unchanged.</exception>
+    public void Set<T>(string path, T value, YamlTypeInfo<T> typeInfo, int document = 0)
+        => Write(Pointer.Parse(path), TypedValues.Of(value, typeInfo, _limits), document, PointerOps.Mode.Set);
+
+    /// <summary>Sets the value a pointer names to a value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="document"/> is outside the stream.</exception>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The pointer names nothing, matches two keys, or goes through an alias. The document is unchanged.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public void Set<T>(string path, T value, YamlSerializerOptions? options, int document = 0)
+        => Write(Pointer.Parse(path), TypedValues.Of(value, options, _limits), document, PointerOps.Mode.Set);
+
+    /// <summary>
+    /// Adds a value of any type <paramref name="typeInfo"/> describes at a pointer, as <see cref="Add(string, object?, int)"/> does.
+    /// </summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="document"/> is outside the stream.</exception>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The pointer is invalid or its parent does not exist, or it goes through an alias. The document is unchanged.</exception>
+    public void Add<T>(string path, T value, YamlTypeInfo<T> typeInfo, int document = 0)
+        => Write(Pointer.Parse(path), TypedValues.Of(value, typeInfo, _limits), document, PointerOps.Mode.Add);
+
+    /// <summary>Adds a value written by the reflection-based serializer at a pointer, as <see cref="Add(string, object?, int)"/> does.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="document"/> is outside the stream.</exception>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The pointer is invalid or its parent does not exist, or it goes through an alias. The document is unchanged.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public void Add<T>(string path, T value, YamlSerializerOptions? options, int document = 0)
+        => Write(Pointer.Parse(path), TypedValues.Of(value, options, _limits), document, PointerOps.Mode.Add);
 
     /// <summary>
     /// Applies an RFC 6902 JSON Patch. The patch is atomic: if any operation fails, the document is
@@ -360,7 +506,7 @@ public sealed class YamlDocument : IDisposable
     /// path token of <c>-</c> or <c>0</c> starts a sequence, any other token a mapping.
     /// </summary>
     /// <param name="patch">A JSON array of operations.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">The patch is malformed (<see cref="YamlErrorCategory.PatchInvalid"/>) or an operation failed; <see cref="YamlException.OperationIndex"/> names it.</exception>
     public void ApplyPatch(string patch, int document = 0)
@@ -371,21 +517,21 @@ public sealed class YamlDocument : IDisposable
 
     /// <summary>Applies an RFC 6902 JSON Patch given as UTF-8 JSON. See <see cref="ApplyPatch(string, int)"/>.</summary>
     /// <param name="utf8Patch">A JSON array of operations.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="YamlException">The patch is malformed or an operation failed. The document is unchanged.</exception>
     public void ApplyPatch(ReadOnlySpan<byte> utf8Patch, int document = 0)
         => Apply(PatchEngine.ReadOperations(PatchEngine.ParseJson(utf8Patch, _limits), _limits), document);
 
     /// <summary>Applies an RFC 6902 JSON Patch given as a JSON node tree. See <see cref="ApplyPatch(string, int)"/>.</summary>
     /// <param name="patch">A <see cref="JsonArray"/> of operations.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="YamlException">The patch is malformed or an operation failed. The document is unchanged.</exception>
     public void ApplyPatch(JsonNode? patch, int document = 0)
         => Apply(PatchEngine.ReadOperations(patch, _limits), document);
 
     /// <summary>Applies a patch built with <see cref="YamlPatch"/>. See <see cref="ApplyPatch(string, int)"/>.</summary>
     /// <param name="patch">The patch.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">An operation failed. The document is unchanged.</exception>
     public void ApplyPatch(YamlPatch patch, int document = 0)
@@ -396,7 +542,8 @@ public sealed class YamlDocument : IDisposable
 
     private void Apply(IReadOnlyList<PatchStep> steps, int document)
     {
-        DocState s = Current(document);
+        DocState s = CurrentForPatch(document);
+        BeginEdit(s);
         Swap(PatchEngine.Apply(s, _limits, document, steps));
     }
 
@@ -406,7 +553,7 @@ public sealed class YamlDocument : IDisposable
     /// Deletions in a mapping run after its other members. Merging an object into an alias is refused.
     /// </summary>
     /// <param name="patch">The patch as JSON text.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">The patch is not valid JSON, or it cannot be applied. The document is unchanged.</exception>
     public void ApplyMergePatch(string patch, int document = 0)
@@ -417,37 +564,39 @@ public sealed class YamlDocument : IDisposable
 
     /// <summary>Applies an RFC 7396 JSON Merge Patch given as UTF-8 JSON. See <see cref="ApplyMergePatch(string, int)"/>.</summary>
     /// <param name="utf8Patch">The patch as JSON bytes.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="YamlException">The patch is not valid JSON, or it cannot be applied. The document is unchanged.</exception>
     public void ApplyMergePatch(ReadOnlySpan<byte> utf8Patch, int document = 0)
         => Merge(PatchEngine.ParseJson(utf8Patch, _limits), document);
 
     /// <summary>Applies an RFC 7396 JSON Merge Patch given as a JSON node tree. See <see cref="ApplyMergePatch(string, int)"/>.</summary>
     /// <param name="patch">The patch; <see langword="null"/> is the JSON value null.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="YamlException">The patch cannot be applied. The document is unchanged.</exception>
     public void ApplyMergePatch(JsonNode? patch, int document = 0) => Merge(patch, document);
 
     private void Merge(JsonNode? patch, int document)
     {
-        DocState s = Current(document);
+        DocState s = CurrentForPatch(document);
+        BeginEdit(s);
         Swap(PatchEngine.ApplyMerge(s, _limits, document, patch));
     }
 
     /// <summary>Removes the entry or item a pointer names.</summary>
     /// <param name="path">An RFC 6901 pointer. The empty pointer is refused.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <exception cref="YamlException">The pointer names nothing, goes through an alias, or the entry holds an anchor that aliases still use. The document is unchanged.</exception>
     public void Remove(string path, int document = 0)
     {
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
+        BeginEdit(s);
         Swap(PointerOps.Remove(s, _limits, document, p));
     }
 
     /// <summary>Tells whether a pointer names a value. Aliases are followed.</summary>
     /// <param name="path">An RFC 6901 pointer.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns><see langword="true"/> if there is a value.</returns>
     /// <exception cref="YamlException">The pointer is invalid or ambiguous.</exception>
     public bool Contains(string path, int document = 0)
@@ -459,27 +608,27 @@ public sealed class YamlDocument : IDisposable
 
     /// <summary>Returns the node a pointer names. Aliases are followed.</summary>
     /// <param name="path">An RFC 6901 pointer.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns>A view of the node.</returns>
     /// <exception cref="YamlException">The pointer names nothing (<see cref="YamlErrorCategory.PatchPath"/>) or is ambiguous.</exception>
     public YamlNode GetNode(string path, int document = 0)
     {
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
-        int node = PointerOps.Find(s, _limits, document, p);
+        int node = PointerOps.Find(s, _limits, document, p, out int failedAt, out int failedIn);
         if (node < 0)
         {
-            throw YamlException.At(YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", s.Text, 0);
+            throw PointerOps.Unresolved(s, p, failedAt, failedIn);
         }
 
         ResetWalk();
-        return new YamlNode(this, node, _version, false);
+        return new YamlNode(this, node, Track(), false);
     }
 
     /// <summary>Reads a scalar a pointer names as a CLR value.</summary>
     /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
     /// <param name="path">An RFC 6901 pointer.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The pointer names nothing, or the scalar is not of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
     public T Get<T>(string path, int document = 0) => GetNode(path, document).GetValue<T>();
@@ -488,7 +637,7 @@ public sealed class YamlDocument : IDisposable
     /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The value, or the default.</param>
-    /// <param name="document">The index of the document in the stream.</param>
+    /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns><see langword="true"/> if the pointer names a scalar of that type.</returns>
     /// <exception cref="YamlException">The pointer is invalid or ambiguous.</exception>
     public bool TryGet<T>(string path, out T value, int document = 0)
@@ -523,13 +672,14 @@ public sealed class YamlDocument : IDisposable
             get
             {
                 DocState s = _doc.State;
-                if ((uint)index >= (uint)Count)
+                int count = Count;
+                if ((uint)index >= (uint)count)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(index));
+                    throw PointerOps.NoSuchDocument(index, count);
                 }
 
                 _doc.ResetWalk();
-                return new YamlNode(_doc, s.Doc(index).Root, _doc._version, false);
+                return new YamlNode(_doc, s.Doc(index).Root, _doc.Track(), false);
             }
         }
 

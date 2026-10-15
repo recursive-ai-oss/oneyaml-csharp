@@ -104,6 +104,44 @@ internal readonly struct Pointer
         return new Pointer(data, bounds);
     }
 
+    /// <summary>The first tokens written back as an RFC 6901 pointer, escaping <c>~</c> and <c>/</c>.</summary>
+    /// <param name="count">How many tokens.</param>
+    /// <returns>The pointer text; empty for no tokens.</returns>
+    public string Escaped(int count)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < count && i < Count; i++)
+        {
+            sb.Append('/');
+            AppendEscaped(sb, this[i]);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>Appends a token to a string builder, escaped.</summary>
+    public static void AppendEscaped(StringBuilder sb, ReadOnlySpan<byte> token)
+    {
+        foreach (char c in Encoding.UTF8.GetString(token))
+        {
+            switch (c)
+            {
+                case '~':
+                    sb.Append("~0");
+                    break;
+                case '/':
+                    sb.Append("~1");
+                    break;
+                default:
+                    sb.Append(c);
+                    break;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Escaped(Count);
+
     /// <summary>Builds a pointer from tokens that are already unescaped.</summary>
     /// <param name="tokens">The tokens, UTF-8.</param>
     /// <returns>The pointer.</returns>
@@ -211,7 +249,7 @@ internal static class PointerOps
 
             if (!Pointer.TryIndex(token, out int idx))
             {
-                throw Path(s, YamlErrorCategory.PatchPath, "A sequence is addressed by a number.", container);
+                throw Path(s, YamlErrorCategory.PatchPath, $"The token '{Encoding.UTF8.GetString(token)}' cannot address an item: a sequence is addressed by an index (0, 1, ...), or '-' for the position after the last item.", container);
             }
 
             position = idx;
@@ -227,7 +265,7 @@ internal static class PointerOps
             {
                 if (found >= 0)
                 {
-                    throw Path(s, YamlErrorCategory.RefusedAmbiguous, "More than one key matches this pointer token.", k);
+                    throw Path(s, YamlErrorCategory.RefusedAmbiguous, $"More than one key matches the pointer token '{Encoding.UTF8.GetString(token)}'.", k);
                 }
 
                 found = v;
@@ -272,11 +310,11 @@ internal static class PointerOps
         var budget = new AliasBudget(s, limits);
         for (int i = 0; i < take; i++)
         {
-            cur = Descend(s, ref budget, cur, ref viaAlias);
+            cur = Descend(s, ref budget, cur, ref viaAlias, p, i);
             int child = FindChild(s, cur, p[i], out _);
             if (child < 0)
             {
-                throw Path(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", cur);
+                throw Missing(s, p, i, cur);
             }
 
             cur = child;
@@ -286,7 +324,10 @@ internal static class PointerOps
     }
 
     /// <summary>Follows an alias (charging the budget) and checks the node can hold children.</summary>
-    public static int Descend(DocState s, ref AliasBudget budget, int node, ref bool viaAlias)
+    public static int Descend(DocState s, ref AliasBudget budget, int node, ref bool viaAlias) => Descend(s, ref budget, node, ref viaAlias, default, -1);
+
+    /// <summary>Follows an alias (charging the budget) and checks the node, reached by the first tokens of a pointer, can hold children.</summary>
+    public static int Descend(DocState s, ref AliasBudget budget, int node, ref bool viaAlias, in Pointer p, int resolved)
     {
         if (s.Node(node).Kind == NodeKind.Alias)
         {
@@ -298,19 +339,123 @@ internal static class PointerOps
 
         if (s.Node(node).Kind == NodeKind.Scalar)
         {
-            throw Path(s, YamlErrorCategory.PatchPath, "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.", node);
+            string where = resolved >= 0 ? $"The pointer '{p}' names nothing: '{p.Escaped(resolved)}' is a scalar (an empty value is a null), which has no members or items to address." : "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.";
+            throw Path(s, YamlErrorCategory.PatchPath, where, node);
         }
 
         return node;
+    }
+
+    private static YamlException NothingAt(DocState s, in Pointer context, int container)
+        => context.Count > 0 ? Missing(s, context, context.Count - 1, container) : Path(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", container);
+
+    /// <summary>Builds the error for a token that names nothing in a collection.</summary>
+    /// <param name="s">The document.</param>
+    /// <param name="p">The pointer.</param>
+    /// <param name="at">The index of the token that names nothing.</param>
+    /// <param name="container">The collection the token was looked up in (aliases followed).</param>
+    /// <returns>The error, category <see cref="YamlErrorCategory.PatchPath"/>.</returns>
+    public static YamlException Missing(DocState s, in Pointer p, int at, int container)
+    {
+        string has = at == 0 ? "the document root" : "'" + p.Escaped(at) + "'";
+        var sb = new StringBuilder();
+        sb.Append("The pointer '").Append(p).Append("' names nothing: ");
+        ref readonly CstNode c = ref s.Node(container);
+        string token = Encoding.UTF8.GetString(p[at]);
+        if (c.Kind == NodeKind.Sequence)
+        {
+            if (p[at].Length == 1 && p[at][0] == (byte)'-')
+            {
+                sb.Append("the token '-' is the position after the last item of ").Append(has).Append(", not an item.");
+            }
+            else
+            {
+                sb.Append(has).Append(" is a sequence of ").Append(c.Count).Append(c.Count == 1 ? " item" : " items").Append(" and has no item ").Append(token).Append('.');
+            }
+
+            return Path(s, YamlErrorCategory.PatchPath, sb.ToString(), container);
+        }
+
+        sb.Append(has).Append(" exists but has no key '").Append(token).Append("'.");
+        string? hint = EscapeHint(s, p, at, container);
+        if (hint is not null)
+        {
+            sb.Append(' ').Append(hint);
+        }
+
+        return Path(s, YamlErrorCategory.PatchPath, sb.ToString(), container);
+    }
+
+    // A '/' in a key is written ~1 in a pointer. When the tokens from here on, joined with '/', name a key of the
+    // mapping, say so and show the pointer that works.
+    private static string? EscapeHint(DocState s, in Pointer p, int at, int container)
+    {
+        if (s.Node(container).Kind != NodeKind.Mapping)
+        {
+            return null;
+        }
+
+        var joined = new List<byte>(p[at].ToArray());
+        for (int j = at + 1; j < p.Count; j++)
+        {
+            joined.Add((byte)'/');
+            joined.AddRange(p[j].ToArray());
+            if (!HasKey(s, container, joined.ToArray()))
+            {
+                continue;
+            }
+
+            var fixedPointer = new StringBuilder(p.Escaped(at)).Append('/');
+            Pointer.AppendEscaped(fixedPointer, joined.ToArray());
+            fixedPointer.Append(p.Escaped(p.Count).AsSpan(p.Escaped(j + 1).Length));
+            string key = Encoding.UTF8.GetString(joined.ToArray());
+            return $"A key '{key}' exists; a '/' inside a key is written '~1' in a pointer, so the pointer '{fixedPointer}' reaches it.";
+        }
+
+        return null;
+    }
+
+    private static bool HasKey(DocState s, int mapping, byte[] key)
+    {
+        int k = mapping + 1;
+        for (int i = 0; i < s.Node(mapping).Count; i += 2)
+        {
+            int v = k + s.Node(k).Size;
+            if (s.Node(k).Kind == NodeKind.Scalar && KeyMatches(s, k, key))
+            {
+                return true;
+            }
+
+            k = v + s.Node(v).Size;
+        }
+
+        return false;
     }
 
     public static void CheckDocument(DocState s, int document)
     {
         if ((uint)document >= (uint)s.DocCount)
         {
-            throw new YamlException("The stream has no document with this index.", YamlErrorCategory.PatchPath, 0, 0, -1);
+            throw NoSuchDocument(document, s.NoRealDocument ? 0 : s.DocCount);
         }
     }
+
+    /// <summary>The error for a document index outside the stream, the same wherever an index is taken.</summary>
+    /// <param name="document">The index asked for.</param>
+    /// <param name="count">How many documents the stream has.</param>
+    /// <returns>The error.</returns>
+    public static ArgumentOutOfRangeException NoSuchDocument(int document, int count)
+        => new(nameof(document), document, NoSuchDocumentMessage(document, count));
+
+    /// <summary>The same error for patches, which report problems as <see cref="YamlException"/> with a category.</summary>
+    /// <param name="document">The index asked for.</param>
+    /// <param name="count">How many documents the stream has.</param>
+    /// <returns>The error, category <see cref="YamlErrorCategory.PatchPath"/>.</returns>
+    public static YamlException NoSuchDocumentForPatch(int document, int count)
+        => new(NoSuchDocumentMessage(document, count), YamlErrorCategory.PatchPath, 0, 0, -1);
+
+    private static string NoSuchDocumentMessage(int document, int count)
+        => $"The stream has {count} {(count == 1 ? "document" : "documents")}, so there is no document at index {document}.";
 
     public enum Mode
     {
@@ -347,17 +492,17 @@ internal static class PointerOps
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
         var budget = new AliasBudget(s, limits);
-        int container = Descend(s, ref budget, cur, ref viaAlias);
+        int container = Descend(s, ref budget, cur, ref viaAlias, p, p.Count - 1);
         if (viaAlias)
         {
             throw Path(s, YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", cur);
         }
 
-        return WriteIn(s, limits, container, p[p.Count - 1], v, mode);
+        return WriteIn(s, limits, container, p[p.Count - 1], v, mode, p);
     }
 
     /// <summary>Writes a value into a collection under a token. The caller has followed and refused aliases.</summary>
-    public static DocState WriteIn(DocState s, YamlLimits limits, int container, ReadOnlySpan<byte> token, ValueTree v, Mode mode)
+    public static DocState WriteIn(DocState s, YamlLimits limits, int container, ReadOnlySpan<byte> token, ValueTree v, Mode mode, Pointer context = default)
     {
         int child = FindChild(s, container, token, out int position);
         if (s.Node(container).Kind == NodeKind.Mapping)
@@ -369,7 +514,7 @@ internal static class PointerOps
 
             if (mode == Mode.Replace)
             {
-                throw Path(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", container);
+                throw NothingAt(s, context, container);
             }
 
             return Editor.AddMember(s, limits, container, token.ToArray(), v);
@@ -382,7 +527,7 @@ internal static class PointerOps
             case Mode.Replace:
                 if (child < 0 || dash)
                 {
-                    throw Path(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", container);
+                    throw NothingAt(s, context, container);
                 }
 
                 return Editor.Replace(s, limits, child, v);
@@ -417,7 +562,7 @@ internal static class PointerOps
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
         var budget = new AliasBudget(s, limits);
-        int container = Descend(s, ref budget, cur, ref viaAlias);
+        int container = Descend(s, ref budget, cur, ref viaAlias, p, p.Count - 1);
         if (viaAlias)
         {
             throw Path(s, YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", cur);
@@ -449,7 +594,7 @@ internal static class PointerOps
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
         var budget = new AliasBudget(s, limits);
-        int container = Descend(s, ref budget, cur, ref viaAlias);
+        int container = Descend(s, ref budget, cur, ref viaAlias, p, p.Count - 1);
         if (viaAlias)
         {
             throw Path(s, YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", cur);
@@ -458,7 +603,7 @@ internal static class PointerOps
         int child = FindChild(s, container, p[p.Count - 1], out _);
         if (child < 0)
         {
-            throw Path(s, YamlErrorCategory.PatchPath, "The pointer names nothing in this document.", container);
+            throw Missing(s, p, p.Count - 1, container);
         }
 
         return Editor.Remove(s, limits, child);
@@ -466,12 +611,23 @@ internal static class PointerOps
 
     /// <summary>Finds the node a pointer names, following aliases for reading.</summary>
     /// <returns>The node, or -1 when the pointer names nothing.</returns>
-    public static int Find(DocState s, YamlLimits limits, int document, in Pointer p)
+    public static int Find(DocState s, YamlLimits limits, int document, in Pointer p) => Find(s, limits, document, p, out _, out _);
+
+    /// <summary>Finds the node a pointer names, and says where the search stopped when there is none.</summary>
+    /// <param name="s">The document.</param>
+    /// <param name="limits">The limits for alias budgets.</param>
+    /// <param name="document">The document index.</param>
+    /// <param name="p">The pointer.</param>
+    /// <param name="failedAt">When nothing is found, the index of the token that failed.</param>
+    /// <param name="failedIn">When nothing is found, the node the token was looked up in.</param>
+    /// <returns>The node, or -1 when the pointer names nothing.</returns>
+    public static int Find(DocState s, YamlLimits limits, int document, in Pointer p, out int failedAt, out int failedIn)
     {
+        failedAt = -1;
+        failedIn = -1;
         CheckDocument(s, document);
         int cur = s.Doc(document).Root;
         var budget = new AliasBudget(s, limits);
-        bool via = false;
         for (int i = 0; i < p.Count; i++)
         {
             if (s.Node(cur).Kind == NodeKind.Alias)
@@ -480,6 +636,8 @@ internal static class PointerOps
                 cur = s.Node(cur).Aux;
             }
 
+            failedAt = i;
+            failedIn = cur;
             if (s.Node(cur).Kind == NodeKind.Scalar)
             {
                 return -1;
@@ -494,7 +652,6 @@ internal static class PointerOps
             cur = child;
         }
 
-        _ = via;
         if (s.Node(cur).Kind == NodeKind.Alias)
         {
             budget.Charge(s, cur, s.Node(cur).Aux);
@@ -502,5 +659,21 @@ internal static class PointerOps
         }
 
         return cur;
+    }
+
+    /// <summary>The error for a pointer that <see cref="Find(DocState, YamlLimits, int, in Pointer, out int, out int)"/> did not resolve.</summary>
+    /// <param name="s">The document.</param>
+    /// <param name="p">The pointer.</param>
+    /// <param name="failedAt">The index of the token that failed.</param>
+    /// <param name="failedIn">The node it was looked up in.</param>
+    /// <returns>The error.</returns>
+    public static YamlException Unresolved(DocState s, in Pointer p, int failedAt, int failedIn)
+    {
+        if (s.Node(failedIn).Kind == NodeKind.Scalar)
+        {
+            return Path(s, YamlErrorCategory.PatchPath, $"The pointer '{p}' names nothing: '{p.Escaped(failedAt)}' is a scalar (an empty value is a null), which has no members or items to address.", failedIn);
+        }
+
+        return Missing(s, p, failedAt, failedIn);
     }
 }

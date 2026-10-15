@@ -62,14 +62,14 @@ public class PatchTests
     }
 
     [Fact]
-    public void A_patch_that_works_makes_earlier_views_stale_and_one_that_fails_does_not()
+    public void A_view_follows_its_node_through_a_patch_that_works_and_one_that_fails()
     {
         using YamlDocument doc = YamlDocument.Parse("a: 1\nb: 2\n");
         YamlNode a = doc.Root["a"];
         Assert.Throws<YamlException>(() => doc.ApplyPatch("""[{"op":"replace","path":"/a","value":9},{"op":"remove","path":"/zz"}]"""));
         Assert.Equal(1, a.GetValue<int>());
         doc.ApplyPatch("""[{"op":"replace","path":"/a","value":9}]""");
-        Assert.Throws<InvalidOperationException>(() => a.GetValue<int>());
+        Assert.Equal(9, a.GetValue<int>());
         Assert.Equal(9, doc.Get<int>("/a"));
     }
 
@@ -363,7 +363,7 @@ public class PatchTests
             .Add("/nothing", null));
         Assert.Equal("a: 1\nlist:\n  - 1\n  - two\n  - null\n  - 3.5\nmap:\n  x: true\nnode:\n  - 1\n  - 2\nnothing: null\n", doc.ToString());
 
-        Assert.Throws<ArgumentException>(() => new YamlPatch().Add("/a", new object()));
+        Assert.Throws<ArgumentException>(() => new YamlPatch().Add("/a", new NoYamlForm()));
         Assert.Throws<ArgumentNullException>(() => new YamlPatch().Move(null!, "/a"));
         Assert.Throws<ArgumentNullException>(() => doc.ApplyPatch((YamlPatch)null!));
     }

@@ -32,11 +32,13 @@ internal sealed partial class DocState
         DocState? spliced = TrySplice(old, edits, texts, limits, out int reparsed);
         if (spliced is not null)
         {
+            spliced.Trace = old.Trace;
             RebuildObserver?.Invoke(spliced, limits, reparsed);
             return spliced;
         }
 
         DocState full = RebuildAll(old, edits, texts, limits);
+        full.Trace = old.Trace;
         RebuildObserver?.Invoke(full, limits, -1);
         return full;
     }

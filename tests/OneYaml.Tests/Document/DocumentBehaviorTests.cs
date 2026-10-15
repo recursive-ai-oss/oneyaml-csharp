@@ -76,21 +76,25 @@ public class DocumentBehaviorTests
     // ---- Stale views ----
 
     [Fact]
-    public void A_view_taken_before_an_edit_is_stale_after_it()
+    public void A_view_taken_before_an_edit_stays_valid_after_it()
     {
         using YamlDocument doc = YamlDocument.Parse("a: 1\nb: 2\n");
         YamlNode a = doc.Root["a"];
         YamlNode root = doc.Root;
         Assert.Equal(1, a.GetValue<int>());
         doc.Set("/b", 3);
+        Assert.Equal(1, a.GetValue<int>());
+        Assert.Equal(3, root["b"].GetValue<int>());
+        Assert.Equal(2, root.Count);
+        Assert.Equal(YamlNodeKind.Scalar, a.Kind);
+        a.Set(5);
+        Assert.Equal("a: 5\nb: 3\n", doc.ToString());
+        a.Remove();
+        Assert.Equal("b: 3\n", doc.ToString());
         Assert.Throws<InvalidOperationException>(() => a.GetValue<int>());
-        Assert.Throws<InvalidOperationException>(() => root["b"]);
-        Assert.Throws<InvalidOperationException>(() => root.Count);
-        Assert.Throws<InvalidOperationException>(() => a.Kind);
-        Assert.Throws<InvalidOperationException>(() => a.Set(5));
-        Assert.Throws<InvalidOperationException>(() => a.Remove());
-        Assert.Throws<InvalidOperationException>(() => root.Items.GetEnumerator());
-        Assert.Equal(3, doc.Root["b"].GetValue<int>());
+        Assert.Throws<InvalidOperationException>(() => a.Set(7));
+        Assert.Equal("b: 3\n", doc.ToString());
+        Assert.Single(root.Items);
     }
 
     [Fact]
@@ -181,14 +185,14 @@ public class DocumentBehaviorTests
         Refused(yaml, d => d.Set("a", 1), YamlErrorCategory.PatchInvalid);
         Refused(yaml, d => d.Set("/a~2", 1), YamlErrorCategory.PatchInvalid);
         Refused(yaml, d => d.Remove(string.Empty), YamlErrorCategory.PatchInvalid);
-        Refused(yaml, d => d.Set("/a", 1, document: 3), YamlErrorCategory.PatchPath);
+        Assert.Equal("a: 1\n", Edit("a: 1\n", d => Assert.Throws<ArgumentOutOfRangeException>(() => d.Set("/a", 2, document: 3))));
     }
 
     [Fact]
     public void A_value_that_has_no_yaml_form_is_an_argument_error_and_changes_nothing()
     {
         using YamlDocument doc = YamlDocument.Parse("a: 1\n");
-        Assert.Throws<ArgumentException>(() => doc.Set("/a", new object()));
+        Assert.Throws<ArgumentException>(() => doc.Set("/a", new NoYamlForm()));
         Assert.Throws<ArgumentException>(() => doc.Set("/a", "bad \ud800 surrogate"));
         Assert.Throws<ArgumentException>(() => doc.Set("/a", new Dictionary<object, object?> { [new object()] = 1 }));
         Assert.Throws<ArgumentNullException>(() => doc.Set(null!, 1));
@@ -446,7 +450,11 @@ public class DocumentBehaviorTests
         Assert.False(doc.Contains("/alias/zz"));
         Assert.False(doc.Contains("/s/3"));
         Assert.Equal(YamlErrorCategory.PatchPath, Assert.Throws<YamlException>(() => doc.Root["s"][3]).Category);
-        Assert.Equal(YamlErrorCategory.PatchPath, Assert.Throws<YamlException>(() => doc.Root["zz"]).Category);
+        Assert.Contains("'zz'", Assert.Throws<KeyNotFoundException>(() => doc.Root["zz"]).Message);
+        Assert.False(doc.Root.TryGetValue("zz", out _));
+        Assert.True(doc.Root["s"].TryGetValue(1, out YamlNode? second));
+        Assert.Equal("y", second!.GetValue<string>());
+        Assert.False(doc.Root["s"].TryGetValue(3, out _));
     }
 
     [Fact]
@@ -553,7 +561,7 @@ public class DocumentBehaviorTests
         Assert.Equal(utf8, fromChars.ToUtf8Bytes());
         using YamlDocument fromStream = YamlDocument.Parse(new MemoryStream(utf8));
         Assert.Equal(text, fromStream.ToString());
-        using YamlDocument fromAsync = await YamlDocument.LoadAsync(new MemoryStream(utf8), cancellationToken: TestContext.Current.CancellationToken);
+        using YamlDocument fromAsync = await YamlDocument.ParseAsync(new MemoryStream(utf8), cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(text, fromAsync.ToString());
         var sw = new StringWriter();
         fromString.WriteTo(sw);
@@ -694,6 +702,14 @@ public class DocumentBehaviorTests
         doc.Dispose();
         doc.Dispose();
         Assert.Throws<ObjectDisposedException>(() => doc.ToString());
-        Assert.Throws<InvalidOperationException>(() => a.GetValue<int>());
+        Assert.Throws<ObjectDisposedException>(() => a.GetValue<int>());
+        Assert.Throws<ObjectDisposedException>(() => a.Count);
+        Assert.Throws<ObjectDisposedException>(() => a.Set(2));
     }
+}
+
+/// <summary>A type the serializer refuses, because a multi-dimensional array has no YAML form.</summary>
+internal sealed class NoYamlForm
+{
+    public int[,] Grid { get; set; } = new int[1, 1];
 }

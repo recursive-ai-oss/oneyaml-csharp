@@ -35,6 +35,9 @@ internal sealed partial class DocState : IDisposable
         _comments = [];
     }
 
+    /// <summary>Where the edits made on the way to the next state are noted, when views of the document exist.</summary>
+    public EditTrace? Trace { get; set; }
+
     /// <summary>Whether a mapping may hold the same key twice.</summary>
     public bool AllowDuplicateKeys { get; private set; }
 
