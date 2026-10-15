@@ -296,6 +296,7 @@ internal static partial class Editor
         {
             bool root = parent < 0;
             bool endsAtBreak = false;
+            bool keptComment = false;
             regionStart = root ? (hasProps || hasTag ? s.PropStart(node) : n.Start) : slotStart;
             if (root && newBlockNonEmpty)
             {
@@ -312,16 +313,44 @@ internal static partial class Editor
                 else if (hasProps)
                 {
                     WriteProps(s, node, propsUntouched, anchor, edit);
+                    if ((n.Flags & NodeFlags.Empty) != 0)
+                    {
+                        // A comment on the marker's line stays there, after the properties that remain.
+                        int propEnd = s.PropEnd(node);
+                        int commentEnd = PastMarkerComment(src, propEnd);
+                        if (commentEnd > propEnd)
+                        {
+                            edit.Write((byte)' ');
+                            edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim((byte)' '));
+                        }
+
+                        regionEnd = Math.Max(regionEnd, commentEnd);
+                        endsAtBreak = commentEnd < src.Length && DocState.IsBreak(src[commentEnd]);
+                    }
+
                     edit.Write((byte)'\n');
                 }
                 else
                 {
                     // The collection starts a line of its own; a block collection cannot share the line of a "---" marker.
+                    // lineEnd is where the marker's line ends, once a tag that no longer fits is gone.
+                    int lineEnd = regionStart;
                     if ((n.Flags & NodeFlags.Empty) != 0)
                     {
                         // A comment on the marker's line stays there.
-                        regionStart = PastMarkerComment(src, regionStart);
-                        regionEnd = Math.Max(regionEnd, regionStart);
+                        int tagEnd = hasTag ? s.PropEnd(node) : regionStart;
+                        lineEnd = PastMarkerComment(src, tagEnd);
+                        regionEnd = Math.Max(regionEnd, lineEnd);
+                        if (!hasTag)
+                        {
+                            regionStart = lineEnd;
+                        }
+                        else if (lineEnd > tagEnd)
+                        {
+                            // The tag goes with the text around it, so the comment is written again where the tag was.
+                            edit.Write((byte)' ');
+                            edit.Write(src.Slice(tagEnd, lineEnd - tagEnd).Trim((byte)' '));
+                        }
                     }
 
                     while (regionStart > 0 && src[regionStart - 1] is (byte)' ' or (byte)'\t')
@@ -334,7 +363,8 @@ internal static partial class Editor
                         edit.Write((byte)'\n');
 
                         // The break that ends the marker's line is still there, so the new lines need no final one.
-                        endsAtBreak = regionStart < src.Length && DocState.IsBreak(src[regionStart]);
+                        int at = (n.Flags & NodeFlags.Empty) != 0 ? lineEnd : regionStart;
+                        endsAtBreak = at < src.Length && DocState.IsBreak(src[at]);
                     }
                 }
             }
@@ -347,13 +377,21 @@ internal static partial class Editor
 
                 WriteProps(s, node, propsUntouched, anchor, edit);
             }
+            else if (!root && newBlockNonEmpty && (n.Flags & NodeFlags.Empty) != 0 && !hasTag)
+            {
+                // A comment after a key with no value belongs to the key: the collection starts on the next line.
+                int afterComment = PastMarkerComment(src, regionStart);
+                keptComment = afterComment > regionStart;
+                regionStart = afterComment;
+                regionEnd = Math.Max(regionEnd, regionStart);
+            }
 
             if (newBlockNonEmpty)
             {
                 using var lines = new ByteBuffer();
                 if (parent >= 0 && s.Node(parent).Kind == NodeKind.Sequence)
                 {
-                    bool compact = !hasProps;
+                    bool compact = !hasProps && !keptComment;
                     if (compact)
                     {
                         edit.Write((byte)' ');

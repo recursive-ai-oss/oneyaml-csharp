@@ -172,6 +172,56 @@ public class EditFixRoundTests
         Assert.Equal("--- !!map\na: 1\n", result);
     }
 
+    [Theory]
+    [InlineData("--- !!seq # c\n", "--- # c\na: 1\n")]
+    [InlineData("--- !!seq\n", "---\na: 1\n")]
+    [InlineData("--- !!seq # c\n...\n", "--- # c\na: 1\n...\n")]
+    [InlineData("--- &a !!seq # c\n", "--- &a # c\na: 1\n")]
+    [InlineData("--- &a !!seq\n", "--- &a\na: 1\n")]
+    public void A_merge_patch_on_a_marker_whose_tag_does_not_fit_keeps_the_comment_on_the_marker_line(string yaml, string expected)
+    {
+        Assert.Equal(expected, Edit(yaml, d => d.ApplyMergePatch("{\"a\":1}")));
+    }
+
+    [Theory]
+    [InlineData("--- # c\n")]
+    [InlineData("---\n")]
+    [InlineData("--- !!map\n")]
+    [InlineData("--- !!map # c\n")]
+    public void Adding_below_the_root_of_a_document_that_is_only_a_marker_is_refused_and_changes_nothing(string yaml)
+    {
+        foreach (Action<YamlDocument> add in new Action<YamlDocument>[]
+        {
+            d => d.ApplyPatch("[{\"op\":\"add\",\"path\":\"/a\",\"value\":1}]"),
+            d => d.Add("/a", 1),
+        })
+        {
+            using YamlDocument doc = YamlDocument.Parse(yaml);
+            var ex = Assert.Throws<YamlException>(() => add(doc));
+            Assert.Equal(YamlErrorCategory.PatchPath, ex.Category);
+            Assert.DoesNotContain("scalar has no children", ex.Message);
+            Assert.Equal(yaml, doc.ToString());
+        }
+    }
+
+    [Fact]
+    public void Replacing_the_root_of_a_marker_keeps_its_comment_and_a_stream_with_no_document_still_takes_an_add()
+    {
+        Assert.Equal("--- # c\na: 1\n", Edit("--- # c\n", d => d.ApplyPatch("[{\"op\":\"replace\",\"path\":\"\",\"value\":{\"a\":1}}]")));
+        Assert.Equal("a: 1\n", Edit("", d => d.Add("/a", 1)));
+        Assert.Equal("# c\na: 1\n", Edit("# c\n", d => d.ApplyPatch("[{\"op\":\"add\",\"path\":\"/a\",\"value\":1}]")));
+    }
+
+    [Theory]
+    [InlineData("a: # c\nb: 1\n", "/a", "a: # c\n  k:\n    - 1\n    - 2\nb: 1\n")]
+    [InlineData("a: # c\n", "/a", "a: # c\n  k:\n    - 1\n    - 2\n")]
+    [InlineData("- # c\n- x\n", "/0", "- # c\n  k:\n    - 1\n    - 2\n- x\n")]
+    [InlineData("o:\n  a: # c\n  b: 1\n", "/o/a", "o:\n  a: # c\n    k:\n      - 1\n      - 2\n  b: 1\n")]
+    public void A_comment_after_a_key_stays_after_the_key_when_the_value_becomes_a_collection(string yaml, string path, string expected)
+    {
+        Assert.Equal(expected, Edit(yaml, d => d.Set(path, new Dictionary<string, object?> { ["k"] = Items(1, 2) })));
+    }
+
     // ---- Removals around block scalars that end in blank lines and a less indented comment ----
 
     [Theory]
