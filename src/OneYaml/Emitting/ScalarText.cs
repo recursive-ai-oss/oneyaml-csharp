@@ -16,7 +16,7 @@ internal enum TextTraits : byte
 
     /// <summary>
     /// Contains something that cannot appear raw in any scalar: a control character, a carriage
-    /// return, a Unicode line separator, a byte-order mark, a non-character or malformed UTF-8.
+    /// return, a Unicode line separator, a byte-order mark, U+FFFE, U+FFFF or malformed UTF-8.
     /// </summary>
     NeedsEscape = 2,
 
@@ -82,7 +82,7 @@ internal static class ScalarText
 
     /// <summary>Tells whether a code point has to be escaped (written in double quotes only).</summary>
     /// <param name="codePoint">A Unicode scalar value.</param>
-    /// <returns><see langword="true"/> for controls, next-line and Unicode separators, the byte-order mark and non-characters.</returns>
+    /// <returns><see langword="true"/> for controls, next-line and Unicode separators, the byte-order mark, U+FFFE and U+FFFF.</returns>
     public static bool MustEscape(int codePoint) =>
         codePoint < 0x20 || (codePoint >= 0x7F && codePoint <= 0x9F)
         || codePoint == 0x2028 || codePoint == 0x2029 || codePoint == 0xFEFF

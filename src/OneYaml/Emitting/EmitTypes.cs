@@ -18,7 +18,36 @@ internal enum ScalarWriteStyle : byte
 
     /// <summary>A folded block, <c>&gt;</c>: written so the line structure reads back exactly.</summary>
     Folded,
+
+    /// <summary>
+    /// Not a style to write with: the key is longer than 1,024 characters in every style that
+    /// could hold it, so it cannot be an implicit key. Nothing was written; the caller writes
+    /// <c>? </c> and the key in double quotes (or a block scalar) and puts <c>:</c> on the next line.
+    /// </summary>
+    ExplicitKeyRequired,
 }
+
+/// <summary>How the trailing line breaks of a block scalar are kept.</summary>
+internal enum BlockChomping : byte
+{
+    /// <summary>Clip (no indicator): one final line break is kept.</summary>
+    Clip,
+
+    /// <summary>Strip (<c>-</c>): no final line break.</summary>
+    Strip,
+
+    /// <summary>Keep (<c>+</c>): every trailing line break is kept.</summary>
+    Keep,
+}
+
+/// <summary>
+/// The header of a block scalar, <c>|2+</c> without the style character: used both as the header
+/// a scalar has now (a preference for the rewrite) and as the header the writer picks.
+/// <c>default</c> means no preference.
+/// </summary>
+/// <param name="Chomping">The chomping.</param>
+/// <param name="IndentIndicator">The indentation indicator, 1 to 9, or 0 for none.</param>
+internal readonly record struct BlockHeader(BlockChomping Chomping, int IndentIndicator);
 
 /// <summary>Where a scalar sits, which decides what a plain scalar may contain.</summary>
 internal enum EmitContext : byte

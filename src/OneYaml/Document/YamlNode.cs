@@ -234,7 +234,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         DocState s = State();
         int t = Followed(s, out _);
-        if (NodeValues.TryGet(s, t, out T value, out string? problem))
+        if (NodeValues.TryGet(s, t, out T value, out string? problem, _doc?.Limits.MaxIntegerDigits ?? int.MaxValue))
         {
             return value;
         }
@@ -250,7 +250,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         DocState s = State();
         int t = Followed(s, out _);
-        return NodeValues.TryGet(s, t, out value, out _);
+        return NodeValues.TryGet(s, t, out value, out _, _doc?.Limits.MaxIntegerDigits ?? int.MaxValue);
     }
 
     /// <summary>Binds the node to a type with the reflection binder, as <see cref="YamlSerializer"/> would bind the same text.</summary>

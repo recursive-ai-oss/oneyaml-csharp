@@ -93,7 +93,7 @@ public sealed partial class CoreAgainstKitFilesTests
                     string raw = m.Groups[2].Value;
                     bool quoted = raw.StartsWith('"');
                     byte[] text = Encoding.UTF8.GetBytes(quoted ? raw[1..^1] : raw);
-                    CoreTag tag = CoreSchema.ParseTag(Encoding.UTF8.GetBytes("!!" + m.Groups[1].Value));
+                    CoreTag tag = CoreSchema.ParseResolvedTag(Encoding.UTF8.GetBytes("tag:yaml.org,2002:" + m.Groups[1].Value));
                     Assert.True(CoreSchema.TryResolveTagged(tag, text, out ScalarKind kind), name + ": " + m.Value);
                     CheckKind(name + "#" + index, kind, text, expected[index], tagged: true);
                     index++;
@@ -108,10 +108,12 @@ public sealed partial class CoreAgainstKitFilesTests
             }
         }
 
-        // The kit has more than a dozen pure plain-scalar resolution cases; fail loudly if the reader
-        // silently matched nothing (for example after a layout change in the kit).
-        Assert.True(casesChecked >= 12, $"only {casesChecked} cases were checked");
-        Assert.True(valuesChecked >= 100, $"only {valuesChecked} values were checked");
+        // The counts are those of the kit revision this was written against (4115afb); a kit change that
+        // adds or moves cases must change them here on purpose, and a layout change that makes the
+        // reader match nothing fails loudly.
+        TestContext.Current.SendDiagnosticMessage($"{casesChecked} kit schema cases, {valuesChecked} values; skipped {skipped.Count}");
+        Assert.Equal(16, casesChecked);
+        Assert.Equal(128, valuesChecked);
         Assert.NotEmpty(skipped);
     }
 

@@ -9,7 +9,10 @@ namespace OneYaml.Emitting;
 /// Writes YAML scalars as UTF-8 into an <see cref="IBufferWriter{T}"/>. Every scalar writer
 /// either writes text that reads back as exactly the value given, or writes nothing and says
 /// so. Text is never wrapped. Strings are passed as UTF-8 bytes and must be valid UTF-8;
-/// malformed bytes are written as U+FFFD in double quotes.
+/// malformed bytes are written as U+FFFD in double quotes. The string, bool, null, integer and
+/// float writers allocate nothing after warm-up on net8 and net10 (measured);
+/// <see cref="WriteBigInteger"/> allocates inside the runtime's formatter on net8 (about 1 KB for
+/// a 400-digit value).
 /// </summary>
 internal readonly partial struct Utf8YamlWriter
 {
@@ -82,7 +85,10 @@ internal readonly partial struct Utf8YamlWriter
     /// <param name="mode">Whose reading a plain scalar must survive.</param>
     /// <param name="parentIndent">Column of the owning key or dash, for block scalars.</param>
     /// <param name="contentIndent">Column of the block scalar's lines.</param>
-    /// <returns>The style to write with.</returns>
+    /// <returns>
+    /// The style to write with, or <see cref="ScalarWriteStyle.ExplicitKeyRequired"/> when the
+    /// scalar is a key that is too long to be an implicit one in any style.
+    /// </returns>
     public static ScalarWriteStyle ChooseStyle(
         ReadOnlySpan<byte> text,
         ScalarWriteStyle preferred,
@@ -90,6 +96,23 @@ internal readonly partial struct Utf8YamlWriter
         StyleMode mode,
         int parentIndent = 0,
         int contentIndent = 2)
+    {
+        ScalarWriteStyle style = ChooseStyleCore(text, preferred, context, mode, parentIndent, contentIndent);
+        if (context is EmitContext.BlockKey or EmitContext.FlowKey && IsTooLongForImplicitKey(text, style))
+        {
+            return ScalarWriteStyle.ExplicitKeyRequired;
+        }
+
+        return style;
+    }
+
+    private static ScalarWriteStyle ChooseStyleCore(
+        ReadOnlySpan<byte> text,
+        ScalarWriteStyle preferred,
+        EmitContext context,
+        StyleMode mode,
+        int parentIndent,
+        int contentIndent)
     {
         TextTraits traits = ScalarText.Analyze(text);
         switch (preferred)
@@ -131,18 +154,26 @@ internal readonly partial struct Utf8YamlWriter
     /// <param name="mode">Whose reading a plain scalar must survive.</param>
     /// <param name="parentIndent">Column of the owning key or dash, for block scalars.</param>
     /// <param name="contentIndent">Column of the block scalar's lines.</param>
-    /// <returns>The style used. A block style means the text ended with a line break.</returns>
+    /// <param name="existingHeader">The header the scalar has now, kept for a block style while it still reads back exactly.</param>
+    /// <returns>
+    /// The style used. A block style means the text ended with a line break.
+    /// <see cref="ScalarWriteStyle.ExplicitKeyRequired"/> means a key too long to be implicit:
+    /// nothing was written and the caller writes <c>? </c> and the key itself.
+    /// </returns>
     public ScalarWriteStyle WriteString(
         ReadOnlySpan<byte> text,
         ScalarWriteStyle preferred,
         EmitContext context,
         StyleMode mode,
         int parentIndent = 0,
-        int contentIndent = 2)
+        int contentIndent = 2,
+        BlockHeader existingHeader = default)
     {
         ScalarWriteStyle style = ChooseStyle(text, preferred, context, mode, parentIndent, contentIndent);
         switch (style)
         {
+            case ScalarWriteStyle.ExplicitKeyRequired:
+                break;
             case ScalarWriteStyle.Plain:
                 WriteRaw(text);
                 break;
@@ -153,7 +184,7 @@ internal readonly partial struct Utf8YamlWriter
                 WriteDoubleQuoted(text);
                 break;
             default:
-                WriteBlock(text, style == ScalarWriteStyle.Folded, parentIndent, contentIndent);
+                WriteBlock(text, style == ScalarWriteStyle.Folded, parentIndent, contentIndent, existingHeader);
                 break;
         }
 
@@ -171,6 +202,11 @@ internal readonly partial struct Utf8YamlWriter
     private static bool CanBePlain(ReadOnlySpan<byte> text, TextTraits traits, EmitContext context, StyleMode mode)
     {
         if (text.IsEmpty || (traits & (TextTraits.LineBreak | TextTraits.NeedsEscape | TextTraits.Tab)) != 0)
+        {
+            return false;
+        }
+
+        if (context is EmitContext.BlockKey or EmitContext.FlowKey && IsTooLongForImplicitKey(text, ScalarWriteStyle.Plain))
         {
             return false;
         }
@@ -270,6 +306,96 @@ internal readonly partial struct Utf8YamlWriter
         }
 
         return mode == StyleMode.Edit || !Yaml11.LooksNonString(text);
+    }
+
+    // Every escape is at most six characters ("\u0001"), so short keys need no exact count.
+    private const int AlwaysShortKeyBytes = (MaxImplicitKeyLength - 2) / 6;
+
+    /// <summary>
+    /// Tells whether a key written in this style would be longer than an implicit key may be: 1,024
+    /// characters including quotes and escapes.
+    /// </summary>
+    private static bool IsTooLongForImplicitKey(ReadOnlySpan<byte> text, ScalarWriteStyle style)
+    {
+        if (text.Length <= AlwaysShortKeyBytes)
+        {
+            return false;
+        }
+
+        return WrittenKeyLength(text, style) > MaxImplicitKeyLength;
+    }
+
+    private static long WrittenKeyLength(ReadOnlySpan<byte> text, ScalarWriteStyle style)
+    {
+        switch (style)
+        {
+            case ScalarWriteStyle.Plain:
+                return CountCharacters(text);
+            case ScalarWriteStyle.SingleQuoted:
+                int quotes = 0;
+                ReadOnlySpan<byte> rest = text;
+                int at;
+                while ((at = rest.IndexOf((byte)'\'')) >= 0)
+                {
+                    quotes++;
+                    rest = rest.Slice(at + 1);
+                }
+
+                return CountCharacters(text) + quotes + 2;
+            default:
+                return DoubleQuotedLength(text);
+        }
+    }
+
+    // Characters of valid UTF-8: every byte that does not continue a character.
+    private static int CountCharacters(ReadOnlySpan<byte> text)
+    {
+        int count = 0;
+        foreach (byte b in text)
+        {
+            if ((b & 0xC0) != 0x80)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    // Mirrors WriteDoubleQuoted: what each character costs once escaped.
+    private static long DoubleQuotedLength(ReadOnlySpan<byte> text)
+    {
+        long length = 2;
+        ReadOnlySpan<byte> rest = text;
+        while (!rest.IsEmpty)
+        {
+            byte b = rest[0];
+            if (b < 0x80)
+            {
+                length += b switch
+                {
+                    (byte)'"' or (byte)'\\' or 0 or 7 or 8 or 9 or 10 or 11 or 12 or 13 or 27 => 2,
+                    < 0x20 or 0x7F => 4,
+                    _ => 1,
+                };
+                rest = rest.Slice(1);
+                continue;
+            }
+
+            OperationStatus status = Rune.DecodeFromUtf8(rest, out Rune rune, out int used);
+            if (status != OperationStatus.Done)
+            {
+                length += 6;
+                rest = rest.Slice(Math.Max(used, 1));
+                continue;
+            }
+
+            int cp = rune.Value;
+            length += !ScalarText.MustEscape(cp) ? 1 : cp is 0x85 or 0x2028 or 0x2029 ? 2 : cp <= 0xFF ? 4 : 6;
+            rest = rest.Slice(used);
+        }
+
+        return length;
     }
 
     private static bool HasSpaceBeforeProperty(ReadOnlySpan<byte> text)

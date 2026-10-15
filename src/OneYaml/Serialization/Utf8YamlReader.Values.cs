@@ -194,6 +194,15 @@ public ref partial struct Utf8YamlReader
     public readonly BigInteger GetBigInteger() =>
         TryReadBigInteger(out BigInteger v) == NumberStatus.Ok ? v : throw CreateException("The value is not an integer.");
 
+    // Refuse a very long integer before parsing it: converting one takes more than linear time.
+    private readonly void CheckIntegerLength(ReadOnlySpan<byte> text)
+    {
+        if (!CoreSchema.IsWithinIntegerDigits(text, _limits.MaxIntegerDigits))
+        {
+            throw Error(YamlErrorCategory.Limit, "The integer has more digits than the configured limit.");
+        }
+    }
+
     internal readonly NumberStatus TryReadBoolean(out bool value)
     {
         value = false;
@@ -311,6 +320,7 @@ public ref partial struct Utf8YamlReader
                 return NumberStatus.Ok;
             }
 
+            CheckIntegerLength(t);
             return CoreSchema.TryParseBigInteger(t, out value) ? NumberStatus.Ok : NumberStatus.NotNumber;
         }
         finally
@@ -356,6 +366,7 @@ public ref partial struct Utf8YamlReader
                 return NumberStatus.Ok;
             }
 
+            CheckIntegerLength(t);
             if (!CoreSchema.TryParseBigInteger(t, out BigInteger big))
             {
                 return NumberStatus.NotNumber;
@@ -399,6 +410,7 @@ public ref partial struct Utf8YamlReader
                     return NumberStatus.Ok;
                 }
 
+                CheckIntegerLength(t);
                 if (!CoreSchema.TryParseBigInteger(t, out BigInteger big))
                 {
                     return NumberStatus.NotNumber;
@@ -457,6 +469,7 @@ public ref partial struct Utf8YamlReader
                         return l;
                     }
 
+                    CheckIntegerLength(t);
                     return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? big : throw CreateException("The integer is not valid.");
                 case ScalarKind.Float:
                     return CoreSchema.TryParseDouble(t, out double d) ? d : throw CreateException("The number is not valid.");
@@ -499,6 +512,7 @@ public ref partial struct Utf8YamlReader
                         return "i" + l.ToString(CultureInfo.InvariantCulture);
                     }
 
+                    CheckIntegerLength(t);
                     return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? "i" + big.ToString(CultureInfo.InvariantCulture) : null;
                 case ScalarKind.Float:
                     return CoreSchema.TryParseDouble(t, out double d) ? "f" + d.ToString("R", CultureInfo.InvariantCulture) : null;

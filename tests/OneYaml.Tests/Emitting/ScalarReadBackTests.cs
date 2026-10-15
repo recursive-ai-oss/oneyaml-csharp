@@ -36,6 +36,7 @@ public sealed partial class ScalarReadBackTests
         new("nested block value", EmitContext.BlockValue, "a:\n  k: ", "  z: 1\ny: 2\n", 2, 4, Open("+MAP", "=VAL :a", "+MAP", "=VAL :k"), ["=VAL :z", "=VAL :1", "-MAP", "=VAL :y", "=VAL :2", "-MAP", .. Footer], false),
         new("odd indentation", EmitContext.BlockValue, "a:\n  k: ", "  z: 1\n", 2, 5, Open("+MAP", "=VAL :a", "+MAP", "=VAL :k"), ["=VAL :z", "=VAL :1", "-MAP", "-MAP", .. Footer], false),
         new("sequence item", EmitContext.BlockValue, "- ", "- z\n", 0, 2, Open("+SEQ"), ["=VAL :z", "-SEQ", .. Footer], false),
+        new("document root", EmitContext.BlockValue, "--- ", string.Empty, -1, 2, Open(), Footer, false),
         new("block key", EmitContext.BlockKey, string.Empty, ": v\nz: 1\n", 0, 2, Open("+MAP"), ["=VAL :v", "=VAL :z", "=VAL :1", "-MAP", .. Footer], true),
         new("flow sequence item", EmitContext.FlowValue, "[a, ", ", z]\n", 0, 2, Open("+SEQ", "=VAL :a"), ["=VAL :z", "-SEQ", .. Footer], false),
         new("flow mapping value", EmitContext.FlowValue, "{k: ", ", z: 1}\n", 0, 2, Open("+MAP", "=VAL :k"), ["=VAL :z", "=VAL :1", "-MAP", .. Footer], false),
@@ -96,6 +97,15 @@ public sealed partial class ScalarReadBackTests
         return sb.ToString();
     }
 
+    // Long keys have no implicit form; the harness writes the explicit one the caller is told to write.
+    private static string ExplicitKey(Layout layout, string value)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        new Utf8YamlWriter(buffer).WriteDoubleQuoted(Encoding.UTF8.GetBytes(value));
+        string quoted = Encoding.UTF8.GetString(buffer.WrittenSpan);
+        return layout.Context == EmitContext.FlowKey ? "{? " + quoted + " : v, z: 1}\n" : "? " + quoted + "\n: v\nz: 1\n";
+    }
+
     /// <summary>Writes, parses with both parsers, compares. Returns the number of documents checked.</summary>
     private static int CheckValue(string value, bool deepNesting)
     {
@@ -103,11 +113,6 @@ public sealed partial class ScalarReadBackTests
         int count = 0;
         foreach (Layout layout in Layouts)
         {
-            if (layout.IsKey && utf8.Length > 1000)
-            {
-                continue;
-            }
-
             foreach (StyleMode mode in new[] { StyleMode.Dump, StyleMode.Edit })
             {
                 foreach (ScalarWriteStyle preferred in Styles)
@@ -115,34 +120,88 @@ public sealed partial class ScalarReadBackTests
                     var buffer = new ArrayBufferWriter<byte>();
                     var writer = new Utf8YamlWriter(buffer);
                     ScalarWriteStyle used = writer.WriteString(utf8, preferred, layout.Context, mode, layout.Parent, layout.Content);
-                    string scalar = Encoding.UTF8.GetString(buffer.WrittenSpan);
-                    string separator = layout.Context == EmitContext.BlockValue && !scalar.EndsWith('\n') ? "\n" : string.Empty;
-                    string text = layout.Prefix + scalar + separator + layout.Trail;
-                    string[] expected = [.. layout.Before, "=VAL " + Mark(used) + value, .. layout.After];
-                    string where = $"{layout.Name}, {mode}, preferred {preferred}, used {used}, value '{Escape(value)}'\n--- document:\n{Escape(text).Replace("\\u000A", "\\n\n")}";
+                    count += Verify(layout, mode, preferred, used, value, utf8, buffer, default);
 
-                    Assert.True(
-                        expected.SequenceEqual(Guard(() => YamlDotNetEvents.Read(text), where)),
-                        "YamlDotNet read back something else: " + where);
-                    Assert.True(
-                        expected.SequenceEqual(Guard(() => SharpYamlEvents.Read(text), where)),
-                        "SharpYaml read back something else: " + where);
-
-                    if (used == ScalarWriteStyle.Plain)
+                    // The block header the scalar has now: every chomping and indentation indicator.
+                    if (used is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded)
                     {
-                        Assert.Equal(ScalarKind.String, CoreSchema.ResolvePlain(utf8));
-                        if (mode == StyleMode.Dump)
+                        int delta = layout.Content - layout.Parent;
+                        foreach (BlockChomping chomping in new[] { BlockChomping.Clip, BlockChomping.Strip, BlockChomping.Keep })
                         {
-                            Assert.False(AnyReaderTakesAsNonString(value), "plain in dump mode but YAML 1.1 reads it as a non-string: " + where);
+                            foreach (int indicator in new[] { 0, delta, delta % 9 + 1 })
+                            {
+                                var header = new BlockHeader(chomping, indicator);
+                                var again = new ArrayBufferWriter<byte>();
+                                ScalarWriteStyle usedAgain = new Utf8YamlWriter(again).WriteString(utf8, preferred, layout.Context, mode, layout.Parent, layout.Content, header);
+                                Assert.Equal(used, usedAgain);
+                                count += Verify(layout, mode, preferred, usedAgain, value, utf8, again, header);
+                            }
                         }
                     }
-
-                    count++;
                 }
             }
         }
 
         return count;
+    }
+
+    private static int Verify(Layout layout, StyleMode mode, ScalarWriteStyle preferred, ScalarWriteStyle used, string value, byte[] utf8, ArrayBufferWriter<byte> buffer, BlockHeader header)
+    {
+        string text;
+        string[] expected;
+        string scalar = Encoding.UTF8.GetString(buffer.WrittenSpan);
+        if (used == ScalarWriteStyle.ExplicitKeyRequired)
+        {
+            Assert.True(layout.IsKey, "only a key can need the explicit form");
+            Assert.Equal(string.Empty, scalar);
+            Assert.True(SomeStyleExceedsTheLimit(utf8), "asked for an explicit key but the key is short: " + Escape(value));
+            text = ExplicitKey(layout, value);
+            expected = [.. layout.Before, "=VAL \"" + value, .. layout.After];
+        }
+        else
+        {
+            if (layout.IsKey)
+            {
+                // No style may produce a key over the limit.
+                Assert.True(scalar.EnumerateRunes().Count() <= Utf8YamlWriter.MaxImplicitKeyLength, "key over 1024 characters: " + Escape(value));
+            }
+
+            string separator = layout.Context == EmitContext.BlockValue && !scalar.EndsWith('\n') ? "\n" : string.Empty;
+            text = layout.Prefix + scalar + separator + layout.Trail;
+            expected = [.. layout.Before, "=VAL " + Mark(used) + value, .. layout.After];
+        }
+
+        string where = $"{layout.Name}, {mode}, preferred {preferred}, used {used}, header {header}, value '{Escape(value)}'\n--- document:\n{Escape(text).Replace("\\u000A", "\\n\n")}";
+
+        Assert.True(
+            expected.SequenceEqual(Guard(() => YamlDotNetEvents.Read(text), where)),
+            "YamlDotNet read back something else: " + where);
+        Assert.True(
+            expected.SequenceEqual(Guard(() => SharpYamlEvents.Read(text), where)),
+            "SharpYaml read back something else: " + where);
+
+        if (used == ScalarWriteStyle.Plain)
+        {
+            Assert.Equal(ScalarKind.String, CoreSchema.ResolvePlain(utf8));
+            if (mode == StyleMode.Dump)
+            {
+                Assert.False(AnyReaderTakesAsNonString(value), "plain in dump mode but YAML 1.1 reads it as a non-string: " + where);
+            }
+        }
+
+        return 1;
+    }
+
+    // The key is long in the style the writer picked: plain, single or double quotes.
+    private static bool SomeStyleExceedsTheLimit(byte[] utf8)
+    {
+        string text = Encoding.UTF8.GetString(utf8);
+        var buffer = new ArrayBufferWriter<byte>();
+        new Utf8YamlWriter(buffer).WriteDoubleQuoted(utf8);
+        int quotes = text.Count(c => c == '\'');
+        return text.EnumerateRunes().Count() > Utf8YamlWriter.MaxImplicitKeyLength
+            || text.EnumerateRunes().Count() + quotes + 2 > Utf8YamlWriter.MaxImplicitKeyLength
+            || Encoding.UTF8.GetString(buffer.WrittenSpan).EnumerateRunes().Count() > Utf8YamlWriter.MaxImplicitKeyLength;
     }
 
     private static int Run(int seed, int values, bool allowLong)

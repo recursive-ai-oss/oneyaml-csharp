@@ -21,6 +21,7 @@ public sealed record YamlLimits
         AliasNodeFloor = 100_000,
         AliasByteFactor = 2,
         AliasByteFloor = 8L * 1024 * 1024,
+        MaxIntegerDigits = 4_300,
     };
 
     /// <summary>No limits at all. Only for input that is fully trusted.</summary>
@@ -34,6 +35,7 @@ public sealed record YamlLimits
         AliasNodeFloor = long.MaxValue,
         AliasByteFactor = long.MaxValue,
         AliasByteFloor = long.MaxValue,
+        MaxIntegerDigits = int.MaxValue,
     };
 
     /// <summary>The deepest nesting of collections allowed.</summary>
@@ -47,6 +49,15 @@ public sealed record YamlLimits
 
     /// <summary>The most documents one stream may hold.</summary>
     public int MaxDocuments { get; init; } = int.MaxValue;
+
+    /// <summary>
+    /// The most digits an integer written in the document may have when it is read as a number of
+    /// any size. Hexadecimal and octal digits count as the decimal digits they stand for. Reading
+    /// a longer integer throws a <see cref="YamlException"/> with category
+    /// <see cref="YamlErrorCategory.Limit"/>, before any work is done on the digits: converting
+    /// a very long integer takes more than linear time. Integers that fit in 64 bits are not affected.
+    /// </summary>
+    public int MaxIntegerDigits { get; init; } = 4_300;
 
     /// <summary>
     /// Alias expansion budget in nodes: this many times the document's own node count, but at least

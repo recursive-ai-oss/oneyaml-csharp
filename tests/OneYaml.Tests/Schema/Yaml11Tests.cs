@@ -134,4 +134,38 @@ public sealed class Yaml11Tests
             Assert.True(Looks(s), s);
         }
     }
+
+    // Spellings that Go's readers take as numbers: they drop every underscore, skip a second
+    // sign, and accept a sign after the base prefix.
+    [Theory]
+    [InlineData("+_1")]
+    [InlineData("-_6")]
+    [InlineData("+__685")]
+    [InlineData("-_1_53")]
+    [InlineData("1e3_")]
+    [InlineData("2E_0")]
+    [InlineData("-3e_4")]
+    [InlineData("8.E+_0")]
+    [InlineData("0_x123")]
+    [InlineData("9_E0_0")]
+    [InlineData("3.e_5")]
+    [InlineData("0o+7")]
+    [InlineData("0x-1")]
+    [InlineData("0o+157")]
+    [InlineData("+-1")]
+    [InlineData("++.4")]
+    [InlineData("++1_.")]
+    [InlineData("+-1._7")]
+    [InlineData("++4.5")]
+    public void Loose_readers_number_spellings_are_not_plain_strings(string text) => Assert.True(Looks(text), text);
+
+    [Theory]
+    [InlineData("--verbose")]
+    [InlineData("-_")]
+    [InlineData("+_x")]
+    [InlineData("--")]
+    [InlineData("1_a")]
+    [InlineData("0o+")]
+    [InlineData("-+x1")]
+    public void Ordinary_text_with_signs_and_underscores_stays_plain(string text) => Assert.False(Looks(text), text);
 }

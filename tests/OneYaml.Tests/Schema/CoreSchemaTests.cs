@@ -358,6 +358,29 @@ public sealed partial class CoreSchemaTests
         Assert.Equal(Enum.Parse<CoreTag>(expected), CoreSchema.ParseTag(U8(tag)));
 
     [Theory]
+    [InlineData("tag:yaml.org,2002:int", "Int")]
+    [InlineData("tag:yaml.org,2002:str", "Str")]
+    [InlineData("!", "Str")]
+    [InlineData("!!int", "Unknown")]
+    [InlineData("!!str", "Unknown")]
+    [InlineData("!!null", "Unknown")]
+    public void ParseResolvedTag_does_not_take_a_handle_that_a_document_may_redefine(string tag, string expected) =>
+        Assert.Equal(Enum.Parse<CoreTag>(expected), CoreSchema.ParseResolvedTag(U8(tag)));
+
+    [Theory]
+    [InlineData("12", 4300, true)]
+    [InlineData("-12", 2, true)]
+    [InlineData("+123", 3, true)]
+    [InlineData("1234", 3, false)]
+    [InlineData("-1234", 3, false)]
+    [InlineData("0xFF", 3, true)]
+    [InlineData("0xFFFFF", 3, false)]
+    [InlineData("0o777", 3, true)]
+    [InlineData("0o7777777", 3, false)]
+    public void IsWithinIntegerDigits_counts_digits_and_scales_the_other_bases(string text, int max, bool within) =>
+        Assert.Equal(within, CoreSchema.IsWithinIntegerDigits(U8(text), max));
+
+    [Theory]
     [InlineData("Float", "1", true, "Float")]
     [InlineData("Float", ".inf", true, "Float")]
     [InlineData("Float", "1.5e3", true, "Float")]

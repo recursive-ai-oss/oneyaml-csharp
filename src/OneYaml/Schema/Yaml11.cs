@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Text;
 
 namespace OneYaml.Schema;
@@ -49,10 +50,70 @@ internal static class Yaml11
             case (byte)'-':
             case (byte)'.':
             case >= (byte)'0' and <= (byte)'9':
-                return IsNumberOrTimestamp(text);
+                return IsNumberOrTimestamp(text) || IsLooseNumber(text);
             default:
                 return false;
         }
+    }
+
+    // Spellings that strict readers reject but loose ones accept: Go's readers drop every underscore
+    // before parsing a number, and some of them skip a second sign or a sign after 0x and 0o.
+    private static bool IsLooseNumber(ReadOnlySpan<byte> t)
+    {
+        if (IsLooseCore(t))
+        {
+            return true;
+        }
+
+        if (t.IndexOf((byte)'_') < 0)
+        {
+            return false;
+        }
+
+        byte[]? rented = null;
+        Span<byte> stripped = t.Length <= 128 ? stackalloc byte[128] : (rented = ArrayPool<byte>.Shared.Rent(t.Length));
+        try
+        {
+            int n = 0;
+            foreach (byte b in t)
+            {
+                if (b != (byte)'_')
+                {
+                    stripped[n++] = b;
+                }
+            }
+
+            ReadOnlySpan<byte> s = stripped.Slice(0, n);
+            return !s.IsEmpty && (CoreSchema.ResolvePlain(s) != ScalarKind.String || IsNumberOrTimestamp(s) || IsLooseCore(s));
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static bool IsLooseCore(ReadOnlySpan<byte> t)
+    {
+        int signs = 0;
+        while (signs < t.Length && t[signs] is (byte)'+' or (byte)'-')
+        {
+            signs++;
+        }
+
+        // "+-1" and "++.4": a run of signs in front of a number.
+        if (signs >= 2 && signs < t.Length && (IsDigit(t[signs]) || t[signs] == (byte)'.'))
+        {
+            ReadOnlySpan<byte> rest = t.Slice(signs);
+            return CoreSchema.ResolvePlain(rest) != ScalarKind.String || IsNumberOrTimestamp(rest);
+        }
+
+        // "0o+7" and "0x-1": a sign after the base prefix.
+        int i = signs == 1 ? 1 : 0;
+        return signs <= 1 && i + 3 < t.Length && t[i] == (byte)'0' && (t[i + 1] | 0x20) is 'x' or 'o' or 'b'
+            && t[i + 2] is (byte)'+' or (byte)'-';
     }
 
     private static bool IsWord(ReadOnlySpan<byte> t)
