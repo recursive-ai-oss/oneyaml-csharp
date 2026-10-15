@@ -79,6 +79,18 @@ internal static class Differ
         }
     }
 
+    // The outcome of a call to the real library, run on a thread with a large stack. The real
+    // library recurses once per nesting level and overflows the 1 MB stack Windows gives a thread
+    // on inputs the compat package reads on any stack; a stack overflow would end the test run.
+    internal static string OutcomeOfReal(Func<object?> call)
+    {
+        string result = "";
+        var thread = new Thread(() => result = Outcome(call), 64 * 1024 * 1024);
+        thread.Start();
+        thread.Join();
+        return result;
+    }
+
     // The outcome of a call: its dumped value, or the kind of failure.
     internal static string Outcome(Func<object?> call)
     {

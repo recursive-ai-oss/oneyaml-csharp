@@ -245,7 +245,7 @@ public class ConverterTests
         var diffs = new List<string>();
         void Check(string label, Func<object?> real, Func<object?> compat)
         {
-            string a = Differ.Outcome(real);
+            string a = Differ.OutcomeOfReal(real);
             string b = Differ.Outcome(compat);
             if (a != b)
             {
