@@ -15,6 +15,10 @@ namespace OneYaml;
 /// <see cref="InvalidOperationException"/>. A node made from a value (a string, a number,
 /// <see langword="null"/>…) is detached and can only be assigned into a document.
 /// </summary>
+/// <remarks>
+/// Reading through aliases is charged to the alias budget of the root the view was reached from, so a
+/// long-lived reader should take <see cref="YamlDocument.Root"/> again for each operation.
+/// </remarks>
 public sealed class YamlNode : IEquatable<YamlNode>
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);

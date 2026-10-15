@@ -128,13 +128,18 @@ internal struct AliasBudget
     /// <param name="state">The document.</param>
     /// <param name="node">The node being copied (for the error position).</param>
     /// <param name="bytes">The bytes of its text.</param>
-    public void ChargeCopied(DocState state, int node, long bytes)
+    /// <param name="viaAlias">Whether the node is reached through an alias, which changes the wording of the refusal.</param>
+    public void ChargeCopied(DocState state, int node, long bytes, bool viaAlias)
     {
         _nodes--;
         _bytes -= Math.Max(bytes, 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit.", state.Text, state.Node(node).Start);
+            throw YamlException.At(
+                YamlErrorCategory.Limit,
+                viaAlias ? "Following aliases expands to more than the configured limit." : "The patch copies more than the configured limit.",
+                state.Text,
+                state.Node(node).Start);
         }
     }
 

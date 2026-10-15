@@ -333,6 +333,16 @@ internal static class PointerOps
             return Editor.Replace(s, limits, s.Doc(document).Root, v);
         }
 
+        int docRoot = s.Doc(document).Root;
+        if (p.Count == 1 && mode != Mode.Replace && s.IsEmptyRoot(docRoot))
+        {
+            // A stream with no content takes its first member or item here, as an indexer does:
+            // "-" and "0" start a sequence, any other token a mapping.
+            ReadOnlySpan<byte> first = p[0];
+            bool item = first.SequenceEqual("-"u8) || first.SequenceEqual("0"u8);
+            return Editor.Replace(s, limits, docRoot, ValueTree.Wrap(item ? null : first.ToArray(), v));
+        }
+
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
         var budget = new AliasBudget(s, limits);
         int container = Descend(s, ref budget, cur, ref viaAlias);

@@ -6,8 +6,10 @@ using OneYaml.Text;
 namespace OneYaml.Documents;
 
 /// <summary>
-/// The text of a YAML stream and its lossless tree. A state is never changed after it is built:
-/// an edit builds the next state from the bytes it wants, so a failed edit leaves this one intact.
+/// The text of a YAML stream and its lossless tree. A state is not changed once it is built: an edit
+/// builds the next state from the bytes it wants, so a failed edit leaves this one intact. The one
+/// exception is a state a patch has marked <see cref="Exclusive"/>: the patch made it, nobody else can
+/// see it yet, and its next operation edits it in place.
 /// The arrays come from the shared pool and go back on <see cref="Dispose"/>.
 /// </summary>
 internal sealed partial class DocState : IDisposable
@@ -133,8 +135,13 @@ internal sealed partial class DocState : IDisposable
         return end;
     }
 
+    /// <summary>The expansion sizes a read through aliases worked out for this state, returned to the pool on <see cref="Dispose"/>.</summary>
+    internal NodeReplay.ExpansionSizes? ExpansionCache { get; set; }
+
     public void Dispose()
     {
+        ExpansionCache?.Release();
+        ExpansionCache = null;
         Return(ref _buf);
         Return(ref _nodes);
         Return(ref _props);

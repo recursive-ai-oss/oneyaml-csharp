@@ -48,6 +48,11 @@ public sealed class YamlDocument : IDisposable
     /// The root of the first document. A stream with no document has an implicit empty one: it reads as
     /// null, and the first write to it makes the document.
     /// </summary>
+    /// <remarks>
+    /// Every call starts a new alias budget (the nodes and bytes that reading through aliases may expand to),
+    /// shared by all views reached from the root it returns. A reader that lives long should take the root
+    /// again for each operation instead of reusing one view, or its reads add up against a single budget.
+    /// </remarks>
     public YamlNode Root
     {
         get
@@ -341,13 +346,6 @@ public sealed class YamlDocument : IDisposable
         // could otherwise leave the edit working on a state that has been replaced.
         ValueTree v = ValueTree.FromObject(value, _limits.MaxDepth);
         DocState s = Current(document);
-        if (p.Count == 1 && s.IsEmptyRoot(s.Doc(document).Root))
-        {
-            // A stream with no content takes its first member here, as it does through an indexer.
-            Swap(Editor.Replace(s, _limits, s.Doc(document).Root, ValueTree.Wrap(p[0].ToArray(), v)));
-            return;
-        }
-
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
     }
 

@@ -364,7 +364,7 @@ internal static class PatchEngine
         Pointer dest = to;
         var policy = new AliasPolicy(s, source, source + s.Node(source).Size, document, () => PointerOps.Locate(s, limits, document, dest, PointerOps.Mode.Add));
         var value = new ValueTree();
-        value.AppendFrom(s, source, ref budget, policy);
+        value.AppendFrom(s, source, ref budget, policy, chargeCopies: !remove);
         if (!remove)
         {
             return PointerOps.Write(s, limits, document, to, value, PointerOps.Mode.Add);
