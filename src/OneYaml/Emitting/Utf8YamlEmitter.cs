@@ -122,6 +122,14 @@ public sealed partial class Utf8YamlEmitter
             emitter._usedFrames = false;
         }
 
+        if (emitter._usedKeyCache)
+        {
+            // The table holds the caller's strings.
+            Array.Clear(emitter._keyCache!);
+            emitter._keyArenaUsed = 0;
+            emitter._usedKeyCache = false;
+        }
+
         emitter._depth = 0;
         emitter._w = default;
         emitter._output = null!;
@@ -170,7 +178,9 @@ public sealed partial class Utf8YamlEmitter
     // The reference is the object being written; the emitter uses it to tell a value that contains itself from deep nesting.
     internal void Begin(bool isMapping, object? reference)
     {
-        if (!RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        // Only converters that call each other nest deeper than the explicit stacks do, and a level costs them a few hundred
+        // bytes, so asking the runtime every eighth level keeps a wide margin and costs nothing on the others.
+        if ((_depth & 7) == 0 && !RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             throw new YamlException("The value is nested too deeply for the stack available.", YamlErrorCategory.Limit, 0, 0, 0);
         }
@@ -216,8 +226,7 @@ public sealed partial class Utf8YamlEmitter
             }
             else
             {
-                StartEntry(ref parent);
-                _w.WriteRaw("- "u8);
+                WriteLead(StartEntryLead(ref parent, dash: true));
                 open = OpenInline;
                 indent = parent.Indent + 2;
             }
@@ -292,19 +301,32 @@ public sealed partial class Utf8YamlEmitter
         }
     }
 
-    // Writes whatever must come before the next entry of a collection: the line break and indentation.
-    private void StartEntry(ref Frame f)
+    // What must come before a scalar or an entry: a line break, indentation, then a dash or a space. It is described
+    // first and written afterwards so the lead, the text and the line end can go out in one buffer request.
+    private readonly struct Lead(bool newline, int spaces, byte tail)
     {
+        public readonly bool Newline = newline;
+        public readonly int Spaces = spaces;
+        public readonly byte Tail = tail; // 0 nothing, 1 a space, 2 a dash and a space
+
+        public int Length => (Newline ? 1 : 0) + Spaces + Tail;
+    }
+
+    // Counts the entry and says what comes before it: the line break and indentation, then the dash of a sequence item.
+    private static Lead StartEntryLead(ref Frame f, bool dash = false)
+    {
+        bool newline = false;
+        int spaces = 0;
         if (f.Count == 0)
         {
             switch (f.Open)
             {
                 case OpenAfterKey:
-                    _w.WriteByte((byte)'\n');
-                    _w.WriteSpaces(f.Indent);
+                    newline = true;
+                    spaces = f.Indent;
                     break;
                 case OpenLineStart:
-                    _w.WriteSpaces(f.Indent);
+                    spaces = f.Indent;
                     break;
                 default:
                     break;
@@ -312,10 +334,51 @@ public sealed partial class Utf8YamlEmitter
         }
         else
         {
-            _w.WriteSpaces(f.Indent);
+            spaces = f.Indent;
         }
 
         f.Count++;
+        return new Lead(newline, spaces, dash ? (byte)2 : (byte)0);
+    }
+
+    private void WriteLead(Lead lead)
+    {
+        if (lead.Length != 0)
+        {
+            Span<byte> dst = OpenLead(lead, 0);
+            _ = dst;
+            Advance(lead.Length);
+        }
+    }
+
+    // Reserves room for the lead and a payload after it, writes the lead and returns the span for the payload. The
+    // caller copies the payload and advances by the lead's length plus the payload's.
+    private Span<byte> OpenLead(Lead lead, int payload)
+    {
+        Span<byte> span = GetSpan(lead.Length + payload);
+        int at = 0;
+        if (lead.Newline)
+        {
+            span[at++] = (byte)'\n';
+        }
+
+        if (lead.Spaces > 0)
+        {
+            span.Slice(at, lead.Spaces).Fill((byte)' ');
+            at += lead.Spaces;
+        }
+
+        if (lead.Tail == 1)
+        {
+            span[at++] = (byte)' ';
+        }
+        else if (lead.Tail == 2)
+        {
+            span[at++] = (byte)'-';
+            span[at++] = (byte)' ';
+        }
+
+        return span.Slice(at);
     }
 
     // ---- scalar positions ----
@@ -331,6 +394,14 @@ public sealed partial class Utf8YamlEmitter
     // Writes the prefix a scalar needs (the dash of a sequence item, the space after a key) and says where the scalar sits.
     private Place BeginScalar(out int parentIndent)
     {
+        Place place = BeginScalarLead(out parentIndent, out Lead lead);
+        WriteLead(lead);
+        return place;
+    }
+
+    // Like BeginScalar, but leaves writing the prefix to the caller.
+    private Place BeginScalarLead(out int parentIndent, out Lead lead)
+    {
         if (_depth == 0)
         {
             if (_rootDone)
@@ -339,11 +410,7 @@ public sealed partial class Utf8YamlEmitter
             }
 
             parentIndent = _embeddedParentIndent;
-            if (_embedding == Embedding.AfterKey)
-            {
-                _w.WriteByte((byte)' ');
-            }
-
+            lead = new Lead(false, 0, _embedding == Embedding.AfterKey ? (byte)1 : (byte)0);
             return Place.Root;
         }
 
@@ -354,15 +421,15 @@ public sealed partial class Utf8YamlEmitter
             if (f.KeyPending)
             {
                 f.KeyPending = false;
-                _w.WriteByte((byte)' ');
+                lead = new Lead(false, 0, 1);
                 return Place.MapValue;
             }
 
+            lead = default;
             return Place.MapKey;
         }
 
-        StartEntry(ref f);
-        _w.WriteRaw("- "u8);
+        lead = StartEntryLead(ref f, dash: true);
         return Place.SeqItem;
     }
 

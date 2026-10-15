@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace OneYaml;
@@ -13,16 +14,30 @@ internal static class GenericWriter
 {
     private static readonly ConcurrentDictionary<Type, YamlConverter?> s_leaves = new();
 
+    private enum FrameKind : byte
+    {
+        // The two shapes a load into `object` makes get struct enumerators, so walking them allocates nothing.
+        Dictionary,
+        List,
+        Entries,
+        Items,
+    }
+
     private struct Frame
     {
+        public Dictionary<string, object?>.Enumerator Dictionary;
+        public List<object?>.Enumerator List;
         public IEnumerator? Items;
         public IDictionaryEnumerator? Entries;
+        public FrameKind Kind;
     }
 
     public static void Write(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options)
     {
         Frame[]? stack = null;
         int sp = 0;
+        // Custom converters may claim any type, even string, so they turn the shortcuts off.
+        bool plain = options.Converters.Count == 0;
         try
         {
             object? current = value;
@@ -32,7 +47,7 @@ internal static class GenericWriter
                 if (pending)
                 {
                     pending = false;
-                    Push(writer, current, options, ref stack, ref sp);
+                    Push(writer, current, options, plain, ref stack, ref sp);
                 }
 
                 if (sp == 0)
@@ -41,32 +56,80 @@ internal static class GenericWriter
                 }
 
                 ref Frame top = ref stack![sp - 1];
-                if (top.Entries is { } entries)
+                switch (top.Kind)
                 {
-                    if (entries.MoveNext())
-                    {
-                        WriteKey(writer, entries.Key, options);
-                        current = entries.Value;
-                        pending = true;
-                    }
-                    else
-                    {
-                        writer.WriteEndMapping();
-                        top = default;
-                        sp--;
-                    }
-                }
-                else if (top.Items!.MoveNext())
-                {
-                    current = top.Items.Current;
-                    pending = true;
-                }
-                else
-                {
-                    writer.WriteEndSequence();
-                    (top.Items as IDisposable)?.Dispose();
-                    top = default;
-                    sp--;
+                    case FrameKind.Dictionary:
+                        if (top.Dictionary.MoveNext())
+                        {
+                            KeyValuePair<string, object?> entry = top.Dictionary.Current;
+                            if (plain)
+                            {
+                                writer.WriteStringKey(entry.Key);
+                            }
+                            else
+                            {
+                                WriteKey(writer, entry.Key, options);
+                            }
+
+                            current = entry.Value;
+                            pending = true;
+                        }
+                        else
+                        {
+                            writer.WriteEndMapping();
+                            top = default;
+                            sp--;
+                        }
+
+                        break;
+                    case FrameKind.List:
+                        if (top.List.MoveNext())
+                        {
+                            current = top.List.Current;
+                            pending = true;
+                        }
+                        else
+                        {
+                            writer.WriteEndSequence();
+                            top = default;
+                            sp--;
+                        }
+
+                        break;
+                    case FrameKind.Entries:
+                        {
+                            IDictionaryEnumerator entries = top.Entries!;
+                            if (entries.MoveNext())
+                            {
+                                WriteKey(writer, entries.Key, options);
+                                current = entries.Value;
+                                pending = true;
+                            }
+                            else
+                            {
+                                writer.WriteEndMapping();
+                                top = default;
+                                sp--;
+                            }
+
+                            break;
+                        }
+
+                    default:
+                        if (top.Items!.MoveNext())
+                        {
+                            current = top.Items.Current;
+                            pending = true;
+                        }
+                        else
+                        {
+                            writer.WriteEndSequence();
+                            (top.Items as IDisposable)?.Dispose();
+                            top = default;
+                            sp--;
+                        }
+
+                        break;
                 }
             }
         }
@@ -85,7 +148,7 @@ internal static class GenericWriter
     }
 
     // Writes a scalar, or starts a collection and pushes its enumerator.
-    private static void Push(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, ref Frame[]? stack, ref int sp)
+    private static void Push(Utf8YamlEmitter writer, object? value, YamlSerializerOptions options, bool plain, ref Frame[]? stack, ref int sp)
     {
         if (value is null)
         {
@@ -93,6 +156,78 @@ internal static class GenericWriter
             return;
         }
 
+        if (plain)
+        {
+            // What a load into `object` gives, by exact type, before the general checks below.
+            Type type = value.GetType();
+            if (type == typeof(string))
+            {
+                writer.WriteStringValue((string)value);
+                return;
+            }
+
+            if (type == typeof(Dictionary<string, object?>))
+            {
+                var dictionary = (Dictionary<string, object?>)value;
+                writer.Begin(isMapping: true, value);
+                ref Frame frame = ref PushFrame(ref stack, ref sp);
+                frame.Dictionary = dictionary.GetEnumerator();
+                frame.Kind = FrameKind.Dictionary;
+                return;
+            }
+
+            if (type == typeof(List<object?>))
+            {
+                var list = (List<object?>)value;
+                writer.Begin(isMapping: false, value);
+                ref Frame frame = ref PushFrame(ref stack, ref sp);
+                frame.List = list.GetEnumerator();
+                frame.Kind = FrameKind.List;
+                return;
+            }
+
+            if (type == typeof(long))
+            {
+                writer.WriteNumberValue((long)value);
+                return;
+            }
+
+            if (type == typeof(double))
+            {
+                writer.WriteNumberValue((double)value);
+                return;
+            }
+
+            if (type == typeof(bool))
+            {
+                writer.WriteBooleanValue((bool)value);
+                return;
+            }
+        }
+
+        PushGeneral(writer, value, options, ref stack, ref sp);
+    }
+
+    private static ref Frame PushFrame(ref Frame[]? stack, ref int sp)
+    {
+        if (stack is null)
+        {
+            stack = ArrayPool<Frame>.Shared.Rent(16);
+        }
+        else if (sp == stack.Length)
+        {
+            Frame[] bigger = ArrayPool<Frame>.Shared.Rent(stack.Length * 2);
+            Array.Copy(stack, bigger, sp);
+            Array.Clear(stack, 0, sp);
+            ArrayPool<Frame>.Shared.Return(stack);
+            stack = bigger;
+        }
+
+        return ref stack[sp++];
+    }
+
+    private static void PushGeneral(Utf8YamlEmitter writer, object value, YamlSerializerOptions options, ref Frame[]? stack, ref int sp)
+    {
         if (TryWriteScalar(writer, value, options))
         {
             return;
@@ -106,11 +241,13 @@ internal static class GenericWriter
             if (value is IDictionary dictionary)
             {
                 frame.Entries = dictionary.GetEnumerator();
+                frame.Kind = FrameKind.Entries;
                 map = true;
             }
             else if (value is IEnumerable sequence)
             {
                 frame.Items = sequence.GetEnumerator();
+                frame.Kind = FrameKind.Items;
             }
             else
             {
@@ -119,20 +256,7 @@ internal static class GenericWriter
             }
 
             writer.Begin(map, value);
-            if (stack is null)
-            {
-                stack = ArrayPool<Frame>.Shared.Rent(16);
-            }
-            else if (sp == stack.Length)
-            {
-                Frame[] bigger = ArrayPool<Frame>.Shared.Rent(stack.Length * 2);
-                Array.Copy(stack, bigger, sp);
-                Array.Clear(stack, 0, sp);
-                ArrayPool<Frame>.Shared.Return(stack);
-                stack = bigger;
-            }
-
-            stack[sp++] = frame;
+            PushFrame(ref stack, ref sp) = frame;
             return;
         }
 

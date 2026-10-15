@@ -15,6 +15,18 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length > 0 && args[0] == "--dump-hash")
+        {
+            DumpHash.Print(args.Skip(1).ToArray());
+            return 0;
+        }
+
+        if (args.Length > 0 && args[0] == "--dump-loop")
+        {
+            DumpHash.Loop(args[1], int.Parse(args[2], System.Globalization.CultureInfo.InvariantCulture));
+            return 0;
+        }
+
         BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args);
         return 0;
     }

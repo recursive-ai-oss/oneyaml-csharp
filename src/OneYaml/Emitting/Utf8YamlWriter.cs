@@ -175,6 +175,13 @@ internal readonly partial struct Utf8YamlWriter
         bool validUtf8 = false)
     {
         ScalarWriteStyle style = ChooseStyle(text, preferred, context, mode, parentIndent, contentIndent, validUtf8);
+        WriteChosen(text, style, parentIndent, contentIndent, existingHeader);
+        return style;
+    }
+
+    // Writes the text in a style ChooseStyle gave. An explicit-key result writes nothing.
+    internal void WriteChosen(ReadOnlySpan<byte> text, ScalarWriteStyle style, int parentIndent, int contentIndent, BlockHeader existingHeader)
+    {
         switch (style)
         {
             case ScalarWriteStyle.ExplicitKeyRequired:
@@ -192,8 +199,6 @@ internal readonly partial struct Utf8YamlWriter
                 WriteBlock(text, style == ScalarWriteStyle.Folded, parentIndent, contentIndent, existingHeader);
                 break;
         }
-
-        return style;
     }
 
     /// <summary>

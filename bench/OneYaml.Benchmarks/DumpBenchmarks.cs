@@ -84,15 +84,22 @@ public class GenericDumpBenchmarks
         .WithAttemptingUnquotedStringTypeDeserialization()
         .Build();
 
+    // The kit reads with references preserved (the input has aliases) and writes with default options.
     private static readonly SharpYaml.YamlSerializerOptions s_sharpOptions = new() { ReferenceHandling = SharpYaml.YamlReferenceHandling.Preserve };
+    private static readonly SharpYaml.YamlSerializerOptions s_sharpDumpOptions = new();
 
     private object? _oneYaml;
     private object? _vYaml;
     private object? _sharpYaml;
     private object? _yamlDotNet;
 
-    [Params("openapi-100k", "helm-values-64k", "long-scalars-256k", "scalar-styles-32k", "unicode-32k", "wide-map-64k")]
+    [ParamsSource(nameof(DumpWorkloads))]
     public string Workload { get; set; } = string.Empty;
+
+    /// <summary>The workloads to dump; <c>ONEYAML_DUMP_WORKLOADS</c> (comma separated) narrows the run.</summary>
+    public static IEnumerable<string> DumpWorkloads =>
+        Environment.GetEnvironmentVariable("ONEYAML_DUMP_WORKLOADS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+        ?? ["openapi-100k", "helm-values-64k", "long-scalars-256k", "scalar-styles-32k", "unicode-32k", "wide-map-64k", "flow-heavy-64k", "anchors-32k", "openapi-api-with-examples", "helm-ingress-nginx"];
 
     [GlobalSetup]
     public void Setup()
@@ -127,7 +134,10 @@ public class GenericDumpBenchmarks
     public ReadOnlyMemory<byte> WriteVYaml() => VYaml.Serialization.YamlSerializer.Serialize(_vYaml);
 
     [Benchmark(Description = "SharpYaml")]
-    public string WriteSharpYaml() => SharpYaml.YamlSerializer.Serialize(_sharpYaml, s_sharpOptions);
+    public string WriteSharpYaml() => SharpYaml.YamlSerializer.Serialize(_sharpYaml, s_sharpDumpOptions);
+
+    [Benchmark(Description = "SharpYaml (UTF-8)")]
+    public byte[] WriteSharpYamlBytes() => System.Text.Encoding.UTF8.GetBytes(SharpYaml.YamlSerializer.Serialize(_sharpYaml, s_sharpDumpOptions));
 
     [Benchmark(Description = "YamlDotNet")]
     public string WriteYamlDotNet() => s_yamlDotNetOut.Serialize(_yamlDotNet!);
