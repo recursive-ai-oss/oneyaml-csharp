@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/OneYaml/OneYaml.csproj" />
+    <Project Path="src/OneYaml.Compat.YamlDotNet/OneYaml.Compat.YamlDotNet.csproj" />
     <Project Path="src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/OneYaml.AotSmoke/OneYaml.AotSmoke.csproj" />
+    <Project Path="tests/OneYaml.Compat.Tests/OneYaml.Compat.Tests.csproj" />
     <Project Path="tests/OneYaml.Fuzz/OneYaml.Fuzz.csproj" />
     <Project Path="tests/OneYaml.SourceGeneration.Tests/OneYaml.SourceGeneration.Tests.csproj" />
     <Project Path="tests/OneYaml.Tests/OneYaml.Tests.csproj" />

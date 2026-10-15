@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <RootNamespace>OneYaml.Compat.YamlDotNet</RootNamespace>
+    <AssemblyName>OneYaml.Compat.YamlDotNet</AssemblyName>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <!-- No package references to lock (see the OneYaml project). -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <RestoreLockedMode>false</RestoreLockedMode>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Package">
+    <PackageId>OneYaml.Compat.YamlDotNet</PackageId>
+    <Description>A drop-in replacement for the commonly used YamlDotNet API (serializer, deserializer, representation model) that runs on OneYaml.</Description>
+    <Authors>Recursive AI, LLC</Authors>
+    <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>yaml;yamldotnet;compat;serializer</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../OneYaml/OneYaml.csproj" />
+    <InternalsVisibleTo Include="OneYaml.Compat.Tests" />
+    <InternalsVisibleTo Include="OneYaml.Benchmarks" />
+  </ItemGroup>
+
+</Project>

@@ -50,6 +50,8 @@
     <InternalsVisibleTo Include="OneYaml.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />
     <InternalsVisibleTo Include="OneYaml.Fuzz" />
+    <!-- The compat layer reads the document tree and writes scalars through the same engine, so it needs the internal tree and writer. -->
+    <InternalsVisibleTo Include="OneYaml.Compat.YamlDotNet" />
   </ItemGroup>
 
 </Project>
