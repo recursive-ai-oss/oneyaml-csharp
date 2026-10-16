@@ -22,7 +22,7 @@ A build that passes after the swap is not yet a finished migration. Check these 
 
 ```sh
 dotnet remove package YamlDotNet
-dotnet add package OneYaml.Compat.YamlDotNet --prerelease
+dotnet add package OneYaml.Compat.YamlDotNet
 ```
 
 | Before | After |
@@ -123,7 +123,7 @@ The adapter reproduces YamlDotNet's documented behaviour, not its defects. Read 
 - **Output that reads back.** Strings that a reader would take for something else are quoted (`'true'`, `'yes'`, `'123'`), characters that YamlDotNet writes in a way that changes on reading are escaped, and long keys are written so that they read back. Snapshot tests of serializer output may need updating.
 - **Comments survive an unchanged round trip.** `YamlStream.Save` returns the loaded text when nothing changed; YamlDotNet writes it again without comments and with `...` after each document.
 - **More valid YAML is read.** Some inputs that YamlDotNet refuses or throws `ArgumentException` on are valid YAML 1.2 and are read.
-- **Limits stay on.** A billion-laughs input fails with a `YamlException` instead of using memory without bound ([Safety limits](#before-you-swap)).
+- **Limits stay on.** The deserializer enforces the alias budget and the depth limit. An alias into `object` or a collection gives back the same instance, and every use is charged to the alias budget as if it were expanded, so a billion-laughs input fails with a `YamlException`. For input you do not control, call `WithLimits(YamlLimits.Untrusted)` on the builder, or pass `YamlLimits.Untrusted` to `YamlStream.Load` or `new Parser(reader, limits)` ([Input you do not control](#input-you-do-not-control)).
 - **Exception classes.** `SyntaxErrorException`, `SemanticErrorException`, `MaximumRecursionLevelReachedException` and `AnchorNotFoundException` are raised, but which class a given error gets can differ from YamlDotNet. Catch `YamlException` if you can.
 - **Line breaks.** The serializer writes the platform line break, as YamlDotNet does.
 
@@ -160,8 +160,10 @@ Code that uses these members no longer compiles against YamlDotNet itself.
 ## Move to the OneYaml API
 
 ```sh
-dotnet add package OneYaml --prerelease
+dotnet add package OneYaml
 ```
+
+If the project still references `OneYaml.Compat.YamlDotNet`, keep `OneYaml` at the same version: the adapter depends on that exact version.
 
 <!-- sample: YamlDotNetPrimary -->
 ```csharp

@@ -20,10 +20,9 @@
        compare against yet; once 1.0.0 is published, set PackageValidationBaselineVersion to 1.0.0 here so
        later packs fail on a breaking change to the public API. -->
 
-  <!-- One version for the three packages. The suffix stays until the API is declared stable. -->
+  <!-- One version for the three packages. -->
   <PropertyGroup>
     <VersionPrefix>1.0.0</VersionPrefix>
-    <VersionSuffix>preview.1</VersionSuffix>
     <PackageProjectUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
   </PropertyGroup>

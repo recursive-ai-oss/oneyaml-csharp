@@ -20,7 +20,7 @@ A build that passes after the swap is not yet a finished migration. Check these 
 
 ```sh
 dotnet remove package SharpYaml
-dotnet add package OneYaml.Compat.SharpYaml --prerelease
+dotnet add package OneYaml.Compat.SharpYaml
 ```
 
 | Before | After |
@@ -110,8 +110,10 @@ Code that sets `Limits` no longer compiles against SharpYaml itself.
 ## Move to the OneYaml API
 
 ```sh
-dotnet add package OneYaml --prerelease
+dotnet add package OneYaml
 ```
+
+If the project still references `OneYaml.Compat.SharpYaml`, keep `OneYaml` at the same version: the adapter depends on that exact version.
 
 <!-- sample: SharpYamlPrimary -->
 ```csharp
