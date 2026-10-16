@@ -64,6 +64,47 @@ public class RedefinedAnchorTests
     }
 }
 
+/// <summary>An alias inside the node its own anchor names is a cycle, which a load cannot represent; it is refused, not read as an older definition of the name.</summary>
+public class AliasInsideItsOwnNodeTests
+{
+    // The second anchor reuses the name of the first, and the alias inside it names the node that holds it.
+    public static TheoryData<string> Texts => new()
+    {
+        "- &a 1\n- &a [*a]\n",
+        "- &a 1\n- &a\n  - *a\n",
+        "- &a 1\n- &a {k: *a}\n",
+        "- &a [&a 1, [*a]]\n- &a [*a]\n",
+        "&a [*a]\n",
+    };
+
+    private static void AssertSyntax(Action read)
+    {
+        YamlException ex = Assert.Throws<YamlException>(read);
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Contains("contains it", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Theory, MemberData(nameof(Texts))]
+    public void Generic_and_typed_loads_refuse_it(string yaml)
+    {
+        AssertSyntax(() => YamlSerializer.Deserialize<object>(yaml));
+        AssertSyntax(() => YamlSerializer.Deserialize<List<object?>>(yaml));
+    }
+
+    [Theory, MemberData(nameof(Texts))]
+    public void A_document_refuses_it_when_it_is_opened(string yaml)
+    {
+        AssertSyntax(() => YamlDocument.Parse(yaml));
+    }
+
+    [Fact]
+    public void An_alias_after_the_enclosing_node_is_complete_still_means_it()
+    {
+        var seq = (List<object?>)YamlSerializer.Deserialize<object>("- &a 1\n- &a [2]\n- *a\n")!;
+        Assert.Equal(new object?[] { 2L }, ((List<object?>)seq[2]!).ToArray());
+    }
+}
+
 /// <summary>An entry added after a block scalar that ends the text must not change the scalar's value.</summary>
 public class AddAfterKeyBlockScalarTests
 {

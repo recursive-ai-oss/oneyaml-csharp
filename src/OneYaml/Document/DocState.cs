@@ -422,10 +422,15 @@ internal sealed partial class DocState : IDisposable
                             if (reader.TokenType == YamlTokenType.Alias)
                             {
                                 n.Kind = NodeKind.Alias;
-                                int target = anchors.Find(src, reader.Anchor);
+                                int target = anchors.Find(src, reader.Anchor, out bool inside);
                                 if (target < 0)
                                 {
                                     throw YamlException.At(YamlErrorCategory.Syntax, "The alias refers to an anchor that is not defined.", src, reader.Start);
+                                }
+
+                                if (inside)
+                                {
+                                    throw YamlException.At(YamlErrorCategory.Syntax, "The alias refers to the node that contains it, a cycle that cannot be read.", src, reader.Start);
                                 }
 
                                 n.Aux = target;
@@ -490,6 +495,12 @@ internal sealed partial class DocState : IDisposable
                                 openNode[open] = idx;
                                 openLast[open] = -1;
                                 open++;
+                                if (reader.HasAnchor)
+                                {
+                                    // The name means this node from here on, so an alias inside it names the node that holds it:
+                                    // a cycle, which is refused, never an older definition of the same name.
+                                    anchors.Set(src, reader.AnchorStart, reader.Anchor.Length, idx, open: true);
+                                }
                             }
 
                             break;
@@ -520,9 +531,8 @@ internal sealed partial class DocState : IDisposable
 
                             if (HasAnchor(idx))
                             {
-                                // An anchor takes effect when its node is complete, so a node cannot refer to itself.
                                 int row = n.Props * PropWidth;
-                                anchors.Set(src, _props[row], _props[row + 1], idx);
+                                anchors.Close(src, _props[row], _props[row + 1], idx);
                             }
 
                             if (!AllowDuplicateKeys && n.Kind == NodeKind.Mapping && n.Count > 2)
@@ -832,8 +842,8 @@ internal sealed partial class DocState : IDisposable
     {
         private int[]? _table;
         private int _tableSize; // a power of two; the rented array may be longer
-        private const int Stride = 5;
-        private int[]? _entries; // per entry: hash, start, length, node, start of the defining name
+        private const int Stride = 6;
+        private int[]? _entries; // per entry: hash, start, length, node, start of the defining name, whether the node is still open
         private int _count;
 
         public void Clear()
@@ -845,8 +855,9 @@ internal sealed partial class DocState : IDisposable
             }
         }
 
-        public int Find(ReadOnlySpan<byte> src, ReadOnlySpan<byte> name)
+        public int Find(ReadOnlySpan<byte> src, ReadOnlySpan<byte> name, out bool open)
         {
+            open = false;
             if (_count == 0)
             {
                 return -1;
@@ -865,12 +876,41 @@ internal sealed partial class DocState : IDisposable
                 int at = (e - 1) * Stride;
                 if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
                 {
+                    open = _entries[at + 5] != 0;
                     return _entries[at + 3];
                 }
             }
         }
 
-        public void Set(ReadOnlySpan<byte> src, int start, int length, int node)
+        // The node of a collection is complete: aliases may name it from here on.
+        public void Close(ReadOnlySpan<byte> src, int start, int length, int node)
+        {
+            ReadOnlySpan<byte> name = src.Slice(start, length);
+            int hash = Hash(name);
+            int mask = _tableSize - 1;
+            for (int slot = hash & mask; ; slot = (slot + 1) & mask)
+            {
+                int e = _table![slot];
+                if (e == 0)
+                {
+                    return;
+                }
+
+                int at = (e - 1) * Stride;
+                if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
+                {
+                    // A node written later with the same name may hold the entry now; then there is nothing to close.
+                    if (_entries[at + 3] == node)
+                    {
+                        _entries[at + 5] = 0;
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        public void Set(ReadOnlySpan<byte> src, int start, int length, int node, bool open = false)
         {
             ReadOnlySpan<byte> name = src.Slice(start, length);
             if (_table is null)
@@ -901,6 +941,7 @@ internal sealed partial class DocState : IDisposable
                     {
                         _entries[at + 3] = node;
                         _entries[at + 4] = start;
+                        _entries[at + 5] = open ? 1 : 0;
                     }
 
                     return;
@@ -927,6 +968,7 @@ internal sealed partial class DocState : IDisposable
             _entries[w + 2] = length;
             _entries[w + 3] = node;
             _entries[w + 4] = start;
+            _entries[w + 5] = open ? 1 : 0;
             _count++;
             for (int slot = hash & mask; ; slot = (slot + 1) & mask)
             {

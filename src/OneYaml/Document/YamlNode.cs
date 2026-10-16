@@ -393,7 +393,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
         try
         {
-            value = NodeReplay.Bind(State(), _index, _doc!.BindOptions.GetReflectiveTypeInfo<T>(), quiet: true)!;
+            value = NodeReplay.Bind(State(), _index, _doc!.BindOptions.GetReflectiveTypeInfo<T>(), _doc!.Limits, quiet: true)!;
             return true;
         }
         catch (YamlException e) when (e.Category == YamlErrorCategory.Binding)
@@ -433,7 +433,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         DocState s = State();
         try
         {
-            return NodeReplay.Bind(s, _index, (options is null ? _doc!.BindOptions : _doc!.StricterOptions(options)).GetReflectiveTypeInfo<T>());
+            return NodeReplay.Bind(s, _index, (options is null ? _doc!.BindOptions : _doc!.StricterOptions(options)).GetReflectiveTypeInfo<T>(), _doc!.Limits);
         }
         catch (YamlException e) when (YamlException.Tag(e, _doc!.SourceName))
         {
@@ -453,7 +453,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         DocState s = State();
         try
         {
-            return NodeReplay.Bind(s, _index, typeInfo);
+            return NodeReplay.Bind(s, _index, typeInfo, _doc!.Limits);
         }
         catch (YamlException e) when (YamlException.Tag(e, _doc!.SourceName))
         {

@@ -79,9 +79,10 @@ internal static class NodeReplay
     /// <param name="s">The document.</param>
     /// <param name="node">The node.</param>
     /// <param name="info">The metadata for <typeparamref name="T"/>.</param>
+    /// <param name="documentLimits">The limits the document was opened with. The read keeps the stricter of these and the limits of the metadata, however the metadata was made.</param>
     /// <param name="quiet">Whether the caller catches the error and carries on, so it need not carry a line, a column or a path.</param>
     /// <returns>The value.</returns>
-    public static T? Bind<T>(DocState s, int node, YamlTypeInfo<T> info, bool quiet = false)
+    public static T? Bind<T>(DocState s, int node, YamlTypeInfo<T> info, YamlLimits documentLimits, bool quiet = false)
     {
         YamlSerializerOptions options = info.Options;
         options.MakeReadOnly();
@@ -92,7 +93,7 @@ internal static class NodeReplay
         AnchorBook? shared = info.ConverterBase is GenericConverter ? RecordShared(s, node, out count) : null;
         bool share = shared is not null;
         AnchorBook book = shared ?? Record(s, node, out count);
-        var reader = new Utf8YamlReader(s.Text, options, book, count, expandAliases: !share);
+        var reader = new Utf8YamlReader(s.Text, options, book, count, expandAliases: !share, limits: documentLimits);
         reader.QuietErrors = quiet;
         try
         {

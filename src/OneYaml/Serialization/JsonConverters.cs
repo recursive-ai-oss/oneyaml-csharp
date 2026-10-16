@@ -14,7 +14,7 @@ internal sealed class JsonNumber(string text)
 }
 
 // Members of the System.Text.Json document types (JsonElement, JsonNode and its subclasses) are read as an untyped
-// value, turned into JSON text and parsed into the JSON type, and written the other way. Every walk uses an explicit
+// value and turned into the JSON type (a node directly, an element through JSON text), and written the other way. Every walk uses an explicit
 // stack, so the depth of the data costs heap, never call depth. Numbers travel as their text in both directions.
 internal static class JsonTrees
 {
@@ -31,12 +31,134 @@ internal static class JsonTrees
         public bool IsMap;
     }
 
-    // From the value of an untyped load (numbers as JsonNumber) to a node, or null for a YAML null.
+    private struct NodeBuildFrame
+    {
+        public Dictionary<string, object?>.Enumerator Map;
+        public List<object?>.Enumerator List;
+        public JsonObject? Object;
+        public JsonArray? Array;
+        public string? Key;
+    }
+
+    // From the value of an untyped load (numbers as JsonNumber) to a node, or null for a YAML null. The nodes are built
+    // directly: going through JSON text and a parse costs several times the memory for a tree of small values.
     public static JsonNode? ToNode(object? tree, in Utf8YamlReader reader)
     {
-        ArrayBufferWriter<byte> json = ToJson(tree, in reader);
-        return JsonNode.Parse(json.WrittenSpan, documentOptions: s_documentOptions);
+        if (tree is not (Dictionary<string, object?> or List<object?>))
+        {
+            return Leaf(tree, in reader);
+        }
+
+        var stack = new List<NodeBuildFrame>();
+        JsonNode? result = null;
+        PushNode(stack, tree, in reader);
+        while (stack.Count > 0)
+        {
+            NodeBuildFrame top = stack[^1];
+            object? child;
+            string? key = null;
+            if (top.Object is not null)
+            {
+                if (!top.Map.MoveNext())
+                {
+                    result = FinishNode(stack, top.Object);
+                    continue;
+                }
+
+                key = top.Map.Current.Key;
+                child = top.Map.Current.Value;
+            }
+            else
+            {
+                if (!top.List.MoveNext())
+                {
+                    result = FinishNode(stack, top.Array!);
+                    continue;
+                }
+
+                child = top.List.Current;
+            }
+
+            // The enumerators are structs held in the list: write the moved copy back.
+            stack[^1] = top;
+            if (child is Dictionary<string, object?> or List<object?>)
+            {
+                top.Key = key;
+                stack[^1] = top;
+                PushNode(stack, child, in reader);
+            }
+            else
+            {
+                AttachNode(top, key, Leaf(child, in reader));
+            }
+        }
+
+        return result;
     }
+
+    private static void PushNode(List<NodeBuildFrame> stack, object? tree, in Utf8YamlReader reader)
+    {
+        if (stack.Count >= MaxJsonDepth)
+        {
+            throw reader.CreateException($"The value is nested deeper than {MaxJsonDepth} levels, which the System.Text.Json types hold.");
+        }
+
+        if (tree is Dictionary<string, object?> map)
+        {
+            stack.Add(new NodeBuildFrame { Map = map.GetEnumerator(), Object = new JsonObject() });
+        }
+        else
+        {
+            stack.Add(new NodeBuildFrame { List = ((List<object?>)tree!).GetEnumerator(), Array = new JsonArray() });
+        }
+    }
+
+    // A finished collection leaves the stack and goes into the one below it, or is the result.
+    private static JsonNode? FinishNode(List<NodeBuildFrame> stack, JsonNode done)
+    {
+        stack.RemoveAt(stack.Count - 1);
+        if (stack.Count == 0)
+        {
+            return done;
+        }
+
+        NodeBuildFrame parent = stack[^1];
+        AttachNode(parent, parent.Key, done);
+        return null;
+    }
+
+    private static void AttachNode(NodeBuildFrame parent, string? key, JsonNode? value)
+    {
+        if (parent.Object is not null)
+        {
+            parent.Object[key!] = value;
+        }
+        else
+        {
+            parent.Array!.Add(value);
+        }
+    }
+
+    private static JsonNode? Leaf(object? value, in Utf8YamlReader reader)
+    {
+        switch (value)
+        {
+            case null:
+                return null;
+            case string s:
+                return JsonValue.Create(s);
+            case bool b:
+                return JsonValue.Create(b);
+            case JsonNumber number:
+                return Number(number.Text);
+            default:
+                throw reader.CreateException($"A value of type {value.GetType().Name} has no JSON form.");
+        }
+    }
+
+    // A number keeps the digits it was written with, so it is parsed from its own text: the node then reads as one
+    // System.Text.Json parsed (GetValue<int>, GetValue<double> and GetValue<decimal> all work), and 1.0, -0 and 1e400 print as written.
+    private static JsonNode? Number(string text) => JsonNode.Parse(text);
 
     public static JsonElement ToElement(object? tree, in Utf8YamlReader reader)
     {
@@ -149,6 +271,9 @@ internal static class JsonTrees
         public JsonElement.ObjectEnumerator Object;
         public JsonElement.ArrayEnumerator Array;
         public bool IsObject;
+
+        // The names written so far in an object: the element type may hold one twice, which YAML cannot.
+        public HashSet<string>? Names;
     }
 
     private sealed class NodeFrame
@@ -184,7 +309,13 @@ internal static class JsonTrees
                     continue;
                 }
 
-                writer.WritePropertyName(top.Object.Current.Name);
+                string name = top.Object.Current.Name;
+                if (!(top.Names ??= new HashSet<string>(StringComparer.Ordinal)).Add(name))
+                {
+                    throw new YamlException($"The object has the property name '{name}' twice, which a YAML mapping cannot hold.") { Category = YamlErrorCategory.Binding };
+                }
+
+                writer.WritePropertyName(name);
                 child = top.Object.Current.Value;
             }
             else

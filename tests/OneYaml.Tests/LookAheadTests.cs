@@ -103,6 +103,43 @@ public class LookAheadTests
         Assert.IsType<WideCircle>(Read(path, last, options));
     }
 
+    // Nested mappings whose discriminator comes last each look ahead over the same logged expansion. Each look-ahead
+    // passes it again, so each is charged, and the total stays within the budget the alias expansion is held to.
+    private static string NestedKeyLast(int depth, bool keyLast)
+    {
+        string tail = keyLast ? "$type: circle" : "";
+        var sb = new StringBuilder("{ ");
+        sb.Append(keyLast ? "" : "$type: circle, ");
+        sb.Append("fill: &a0 [x], other: &a1 [").Append(string.Join(",", Enumerable.Repeat("*a0", 10)));
+        sb.Append("], more: &a2 [").Append(string.Join(",", Enumerable.Repeat("*a1", 10)));
+        sb.Append("], again: &a3 [").Append(string.Join(",", Enumerable.Repeat("*a2", 10))).Append("], inner: ");
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append(keyLast ? "{ label: x, inner: " : "{ $type: circle, label: x, inner: ");
+        }
+
+        sb.Append(keyLast ? "{ fill: *a3, $type: circle }" : "{ $type: circle, fill: *a3 }");
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append(keyLast ? ", $type: circle }" : " }");
+        }
+
+        return sb.Append(keyLast ? ", " + tail + " }" : " }").ToString();
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void Nested_look_aheads_over_one_alias_expansion_are_charged_each_time_they_pass_it(int path)
+    {
+        // One expansion is 2,111 nodes. Held to 30,000, it is read once, but 40 look-aheads over it are not.
+        var options = new YamlSerializerOptions { Limits = YamlLimits.Untrusted with { MaxDepth = 200, AliasNodeFloor = 30_000, AliasNodeFactor = 1 } };
+
+        Assert.IsType<WideCircle>(Read(path, NestedKeyLast(40, keyLast: false), options));
+        Assert.IsType<WideCircle>(Read(path, NestedKeyLast(8, keyLast: true), options));
+
+        YamlException ex = Assert.Throws<YamlException>(() => Read(path, NestedKeyLast(40, keyLast: true), options));
+        Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+    }
+
     [Theory, MemberData(nameof(Paths))]
     public void Ends_of_collections_passed_while_looking_ahead_are_not_charged(int path)
     {
