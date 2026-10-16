@@ -52,7 +52,7 @@ internal sealed class Loaded : IDisposable
 
     public Mark MarkAt(int offset) => Lines.MarkAt(offset);
 
-    private List<Dictionary<string, string>>? _tagDirectives;
+    private List<Dictionary<string, TagPrefix>>? _tagDirectives;
     private bool _directivesScanned;
 
     private Dictionary<(int Document, string Raw), TagSlot>? _tagSlots;
@@ -85,7 +85,7 @@ internal sealed class Loaded : IDisposable
         }
 
         int document = 0;
-        Dictionary<string, string>? handles = null;
+        Dictionary<string, TagPrefix>? handles = null;
         if (_tagDirectives is not null && _tagDirectives.Count == State.DocCount)
         {
             // Documents hold their nodes in one contiguous range each; find the one holding this node.
@@ -122,10 +122,10 @@ internal sealed class Loaded : IDisposable
 
     // %TAG directives per document. A directive belongs to the document that the next --- opens; they are only valid at the start
     // of the stream or after a document end marker, which is what makes a line scan safe.
-    private static List<Dictionary<string, string>> ScanTagDirectives(ReadOnlySpan<byte> text)
+    private static List<Dictionary<string, TagPrefix>> ScanTagDirectives(ReadOnlySpan<byte> text)
     {
-        var docs = new List<Dictionary<string, string>>();
-        var pending = new Dictionary<string, string>(StringComparer.Ordinal);
+        var docs = new List<Dictionary<string, TagPrefix>>();
+        var pending = new Dictionary<string, TagPrefix>(StringComparer.Ordinal);
         bool header = true;
         int pos = 0;
         while (pos < text.Length)
@@ -142,7 +142,7 @@ internal sealed class Loaded : IDisposable
             if (marker && line[0] == (byte)'.')
             {
                 header = true;
-                pending = new Dictionary<string, string>(StringComparer.Ordinal);
+                pending = new Dictionary<string, TagPrefix>(StringComparer.Ordinal);
                 continue;
             }
 
@@ -151,7 +151,7 @@ internal sealed class Loaded : IDisposable
                 string[] parts = Encoding.UTF8.GetString(line).Split([' ', '\t'], StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length >= 3 && parts[0] == "%TAG")
                 {
-                    pending[parts[1]] = parts[2];
+                    pending[parts[1]] = new TagPrefix(parts[2]);
                 }
 
                 continue;
@@ -160,12 +160,12 @@ internal sealed class Loaded : IDisposable
             if (header)
             {
                 docs.Add(pending);
-                pending = new Dictionary<string, string>(StringComparer.Ordinal);
+                pending = new Dictionary<string, TagPrefix>(StringComparer.Ordinal);
                 header = false;
             }
             else if (marker)
             {
-                docs.Add(new Dictionary<string, string>(StringComparer.Ordinal));
+                docs.Add(new Dictionary<string, TagPrefix>(StringComparer.Ordinal));
             }
         }
 
@@ -176,22 +176,105 @@ internal sealed class Loaded : IDisposable
     public void Dispose() => Document.Dispose();
 }
 
-// A written tag and the directives it is resolved with; the full tag is built once, on first use.
-internal sealed class TagSlot(byte[] raw, Dictionary<string, string>? handles)
+// The prefix a %TAG directive gives a handle. It is shared by every tag written with the handle, so the work that
+// depends only on the prefix (hashing it, which can cost as much as the input) is done once.
+internal sealed class TagPrefix(string text)
 {
+    private int _state;
+    private bool _hashed;
+
+    public string Text { get; } = text;
+
+    // The hash state after the prefix, to be continued over the suffix: a tag hashes the same whichever way it was split.
+    public int State
+    {
+        get
+        {
+            if (!_hashed)
+            {
+                _state = TagText.Hash(TagText.Seed, Text);
+                _hashed = true;
+            }
+
+            return _state;
+        }
+    }
+}
+
+// Hashing and comparing tags as prefix + suffix pairs, without building the joined text.
+internal static class TagText
+{
+    public const int Seed = unchecked((int)2166136261);
+
+    public static int Hash(int state, ReadOnlySpan<char> text)
+    {
+        foreach (char c in text)
+        {
+            state = unchecked((state ^ c) * 16777619);
+        }
+
+        return state;
+    }
+
+    // Whether prefix1 + suffix1 is the same text as prefix2 + suffix2.
+    public static bool Equal(ReadOnlySpan<char> prefix1, ReadOnlySpan<char> suffix1, ReadOnlySpan<char> prefix2, ReadOnlySpan<char> suffix2)
+    {
+        if (prefix1.Length + suffix1.Length != prefix2.Length + suffix2.Length)
+        {
+            return false;
+        }
+
+        if (prefix1.Length > prefix2.Length)
+        {
+            return Equal(prefix2, suffix2, prefix1, suffix1);
+        }
+
+        // prefix1 is the shorter: it must match the start of prefix2, and the rest of prefix2 plus suffix2 must match suffix1.
+        int head = prefix1.Length;
+        int tail = prefix2.Length - head;
+        return prefix1.SequenceEqual(prefix2[..head])
+            && suffix1[..tail].SequenceEqual(prefix2[head..])
+            && suffix1[tail..].SequenceEqual(suffix2);
+    }
+}
+
+// A written tag and the directives it is resolved with. The tag is kept as a prefix (shared) and a suffix: the joined
+// text is built only when somebody reads the tag, and hashing and comparing never build it.
+internal sealed class TagSlot
+{
+    private readonly TagPrefix? _prefix;
+    private readonly string _suffix;
     private TagName _value;
     private bool _resolved;
 
+    public TagSlot(byte[] raw, Dictionary<string, TagPrefix>? handles)
+    {
+        (_prefix, _suffix) = Tags.Split(raw, handles);
+    }
+
+    public ReadOnlySpan<char> Prefix => _prefix is null ? default : _prefix.Text;
+
+    public ReadOnlySpan<char> Suffix => _suffix;
+
+    // The full tag, kept: the tag of a node a caller asks for is a string the caller holds.
     public TagName Get()
     {
         if (!_resolved)
         {
-            _value = handles is null ? Tags.FromRaw(raw) : Tags.Resolve(raw, handles);
+            _value = new TagName(Text());
             _resolved = true;
         }
 
         return _value;
     }
+
+    // The full tag text, made again each time, for the callers that use it once.
+    public string Text() => _prefix is null ? _suffix : string.Concat(_prefix.Text, _suffix);
+
+    public int Hash() => TagText.Hash(_prefix?.State ?? TagText.Seed, _suffix);
+
+    public static bool Same(TagSlot a, TagSlot b) =>
+        ReferenceEquals(a, b) || (ReferenceEquals(a._prefix, b._prefix) ? a._suffix == b._suffix : TagText.Equal(a.Prefix, a.Suffix, b.Prefix, b.Suffix));
 }
 
 // Line starts of a text, so a UTF-8 byte offset (what the engine reports) becomes a mark without rescanning the text.

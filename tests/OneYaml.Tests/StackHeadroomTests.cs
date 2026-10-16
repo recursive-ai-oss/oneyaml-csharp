@@ -29,6 +29,45 @@ internal sealed class TreeNode
     public List<TreeNode> Children { get; set; } = [];
 }
 
+// Polymorphic chains: a base whose derived type holds the next level, told apart by a key or by a tag.
+[YamlPolymorphic]
+[YamlDerivedType(typeof(KeyNode), "n")]
+internal abstract class KeyBase;
+
+internal sealed class KeyNode : KeyBase
+{
+    public KeyBase? C { get; set; }
+
+    public string? S { get; set; }
+}
+
+[YamlPolymorphic]
+[YamlDerivedType(typeof(KeyRecNode), "n")]
+internal abstract record KeyRecordBase;
+
+internal sealed record KeyRecNode(KeyRecordBase? C, string? S) : KeyRecordBase;
+
+[YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+[YamlDerivedType(typeof(TagNode), "n")]
+internal abstract class TagBase;
+
+internal sealed class TagNode : TagBase
+{
+    public TagBase? C { get; set; }
+
+    public string? S { get; set; }
+}
+
+[YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+[YamlDerivedType(typeof(TagRecNode), "n")]
+internal abstract record TagRecordBase;
+
+internal sealed record TagRecNode(TagRecordBase? C, string? S) : TagRecordBase;
+
+[YamlSerializable(typeof(KeyBase))]
+[YamlSerializable(typeof(KeyRecordBase))]
+[YamlSerializable(typeof(TagBase))]
+[YamlSerializable(typeof(TagRecordBase))]
 [YamlSerializable(typeof(ChainNode))]
 [YamlSerializable(typeof(RecordNode))]
 [YamlSerializable(typeof(ObjectBox))]
@@ -237,6 +276,88 @@ public class StackHeadroomTests
             doc.Set(path, 2);
             Assert.Equal(2, doc.Get<int>(path));
             Assert.Contains("s: 2", doc.ToString(), StringComparison.Ordinal);
+        });
+    }
+
+    // Mappings nested to the limit, each naming its derived type by a key or by a tag.
+    private static string PolymorphicChain(int levels, string open, string close, string leaf) =>
+        string.Concat(Enumerable.Repeat(open, levels - 1)) + leaf + string.Concat(Enumerable.Repeat(close, levels - 1));
+
+    private static string KeyChain(int levels) => PolymorphicChain(levels, "{$type: n, c: ", "}", "{$type: n, s: \"a\\tb\"}");
+
+    private static string TagChain(int levels) => PolymorphicChain(levels, "!n {c: ", "}", "!n {s: \"a\\tb\"}");
+
+    private static int Depth(object? node)
+    {
+        int n = 0;
+        for (; node is not null; n++)
+        {
+            node = node switch
+            {
+                KeyNode k => k.C,
+                KeyRecNode r => r.C,
+                TagNode t => t.C,
+                TagRecNode tr => tr.C,
+                _ => null,
+            };
+        }
+
+        return n;
+    }
+
+    [Fact]
+    public void Key_polymorphic_classes_reach_the_depth_limit_by_every_path()
+    {
+        SkipWhenUnoptimised();
+        string yaml = KeyChain(Levels);
+        YamlTypeInfo<KeyBase> info = Generated<KeyBase>();
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
+            Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<KeyBase>()));
+        });
+    }
+
+    [Fact]
+    public void Key_polymorphic_records_reach_the_depth_limit_by_every_path()
+    {
+        SkipWhenUnoptimised();
+        string yaml = KeyChain(Levels);
+        YamlTypeInfo<KeyRecordBase> info = Generated<KeyRecordBase>();
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyRecordBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
+            Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<KeyRecordBase>()));
+        });
+    }
+
+    [Fact]
+    public void Tag_polymorphic_classes_reach_the_depth_limit_by_every_path()
+    {
+        SkipWhenUnoptimised();
+        string yaml = TagChain(Levels);
+        YamlTypeInfo<TagBase> info = Generated<TagBase>();
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<TagBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
+            Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<TagBase>()));
+        });
+    }
+
+    [Fact]
+    public void Tag_polymorphic_records_reach_the_depth_limit_by_every_path()
+    {
+        SkipWhenUnoptimised();
+        string yaml = TagChain(Levels);
+        YamlTypeInfo<TagRecordBase> info = Generated<TagRecordBase>();
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<TagRecordBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
+            Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<TagRecordBase>()));
         });
     }
 }

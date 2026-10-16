@@ -103,6 +103,7 @@ internal sealed record Labelled(string Name, int Size)
 [YamlPolymorphic]
 [YamlDerivedType(typeof(Cat), "cat")]
 [YamlDerivedType(typeof(Hound), "dog")]
+[YamlDerivedType(typeof(Wild), "wild")]
 internal abstract class Pet
 {
     public string Name { get; set; } = "";
@@ -116,6 +117,12 @@ internal sealed class Cat : Pet
 internal sealed class Hound : Pet
 {
     public bool Good { get; set; } = true;
+}
+
+internal sealed class Wild : Pet
+{
+    [YamlExtensionData]
+    public Dictionary<string, object?> More { get; set; } = new();
 }
 
 internal sealed class Home
@@ -162,6 +169,7 @@ internal sealed class Drawing
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(Car), "car")]
 [JsonDerivedType(typeof(Truck), 7)]
+[JsonDerivedType(typeof(Bus), -3)]
 internal class Vehicle
 {
     public int Wheels { get; set; } = 4;
@@ -175,6 +183,49 @@ internal sealed class Car : Vehicle
 internal sealed class Truck : Vehicle
 {
     public int Load { get; set; }
+}
+
+internal sealed class Bus : Vehicle
+{
+    public int Seats { get; set; }
+}
+
+// The YAML attribute names no key and System.Text.Json's does: the YAML attribute wins, so the key stays $type.
+[YamlPolymorphic]
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+[YamlDerivedType(typeof(MixA), "a")]
+internal class Mixed
+{
+    public int X { get; set; }
+}
+
+internal sealed class MixA : Mixed
+{
+    public int Y { get; set; }
+}
+
+// Mistakes in the attributes, which are refused when the metadata is made or first used.
+[YamlPolymorphic]
+[YamlDerivedType(typeof(DupA), "same")]
+[YamlDerivedType(typeof(DupB), "same")]
+internal abstract class DupBase;
+
+internal sealed class DupA : DupBase;
+
+internal sealed class DupB : DupBase;
+
+internal sealed class TwoExtensions
+{
+    [YamlExtensionData]
+    public Dictionary<string, object?> One { get; set; } = new();
+
+    [YamlExtensionData]
+    public Dictionary<string, object?> Two { get; set; } = new();
+}
+
+[YamlConverter(typeof(string))]
+internal sealed class NotAConverter
+{
 }
 
 internal sealed class TagReader : YamlConverter<string>
@@ -223,6 +274,7 @@ internal sealed record Memo(string Title, int Priority) : Note(Title);
 [YamlSerializable(typeof(Figure))]
 [YamlSerializable(typeof(Drawing))]
 [YamlSerializable(typeof(Vehicle))]
+[YamlSerializable(typeof(Mixed))]
 [YamlSerializable(typeof(Note))]
 internal sealed partial class AttributeContext : YamlSerializerContext
 {

@@ -132,7 +132,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             p.Write(writer, value);
         }
 
-        info.Extension?.WriteExtension(writer, value);
+        info.Extension?.WriteExtension(writer, value, info, null);
         writer.WriteEndMapping();
     }
 
@@ -149,7 +149,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             p.Write(writer, value);
         }
 
-        info.Extension?.WriteExtension(writer, value);
+        info.Extension?.WriteExtension(writer, value, info, key);
         writer.WriteEndMapping();
     }
 
@@ -174,7 +174,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         var merged = new MemberSet(info.Props.Length);
         if (info.UsesConstructor)
         {
-            return ReadThroughConstructor(ref reader, options, info, start, ReadNormal, ref seen, ref merged);
+            return ReadThroughConstructor(ref reader, options, info, start, ReadNormal, null, ref seen, ref merged);
         }
 
         T instance = info.CreateInstance();
@@ -184,7 +184,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
         else
         {
-            ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ReadNormal);
+            ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ReadNormal, null);
         }
 
         if (info.RequiredCount > 0)
@@ -197,14 +197,17 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
     // The mapping start is behind the reader, which is on the first key (or the end of an empty mapping). A polymorphic
     // base that is read as itself looked at the first key to see whether it names a derived type, and found it did not.
-    internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
-        ReadBody(ref reader, options, start, ReadResume);
+    internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
+        ReadBody(ref reader, options, start, ReadResume, discriminatorKey);
 
     // The mapping start and the discriminator key are behind the reader, which is on the discriminator's value.
-    internal T? ReadAfterDiscriminator(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
-        ReadBody(ref reader, options, start, ReadNormal);
+    internal T? ReadAfterDiscriminator(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
+        ReadBody(ref reader, options, start, ReadNormal, discriminatorKey);
 
-    private T? ReadBody(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, int mode)
+    // Compiled fully optimised from the start, like the other methods that recurse once per level: a document read once
+    // never leaves the first, larger code, and the depth limit has to fit on a 1 MB stack.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private T? ReadBody(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, int mode, byte[] discriminatorKey)
     {
         ConverterGuards.EnsureStack(in reader);
         YamlTypeInfo<T> info = _info;
@@ -218,11 +221,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         var merged = new MemberSet(info.Props.Length);
         if (info.UsesConstructor)
         {
-            return ReadThroughConstructor(ref reader, options, info, start, mode, ref seen, ref merged);
+            return ReadThroughConstructor(ref reader, options, info, start, mode, discriminatorKey, ref seen, ref merged);
         }
 
         T instance = info.CreateInstance();
-        ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, mode);
+        ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, mode, discriminatorKey);
         if (info.RequiredCount > 0)
         {
             CheckRequired(in reader, start, ref seen, ref merged);
@@ -233,11 +236,12 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
     // Kept apart from Read so that the frame of the common case, which every level of a nested document passes through,
     // holds only what that case needs.
-    private T? ReadThroughConstructor(ref Utf8YamlReader reader, YamlSerializerOptions options, YamlTypeInfo<T> info, int start, int mode, ref MemberSet seen, ref MemberSet merged)
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private T? ReadThroughConstructor(ref Utf8YamlReader reader, YamlSerializerOptions options, YamlTypeInfo<T> info, int start, int mode, byte[]? discriminatorKey, ref MemberSet seen, ref MemberSet merged)
     {
         object?[] slots = info.NewArguments();
         T instance = default!;
-        ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, mode);
+        ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, mode, discriminatorKey);
         CheckRequired(in reader, start, ref seen, ref merged);
         instance = info.CreateWith(slots);
         if (info.Extension is { ParameterIndex: < 0 } extension && slots[extension.Slot] is { } collected)
@@ -419,6 +423,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     }
 
     // The same walk for the less common cases: extension data, a first key that was read already, or a merged mapping of such a type.
+    //
+    // A polymorphic base passes the key that names the derived type. After that key was read, a repeat of it is a
+    // duplicate; when the first key was something else, the key must not turn up later, where a reader that stops at the
+    // first key would never look for it.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     private void ReadMembersGeneral(
         ref Utf8YamlReader reader,
         YamlSerializerOptions options,
@@ -426,11 +435,18 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         object?[]? slots,
         ref MemberSet seen,
         ref MemberSet merged,
-        int mode)
+        int mode,
+        byte[]? discriminatorKey)
     {
         YamlTypeInfo<T> info = _info;
         bool merging = mode == ReadMerging;
         var skipped = default(SkippedKeys);
+        byte[]? misplaced = null;
+        if (discriminatorKey is not null)
+        {
+            Seed(ref skipped, ref misplaced, discriminatorKey, mode == ReadResume, reader.Source);
+        }
+
         Dictionary<string, object?>? extra = null;
         while ((mode != ReadResume ? reader.Read() : Resumed(ref mode)) && reader.Type != YamlTokenType.MappingEnd)
         {
@@ -454,6 +470,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             int index = FindMember(ref reader, info);
             if (index < 0)
             {
+                if (misplaced is not null)
+                {
+                    CheckMisplaced(ref reader, misplaced);
+                }
+
                 if (info.Extension is not null)
                 {
                     ReadExtra(ref reader, options, ref skipped, ref extra, keyStart);
@@ -493,6 +514,41 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
 
         skipped.Release();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Seed(ref SkippedKeys skipped, ref byte[]? misplaced, byte[] key, bool resumed, ReadOnlySpan<byte> source)
+    {
+        if (resumed)
+        {
+            misplaced = key;
+        }
+        else
+        {
+            skipped.Add(new SkipKey(0, 0, key), source);
+        }
+    }
+
+    // The key that names the derived type came after another key, so it did not choose a type.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void CheckMisplaced(ref Utf8YamlReader reader, byte[] key)
+    {
+        byte[]? rented = null;
+        try
+        {
+            Span<byte> scratch = stackalloc byte[128];
+            if (reader.Text(scratch, ref rented).SequenceEqual(key))
+            {
+                throw reader.CreateException($"The key '{Encoding.UTF8.GetString(key)}' names the derived type of {ConverterGuards.DescribeType(typeof(T))}, so it must be the first key of the mapping.");
+            }
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
     }
 
     // The first key was read already: the loop starts on it instead of reading one.
@@ -596,7 +652,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
         else
         {
-            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ReadMerging);
+            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ReadMerging, null);
         }
     }
 

@@ -223,6 +223,83 @@ public abstract class YamlNode
 
     internal void SetTag(TagSlot? slot) => _tag = slot;
 
+    // The tag as a prefix and a suffix whose joined text is the full tag; both empty when there is none. Hashing and
+    // comparing go through these so that no node has to build its full tag, which a long %TAG prefix makes as long as the input.
+    private void TagParts(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> suffix)
+    {
+        switch (_tag)
+        {
+            case string text:
+                prefix = default;
+                suffix = text;
+                break;
+            case TagSlot slot:
+                prefix = slot.Prefix;
+                suffix = slot.Suffix;
+                break;
+            default:
+                prefix = default;
+                suffix = default;
+                break;
+        }
+    }
+
+    // Equal for tags with equal full text, however they were written.
+    internal int TagHash()
+    {
+        switch (_tag)
+        {
+            case TagSlot slot:
+                return slot.Hash();
+            case string text:
+                return TagText.Hash(TagText.Seed, text);
+            default:
+                return 0;
+        }
+    }
+
+    internal bool TagEquals(YamlNode other)
+    {
+        if (ReferenceEquals(_tag, other._tag))
+        {
+            return true;
+        }
+
+        if (_tag is TagSlot a && other._tag is TagSlot b)
+        {
+            return TagSlot.Same(a, b);
+        }
+
+        TagParts(out ReadOnlySpan<char> leftPrefix, out ReadOnlySpan<char> leftSuffix);
+        other.TagParts(out ReadOnlySpan<char> rightPrefix, out ReadOnlySpan<char> rightSuffix);
+        return (_tag is null) == (other._tag is null) && TagText.Equal(leftPrefix, leftSuffix, rightPrefix, rightSuffix);
+    }
+
+    // Whether the node still has the tag the source text gave the node at this index.
+    internal bool TagIs(TagSlot? source)
+    {
+        if (source is null || _tag is null)
+        {
+            return source is null && _tag is null;
+        }
+
+        if (ReferenceEquals(_tag, source))
+        {
+            return true;
+        }
+
+        TagParts(out ReadOnlySpan<char> leftPrefix, out ReadOnlySpan<char> leftSuffix);
+        return TagText.Equal(leftPrefix, leftSuffix, source.Prefix, source.Suffix);
+    }
+
+    // The full tag as text for a caller that uses it once, without keeping a copy on the node's shared slot.
+    internal string? TagTextOnce() => _tag switch
+    {
+        string text => text,
+        TagSlot slot => slot.Text(),
+        _ => null,
+    };
+
     /// <summary>The anchor of the node, or the empty name.</summary>
     public AnchorName Anchor { get; set; }
 
@@ -319,7 +396,7 @@ public abstract class YamlNode
         if (this is YamlScalarNode only)
         {
             // The usual key is a scalar: nothing to walk.
-            return HashCode.Combine(NodeType, Tag.Value, only.Value);
+            return HashCode.Combine(NodeType, TagHash(), only.Value);
         }
 
         int visits = 0;
@@ -380,7 +457,7 @@ public abstract class YamlNode
             else if (child is YamlScalarNode scalar)
             {
                 visits++;
-                int h = HashCode.Combine(scalar.NodeType, scalar.Tag.Value, scalar.Value);
+                int h = HashCode.Combine(scalar.NodeType, scalar.TagHash(), scalar.Value);
                 done[child] = h;
                 frames[top] = (node, next + 1, HashCode.Combine(acc, h));
             }
@@ -397,9 +474,9 @@ public abstract class YamlNode
     {
         return node switch
         {
-            YamlSequenceNode q => HashCode.Combine(node.NodeType, node.Tag.Value, q.Children.Count),
-            YamlMappingNode m => HashCode.Combine(node.NodeType, node.Tag.Value, m.Children.Count),
-            _ => HashCode.Combine(node.NodeType, node.Tag.Value),
+            YamlSequenceNode q => HashCode.Combine(node.NodeType, node.TagHash(), q.Children.Count),
+            YamlMappingNode m => HashCode.Combine(node.NodeType, node.TagHash(), m.Children.Count),
+            _ => HashCode.Combine(node.NodeType, node.TagHash()),
         };
     }
 
@@ -470,7 +547,7 @@ public abstract class YamlNode
             }
 
             Guard(depth, ref visits);
-            if (x.GetType() != y.GetType() || x.Tag != y.Tag)
+            if (x.GetType() != y.GetType() || !x.TagEquals(y))
             {
                 return false;
             }

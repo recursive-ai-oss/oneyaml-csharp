@@ -72,6 +72,12 @@ internal static class KitInput
                 continue;
             }
 
+            if (part.TryGetProperty("product", out JsonElement product))
+            {
+                WriteProduct(output, Product(product));
+                continue;
+            }
+
             NumbersSpec n = Numbers(part.GetProperty("numbers"));
             var line = new StringBuilder();
             for (long i = 0; i < n.Count; i++)
@@ -135,6 +141,43 @@ internal static class KitInput
                 long digits = Math.Max(n.Width, (n.Start + Math.Max(n.Count - 1, 0)).ToString(CultureInfo.InvariantCulture).Length);
                 total += (Encoding.UTF8.GetByteCount(n.Prefix) + Encoding.UTF8.GetByteCount(n.Suffix) + digits) * n.Count;
             }
+            else if (part.TryGetProperty("product", out JsonElement product))
+            {
+                if (part.EnumerateObject().Count() != 1)
+                {
+                    throw new InvalidOperationException("a product part has no other keys");
+                }
+
+                ProductSpec spec = Product(product);
+                long combinations = 1;
+                long choiceBytes = 0;
+                foreach (byte[][] list in spec.Choices)
+                {
+                    combinations *= list.Length;
+                    if (combinations > MaxBytes)
+                    {
+                        throw new InvalidOperationException("a recipe builds at most 64 MiB");
+                    }
+                }
+
+                // Every choice of a list appears in combinations / list length of the combinations.
+                foreach (byte[][] list in spec.Choices)
+                {
+                    long sum = 0;
+                    foreach (byte[] choice in list)
+                    {
+                        sum += choice.Length;
+                    }
+
+                    choiceBytes += (combinations / list.Length) * sum;
+                    if (choiceBytes > MaxBytes)
+                    {
+                        throw new InvalidOperationException("a recipe builds at most 64 MiB");
+                    }
+                }
+
+                total += (combinations * (spec.Prefix.Length + spec.Suffix.Length)) + choiceBytes;
+            }
             else
             {
                 throw new InvalidOperationException("unknown recipe part kind: " + part.GetRawText());
@@ -163,6 +206,92 @@ internal static class KitInput
 
     private static string Text(JsonElement value) =>
         value.ValueKind == JsonValueKind.String ? value.GetString()! : throw new InvalidOperationException("a prefix and a suffix are strings");
+
+    private readonly record struct ProductSpec(byte[] Prefix, byte[] Suffix, byte[][][] Choices);
+
+    // A product part: a prefix, one string from each list in turn, a suffix, for every combination. The choices are
+    // required, and every list holds at least one string.
+    private static ProductSpec Product(JsonElement spec)
+    {
+        if (spec.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("a product part holds an object");
+        }
+
+        byte[] prefix = [];
+        byte[] suffix = [];
+        byte[][][]? choices = null;
+        foreach (JsonProperty p in spec.EnumerateObject())
+        {
+            switch (p.Name)
+            {
+                case "prefix": prefix = Encoding.UTF8.GetBytes(Text(p.Value)); break;
+                case "suffix": suffix = Encoding.UTF8.GetBytes(Text(p.Value)); break;
+                case "choices": choices = Choices(p.Value); break;
+                default: throw new InvalidOperationException("unknown key in a product part: " + p.Name);
+            }
+        }
+
+        return new ProductSpec(prefix, suffix, choices ?? throw new InvalidOperationException("a product part needs choices"));
+    }
+
+    private static byte[][][] Choices(JsonElement lists)
+    {
+        if (lists.ValueKind != JsonValueKind.Array || lists.GetArrayLength() == 0)
+        {
+            throw new InvalidOperationException("choices is a list of non-empty lists of strings");
+        }
+
+        var result = new List<byte[][]>();
+        foreach (JsonElement list in lists.EnumerateArray())
+        {
+            if (list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException("choices is a list of non-empty lists of strings");
+            }
+
+            var strings = new List<byte[]>();
+            foreach (JsonElement choice in list.EnumerateArray())
+            {
+                if (choice.ValueKind != JsonValueKind.String)
+                {
+                    throw new InvalidOperationException("choices is a list of non-empty lists of strings");
+                }
+
+                strings.Add(Encoding.UTF8.GetBytes(choice.GetString()!));
+            }
+
+            result.Add([.. strings]);
+        }
+
+        return [.. result];
+    }
+
+    // Every combination, the first list varying slowest and the last fastest.
+    private static void WriteProduct(MemoryStream output, ProductSpec spec)
+    {
+        var at = new int[spec.Choices.Length];
+        while (true)
+        {
+            output.Write(spec.Prefix);
+            for (int i = 0; i < at.Length; i++)
+            {
+                output.Write(spec.Choices[i][at[i]]);
+            }
+
+            output.Write(spec.Suffix);
+            int last = at.Length - 1;
+            while (last >= 0 && ++at[last] == spec.Choices[last].Length)
+            {
+                at[last--] = 0;
+            }
+
+            if (last < 0)
+            {
+                return;
+            }
+        }
+    }
 
     private readonly record struct NumbersSpec(long Count, long Start, string Prefix, string Suffix, int Width);
 

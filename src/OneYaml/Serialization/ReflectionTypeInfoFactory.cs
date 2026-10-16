@@ -258,7 +258,7 @@ internal static class ReflectionTypeInfoFactory
     private static YamlTypeInfo<T> FromConverter<T>(YamlSerializerOptions options, object converter) =>
         converter is YamlConverter<T> typed
             ? new YamlTypeInfo<T>(options, typed)
-            : throw new InvalidOperationException($"The converter {converter.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
+            : throw new NotSupportedException($"The converter {converter.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
 
     private static YamlTypeInfo<T> MakeFromAttribute<T>(YamlSerializerOptions options, object converter) =>
         new YamlTypeInfo<T>(options, YamlMetadataServices.GetAttributeConverter<T>(options, (YamlConverter)converter));
@@ -271,7 +271,7 @@ internal static class ReflectionTypeInfoFactory
         {
             if (!target.IsGenericType || target.GetGenericArguments().Length != converterType.GetGenericArguments().Length)
             {
-                throw new InvalidOperationException($"The open generic converter {converterType} named by YamlConverter does not fit '{target}': it needs the same number of type arguments.");
+                throw new NotSupportedException($"The open generic converter {converterType} named by YamlConverter does not fit '{target}': it needs the same number of type arguments.");
             }
 
             converterType = converterType.MakeGenericType(target.GetGenericArguments());
@@ -279,7 +279,7 @@ internal static class ReflectionTypeInfoFactory
 
         if (!typeof(YamlConverter).IsAssignableFrom(converterType) || converterType.IsAbstract || converterType.GetConstructor(Type.EmptyTypes) is null)
         {
-            throw new InvalidOperationException($"The type {converterType} named by YamlConverter must be a converter with a public parameterless constructor.");
+            throw new NotSupportedException($"The type {converterType} named by YamlConverter must be a converter with a public parameterless constructor.");
         }
 
         return (YamlConverter)Activator.CreateInstance(converterType)!;
@@ -311,7 +311,7 @@ internal static class ReflectionTypeInfoFactory
             foreach (JsonDerivedTypeAttribute a in type.GetCustomAttributes<JsonDerivedTypeAttribute>(false))
             {
                 // A derived type with no discriminator cannot be told apart, so it is not listed.
-                if (a.TypeDiscriminator?.ToString() is { } text)
+                if (a.TypeDiscriminator is { } value && Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) is { } text)
                 {
                     derived.Add((a.DerivedType, text));
                 }
@@ -323,10 +323,10 @@ internal static class ReflectionTypeInfoFactory
             return null;
         }
 
-        return new Polymorphism(
-            yaml?.Discriminator ?? YamlDiscriminatorKind.Key,
-            yaml?.TypeDiscriminatorPropertyName ?? json?.TypeDiscriminatorPropertyName ?? "$type",
-            derived);
+        // The name System.Text.Json gives the key applies only when no YAML polymorphism attribute is present.
+        bool yamlPresent = yaml is not null || type.IsDefined(typeof(YamlDerivedTypeAttribute), false);
+        string key = yamlPresent ? yaml?.TypeDiscriminatorPropertyName ?? "$type" : json?.TypeDiscriminatorPropertyName ?? "$type";
+        return new Polymorphism(yaml?.Discriminator ?? YamlDiscriminatorKind.Key, key, derived);
     }
 
     private static YamlTypeInfo<T> MakePolymorphic<T>(YamlSerializerOptions options, object setup)

@@ -780,7 +780,10 @@ internal sealed class Parser
         AttributeData? yaml = FindAttribute(type, _yamlPolymorphic);
         AttributeData? json = FindAttribute(type, _jsonPolymorphic);
         string? key = null;
-        foreach (AttributeData? source in new[] { yaml, json })
+
+        // The name System.Text.Json gives the key applies only when no YAML polymorphism attribute is present.
+        bool yamlPresent = yaml is not null || FindAttribute(type, _yamlDerived) is not null;
+        foreach (AttributeData? source in yamlPresent ? new[] { yaml } : new[] { json })
         {
             if (source is null)
             {

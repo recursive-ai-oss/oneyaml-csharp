@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 
 namespace OneYaml.Serialization.Metadata;
 
@@ -30,7 +31,7 @@ public abstract class YamlDerivedTypeInfo<TBase>
 
     internal abstract void WriteTagged(Utf8YamlEmitter writer, TBase value, YamlSerializerOptions options);
 
-    internal abstract TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start);
+    internal abstract TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key);
 
     internal abstract TBase? ReadWhole(ref Utf8YamlReader reader, YamlSerializerOptions options);
 }
@@ -65,9 +66,11 @@ internal sealed class YamlDerivedTypeInfoImpl<TBase, TDerived> : YamlDerivedType
         _resolved!.Converter.WriteValue(writer, (TDerived)(object)value!, options);
     }
 
-    internal override TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
-        _resolved!.ObjectBinder!.ReadAfterDiscriminator(ref reader, options, start);
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal override TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key) =>
+        _resolved!.ObjectBinder!.ReadAfterDiscriminator(ref reader, options, start, key);
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override TBase? ReadWhole(ref Utf8YamlReader reader, YamlSerializerOptions options) =>
         _resolved!.Converter.ReadValue(ref reader, options);
 }

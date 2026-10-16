@@ -432,7 +432,7 @@ internal static class ModelWriter
             seen[node] = buffer.Count;
         }
 
-        string? tag = node.Tag.Value;
+        string? tag = node.TagTextOnce();
         string? anchor = node.Anchor.Value;
         switch (node)
         {
@@ -519,7 +519,7 @@ internal static class ModelMatcher
                     return false;
                 }
 
-                if (source.TagOf(i) != node.Tag)
+                if (!node.TagIs(source.TagSlotOf(i)))
                 {
                     return false;
                 }
