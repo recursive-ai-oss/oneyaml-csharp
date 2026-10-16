@@ -38,6 +38,8 @@ internal static partial class Editor
         bool runKeep = false;
         bool runBlock = false;
         bool gapMatters = false;
+        bool cutSincePrevious = false;
+        bool keptBare = false;
         int k = map + 1;
         for (int i = 0; i < items; i++)
         {
@@ -61,6 +63,15 @@ internal static partial class Editor
 
             if (wanted < 0)
             {
+                // A key with no value, cuts, then an entry that starts with a colon: with the entries between gone the
+                // colon would turn into the key's value. The one-at-a-time removal knows how to keep both.
+                if (cutSincePrevious && keptBare && (s.Node(k).Flags & NodeFlags.Empty) != 0)
+                {
+                    return false;
+                }
+
+                cutSincePrevious = false;
+                keptBare = (last.Flags & NodeFlags.Bare) != 0;
                 runKeep = keepHere;
                 runBlock = blockHere;
             }
@@ -73,6 +84,7 @@ internal static partial class Editor
                 }
 
                 deleted++;
+                cutSincePrevious = true;
                 gone?.Add(k);
                 gone?.Add(after);
                 lastWanted = Math.Max(lastWanted, wanted);

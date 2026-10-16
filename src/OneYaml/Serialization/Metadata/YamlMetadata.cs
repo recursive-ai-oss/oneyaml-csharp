@@ -355,7 +355,6 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
             return;
         }
 
-        Span<byte> small = stackalloc byte[256];
         foreach (KeyValuePair<string, object?> entry in entries)
         {
             if (string.Equals(entry.Key, discriminatorKey, StringComparison.Ordinal))
@@ -363,35 +362,42 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
                 continue;
             }
 
-            byte[]? rented = null;
-            Span<byte> bytes = small;
-            int max = Encoding.UTF8.GetMaxByteCount(entry.Key.Length);
-            if (max > small.Length)
-            {
-                rented = ArrayPool<byte>.Shared.Rent(max);
-                bytes = rented;
-            }
-
-            int found;
-            try
-            {
-                found = info.Find(bytes[..Encoding.UTF8.GetBytes(entry.Key, bytes)]);
-            }
-            finally
-            {
-                if (rented is not null)
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-            }
-
-            if (found >= 0 && info.Props[found] is { CanWrite: true } member && member.WritesValue(instance))
+            if (MemberWroteKey(entry.Key, instance, info))
             {
                 continue;
             }
 
             writer.WritePropertyName(entry.Key);
             _extensionConverter!.WriteValue(writer, entry.Value, _options!);
+        }
+    }
+
+    // The key buffer lives in this method, not in WriteExtension: that frame stays on the stack while nested values are
+    // written, and a recursive write path must keep its frame small.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static bool MemberWroteKey(string key, TDeclaring instance, YamlTypeInfo<TDeclaring> info)
+    {
+        Span<byte> small = stackalloc byte[256];
+        byte[]? rented = null;
+        Span<byte> bytes = small;
+        int max = Encoding.UTF8.GetMaxByteCount(key.Length);
+        if (max > small.Length)
+        {
+            rented = ArrayPool<byte>.Shared.Rent(max);
+            bytes = rented;
+        }
+
+        try
+        {
+            int found = info.Find(bytes[..Encoding.UTF8.GetBytes(key, bytes)]);
+            return found >= 0 && info.Props[found] is { CanWrite: true } member && member.WritesValue(instance);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
         }
     }
 

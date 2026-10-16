@@ -88,6 +88,15 @@ internal static partial class Editor
         }
 
         ref readonly VNode nv = ref v[0];
+
+        // A collection that stays the same kind of collection keeps its tag, whatever the tag says: emptying a
+        // mapping that someone tagged with a scalar or sequence tag does not make the tag any less theirs.
+        NodeKind was = s.Node(node).Kind;
+        if ((was == NodeKind.Mapping && nv.Kind == VKind.Mapping) || (was == NodeKind.Sequence && nv.Kind == VKind.Sequence))
+        {
+            return true;
+        }
+
         CoreTag core = s.ExplicitCoreTag(node);
         if (core != CoreTag.Unknown)
         {
@@ -491,7 +500,7 @@ internal static partial class Editor
                     regionEnd = BlankLinesEnd(src, regionEnd);
                 }
 
-                edit.Write(text);
+                WriteOverBlankTail(edit, src, text, endsInBlock, ref regionEnd);
             }
             else
             {
@@ -656,7 +665,7 @@ internal static partial class Editor
                 regionEnd = BlankLinesEnd(src, regionEnd);
             }
 
-            edit.Write(text);
+            WriteOverBlankTail(edit, src, text, endsInBlock, ref regionEnd);
         }
         else
         {
@@ -773,7 +782,8 @@ internal static partial class Editor
             if (src[i] == (byte)'#' && s.IsCommentAt(i))
             {
                 int from = i;
-                while (from > start && src[from - 1] == (byte)' ')
+                // The comment keeps the blanks in front of it, tabs too: a comment must be set apart from the header.
+                while (from > start && src[from - 1] is (byte)' ' or (byte)'\t')
                 {
                     from--;
                 }
@@ -783,6 +793,35 @@ internal static partial class Editor
         }
 
         return default;
+    }
+
+    // Writes new lines over a region. When they end in a block scalar, blank lines after the region that hold spaces are
+    // reduced to their line breaks: a line of spaces wider than the scalar's indentation would otherwise read as one more
+    // line of the scalar's text.
+    private static void WriteOverBlankTail(ByteBuffer edit, ReadOnlySpan<byte> src, ReadOnlySpan<byte> text, bool endsInBlock, ref int regionEnd)
+    {
+        edit.Write(text);
+        if (!endsInBlock || regionEnd >= src.Length)
+        {
+            return;
+        }
+
+        int tailEnd = BlankLinesEnd(src, regionEnd);
+        ReadOnlySpan<byte> tail = src.Slice(regionEnd, tailEnd - regionEnd);
+        if (tail.IndexOf((byte)' ') < 0)
+        {
+            return;
+        }
+
+        foreach (byte b in tail)
+        {
+            if (b == (byte)'\n')
+            {
+                edit.Write((byte)'\n');
+            }
+        }
+
+        regionEnd = tailEnd;
     }
 
     /// <summary>The end of the blank lines (only spaces) that start at an offset.</summary>

@@ -710,7 +710,10 @@ internal sealed partial class DocState : IDisposable
                 q--;
             }
 
-            if (q > 0 && src[q - 1] == (byte)'?' && (q == 1 || src[q - 2] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'-'))
+            // A "?" that sits before the end of the entry before belongs to that entry's last key (an empty key
+            // at the end of a nested mapping), not to this one.
+            int floor = parent < 0 ? 0 : prev >= 0 ? _nodes[prev].End : _nodes[parent].Start;
+            if (q > floor && src[q - 1] == (byte)'?' && (q == 1 || src[q - 2] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'-'))
             {
                 n.Start = n.End = q;
             }
