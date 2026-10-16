@@ -77,6 +77,15 @@ internal sealed class Settings
     public Dictionary<string, object?> Extra { get; set; } = new();
 }
 
+internal sealed class Optional
+{
+    [YamlIgnore(Condition = YamlIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; set; }
+
+    [YamlExtensionData]
+    public Dictionary<string, object?> Extra { get; set; } = new();
+}
+
 // The dictionary is made when the type has none, as System.Text.Json does.
 internal sealed class Lazy
 {
@@ -265,6 +274,7 @@ internal sealed record Memo(string Title, int Priority) : Note(Title);
 [YamlSerializable(typeof(Level))]
 [YamlSerializable(typeof(Crate))]
 [YamlSerializable(typeof(Settings))]
+[YamlSerializable(typeof(Optional))]
 [YamlSerializable(typeof(Lazy))]
 [YamlSerializable(typeof(FromJson))]
 [YamlSerializable(typeof(Labelled))]

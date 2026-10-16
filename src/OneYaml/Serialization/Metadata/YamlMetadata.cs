@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -111,6 +112,9 @@ public abstract class YamlPropertyInfo<TDeclaring> : YamlPropertyInfo
 
     // Writes the key and the value, unless the member is left out.
     internal abstract void Write(Utf8YamlEmitter writer, TDeclaring instance);
+
+    // Whether Write puts the member out for this instance (an ignored null or default is left out).
+    internal abstract bool WritesValue(TDeclaring instance);
 
     // Reads the value and assigns it.
     internal abstract void Read(ref Utf8YamlReader reader, ref TDeclaring instance);
@@ -230,6 +234,16 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
 
     internal override bool CanWrite => _values.Getter is not null;
 
+    internal override bool WritesValue(TDeclaring instance)
+    {
+        if (_ignore == YamlIgnoreCondition.WhenWritingNull)
+        {
+            return _values.Getter!(instance) is not null;
+        }
+
+        return _ignore != YamlIgnoreCondition.WhenWritingDefault || !EqualityComparer<TProperty>.Default.Equals(_values.Getter!(instance), default!);
+    }
+
     internal override void Write(Utf8YamlEmitter writer, TDeclaring instance)
     {
         TProperty value = _values.Getter!(instance);
@@ -331,8 +345,9 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
         }
     }
 
-    // A key that a member takes, or that names the derived type, is not written from the dictionary: written twice it would
-    // make a mapping that reads back as a duplicate key, and a reader hands that key to the member, never to the dictionary.
+    // A key that a member wrote, or that names the derived type, is not written from the dictionary: written twice it would
+    // make a mapping that reads back as a duplicate key. A member that left itself out (an ignored null) wrote nothing, so
+    // its dictionary entry is written; a reader hands that key to the member.
     internal override void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey)
     {
         if ((IDictionary<string, object?>?)(object?)_values.Getter!(instance) is not { } entries)
@@ -340,9 +355,37 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
             return;
         }
 
+        Span<byte> small = stackalloc byte[256];
         foreach (KeyValuePair<string, object?> entry in entries)
         {
-            if (string.Equals(entry.Key, discriminatorKey, StringComparison.Ordinal) || info.Find(Encoding.UTF8.GetBytes(entry.Key)) >= 0)
+            if (string.Equals(entry.Key, discriminatorKey, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            byte[]? rented = null;
+            Span<byte> bytes = small;
+            int max = Encoding.UTF8.GetMaxByteCount(entry.Key.Length);
+            if (max > small.Length)
+            {
+                rented = ArrayPool<byte>.Shared.Rent(max);
+                bytes = rented;
+            }
+
+            int found;
+            try
+            {
+                found = info.Find(bytes[..Encoding.UTF8.GetBytes(entry.Key, bytes)]);
+            }
+            finally
+            {
+                if (rented is not null)
+                {
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
+            }
+
+            if (found >= 0 && info.Props[found] is { CanWrite: true } member && member.WritesValue(instance))
             {
                 continue;
             }

@@ -306,6 +306,12 @@ internal sealed partial class DocState
             return end;
         }
 
+        if (end >= 4 && src[end - 3] == 0xEF && src[end - 2] == 0xBB && src[end - 1] == 0xBF && IsBreak(src[end - 4]))
+        {
+            // A byte order mark in front of a document marker belongs to the marker's line, which has not begun.
+            return end - 3;
+        }
+
         int b = LineBreakAt(end);
         return b >= Length ? Length : PastBreak(b);
     }
@@ -403,7 +409,20 @@ internal sealed partial class DocState
     public int ColonEnd(int key)
     {
         int at = SkipTrivia(Text, _nodes[key].End);
-        return at < Length && Text[at] == (byte)':' ? at + 1 : _nodes[key].End;
+        return at < Length && Text[at] == (byte)':' && IsValueIndicator(key, at) ? at + 1 : _nodes[key].End;
+    }
+
+    // A colon right before more text is an indicator only inside a flow collection. In block context it starts a
+    // plain scalar (":x" on a line after an explicit key is a new key, whatever style the key had).
+    private bool IsValueIndicator(int key, int colon)
+    {
+        if (colon + 1 >= Length || Text[colon + 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+        {
+            return true;
+        }
+
+        int parent = _nodes[key].Parent;
+        return parent >= 0 && _nodes[parent].IsFlow;
     }
 
     /// <summary>The offset of the <c>-</c> that introduces a sequence item.</summary>

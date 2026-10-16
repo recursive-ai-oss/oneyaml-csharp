@@ -111,6 +111,84 @@ public class SharedTagTests
         Assert.Equal(a.Children[0].GetHashCode(), a.Children[2].GetHashCode());
     }
 
+    // Tags that agree under the plain 32-bit FNV-1a hash an earlier version used. A fixed hash lets a sender line up
+    // thousands of keys in one bucket, and every lookup then compares against all of them.
+    private static List<string> FnvCollidingTags(int want)
+    {
+        const uint seed = 2166136261, prime = 16777619;
+        const string alpha = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        uint inverse = prime;
+        for (int i = 0; i < 5; i++)
+        {
+            inverse *= 2 - prime * inverse;
+        }
+
+        uint target = 0x12345678;
+        var back = new Dictionary<uint, string>();
+        foreach (char a in alpha)
+        {
+            foreach (char b in alpha)
+            {
+                foreach (char c in alpha)
+                {
+                    uint s = unchecked(target * inverse ^ c);
+                    s = unchecked(s * inverse ^ b);
+                    s = unchecked(s * inverse ^ a);
+                    back[s] = new string([a, b, c]);
+                }
+            }
+        }
+
+        var result = new List<string>();
+        uint start = unchecked((seed ^ '!') * prime);
+        foreach (char z in alpha)
+        {
+            uint hz = unchecked((start ^ z) * prime);
+            foreach (char a in alpha)
+            {
+                uint ha = unchecked((hz ^ a) * prime);
+                foreach (char b in alpha)
+                {
+                    uint hb = unchecked((ha ^ b) * prime);
+                    foreach (char c in alpha)
+                    {
+                        uint hc = unchecked((hb ^ c) * prime);
+                        foreach (char d in alpha)
+                        {
+                            if (back.TryGetValue(unchecked((hc ^ d) * prime), out string? tail))
+                            {
+                                result.Add("!" + z + a + b + c + d + tail);
+                                if (result.Count >= want)
+                                {
+                                    return result;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    [Fact]
+    public void Tags_chosen_to_collide_under_a_fixed_hash_do_not_make_loading_quadratic()
+    {
+        List<string> tags = FnvCollidingTags(4_000);
+        Assert.Equal(4_000, tags.Count);
+        string yaml = string.Concat(tags.Select(t => t + " k: 1\n"));
+        Load(yaml);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        Cm.YamlStream stream = Load(yaml);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(4_000, ((Cm.YamlMappingNode)stream.Documents[0].RootNode).Children.Count);
+        // Linear work is a few megabytes; comparing every pair of colliding keys costs gigabytes.
+        Assert.True(allocated < 100_000_000, $"loading allocated {allocated:N0} bytes");
+    }
+
     [Fact]
     public void An_unresolved_tag_is_cut_in_the_message()
     {

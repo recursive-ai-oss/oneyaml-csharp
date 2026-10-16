@@ -113,7 +113,9 @@ internal static partial class Editor
     }
 
     // Text for a new last line: if the text ends without a line break, the new line starts with one instead.
-    private static DocState AppendLines(DocState s, YamlLimits limits, int pos, ByteBuffer lines, string nl)
+    // When the text ends in a block scalar whose last line had no break, the new break would become part of its
+    // value, so the scalar's header is switched to strip to keep the value as it was.
+    private static DocState AppendLines(DocState s, YamlLimits limits, int pos, ByteBuffer lines, string nl, int container = -1)
     {
         ReadOnlySpan<byte> src = s.Text;
         bool noBreak = pos == s.Length && (pos == 0 || !DocState.IsBreak(src[pos - 1]));
@@ -128,7 +130,76 @@ internal static partial class Editor
             text.Write(lines.WrittenSpan);
         }
 
+        if (noBreak && pos > 0 && container >= 0 && TrailingBlockHeader(s, container, out int hStart, out int hEnd))
+        {
+            using var final = new ByteBuffer(text.Count + 8);
+            final.Write((byte)'-');
+            ValueWriter.WriteWithBreaks(text.WrittenSpan, nl, final);
+            Span<TextEdit> two = [new TextEdit(hStart, hEnd, 0, 1), new TextEdit(pos, pos, 1, final.Count - 1)];
+            return DocState.Rebuild(s, two, final.WrittenSpan, limits);
+        }
+
         return InsertAt(s, limits, pos, text, nl);
+    }
+
+    // The last value under a node, when it is a literal or folded scalar that does not strip and whose text
+    // runs to the end of the stream without a break: where its chomping indicator is (hStart == hEnd) or goes.
+    private static bool TrailingBlockHeader(DocState s, int node, out int hStart, out int hEnd)
+    {
+        hStart = hEnd = 0;
+        int n = node;
+        while (s.Node(n).Kind != NodeKind.Scalar)
+        {
+            if (s.Node(n).Count == 0)
+            {
+                return false;
+            }
+
+            n = LastChild(s, n);
+        }
+
+        if ((s.Node(n).Flags & NodeFlags.Bare) != 0)
+        {
+            // An explicit key with no value at all: the key's text is what ends the stream.
+            n = s.PrevSibling(n);
+        }
+
+        ref readonly CstNode sc = ref s.Node(n);
+        if (!IsBlockScalar(sc) || (Chomping)sc.Chomp == Chomping.Strip)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> src = s.Text;
+        int lineStart = src.LastIndexOfAny((byte)'\n', (byte)'\r') + 1;
+        if (lineStart <= sc.Start || src.Slice(lineStart).IndexOfAnyExcept((byte)' ') < 0)
+        {
+            // The header line is the last line (empty body), or the last line is only blanks.
+            return false;
+        }
+
+        int i = sc.Start + 1;
+        hStart = -1;
+        while (i < src.Length && i < sc.Start + 4 && src[i] is (byte)'+' or (byte)'-' or (>= (byte)'1' and <= (byte)'9'))
+        {
+            if (src[i] == (byte)'+')
+            {
+                hStart = i;
+            }
+
+            i++;
+        }
+
+        if (hStart >= 0)
+        {
+            hEnd = hStart + 1;
+        }
+        else
+        {
+            hStart = hEnd = i;
+        }
+
+        return true;
     }
 
     /// <summary>Adds a member at the end of a mapping.</summary>
@@ -179,7 +250,7 @@ internal static partial class Editor
         using var lines = new ByteBuffer();
         int col = s.Column(s.EntryStart(map + 1));
         ValueWriter.WriteBlock(lines, tree, 0, col, false, lay, keyPref, valPref);
-        return AppendLines(s, limits, s.PastLine(m.End), lines, lay.Nl);
+        return AppendLines(s, limits, s.PastLine(m.End), lines, lay.Nl, map);
     }
 
     /// <summary>Inserts an item into a sequence.</summary>
@@ -235,7 +306,7 @@ internal static partial class Editor
         {
             ScalarWriteStyle pref = v.IsScalar ? SiblingStyle(s, LastChild(s, seq)) : ScalarWriteStyle.Plain;
             ValueWriter.WriteBlock(lines, tree, 0, s.Column(q.Start), false, lay, ScalarWriteStyle.Plain, pref);
-            return AppendLines(s, limits, s.PastLine(q.End), lines, lay.Nl);
+            return AppendLines(s, limits, s.PastLine(q.End), lines, lay.Nl, seq);
         }
 
         int item = s.ChildAt(seq, index);
@@ -406,6 +477,12 @@ internal static partial class Editor
             }
             else
             {
+                if (q >= src.Length && q - p0 > column)
+                {
+                    // The last line has only blanks, more than the scalar's indentation, and no line break.
+                    end = q;
+                }
+
                 break;
             }
         }
@@ -501,7 +578,10 @@ internal static partial class Editor
 
             // Without a comma of its own an entry that is not the last one is separated from the next by the
             // comma at the start of the next line; taking its line alone would leave that comma first.
-            if (s.StartsLine(entryAt) && (ownComma || nextEntry < 0) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
+            // The last entry without a comma of its own may have a trailing comma on a later line; the lines alone
+            // would go and leave that comma behind the previous entry's.
+            bool commaLater = !ownComma && nextEntry < 0 && DocState.SkipTrivia(src, after) is int t && t < src.Length && src[t] == (byte)',';
+            if (s.StartsLine(entryAt) && !commaLater && (ownComma || nextEntry < 0) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
             {
                 // The item has its lines to itself, its own comment included: they go, and nothing else moves.
                 using var lines = new ByteBuffer(1);
@@ -512,6 +592,20 @@ internal static partial class Editor
             {
                 from = s.PropStart(first);
                 to = s.PropStart(nextEntry);
+                if (map && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0)
+                {
+                    // An empty key sits at the next token, behind its own "?", which stays with it.
+                    int back = to;
+                    while (back > from && src[back - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+                    {
+                        back--;
+                    }
+
+                    if (back > from && src[back - 1] == (byte)'?')
+                    {
+                        to = back - 1;
+                    }
+                }
             }
             else
             {
@@ -544,7 +638,8 @@ internal static partial class Editor
                 stop = CommentLinesEnd(src, stop, s.Node(first - 1).Aux);
             }
 
-            if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0)
+            if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0
+                && !(first > 0 && IsBlockScalar(s.Node(first - 1)) && (Chomping)s.Node(first - 1).Chomp != Chomping.Strip))
             {
                 // The text had no final line break; the new last line should not gain one.
                 start -= start >= 2 && src[start - 1] == (byte)'\n' && src[start - 2] == (byte)'\r' ? 2 : 1;
@@ -556,8 +651,25 @@ internal static partial class Editor
             stop = map ? s.EntryStart(nextEntry) : s.DashOf(nextEntry, node);
         }
 
-        _ = nl;
         using var none = new ByteBuffer(1);
+        if (map && nextEntry >= 0 && prevEntry >= 0 && (s.Node(prevEntry).Flags & NodeFlags.Bare) != 0 && s.StartsLine(entryStart)
+            && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0 && IsColonOnlyEntry(src, s.Node(node).End))
+        {
+            // A key with no value, then an entry that is only a colon: without this entry between them the colon
+            // would turn into the key's value. A colon line of its own gives the key its empty value.
+            none.WriteSpaces(entryStart - s.LineStart(entryStart));
+            none.Write((byte)':');
+            none.WriteAscii(nl);
+        }
+
         return Commit(s, limits, start, stop, none);
+    }
+
+    // Whether the entry that follows the text up to an offset is a colon with no key before it.
+    private static bool IsColonOnlyEntry(ReadOnlySpan<byte> src, int from)
+    {
+        // Comment lines may sit between the removed entry and the colon.
+        int i = DocState.SkipTrivia(src, from);
+        return i < src.Length && src[i] == (byte)':' && (i + 1 >= src.Length || src[i + 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r');
     }
 }

@@ -458,11 +458,17 @@ internal sealed class Model
     }
 
     /// <summary>Applies an RFC 7396 merge patch to the expected model.</summary>
-    public static void Merge(Model target, JsonElement patch)
+    public static void Merge(Model target, JsonElement patch, Model? root = null)
     {
         if (patch.ValueKind != JsonValueKind.Object)
         {
             Become(target, FromJson(patch));
+            return;
+        }
+
+        // An alias to a mapping already is an object: an empty patch changes nothing, and the alias stays.
+        if (target.Kind == "alias" && root is not null && !patch.EnumerateObject().Any() && Resolve(root, target).Kind == "map")
+        {
             return;
         }
 
@@ -498,7 +504,7 @@ internal sealed class Model
                 }
             }
 
-            Merge(target.Kids[at + 1], p.Value);
+            Merge(target.Kids[at + 1], p.Value, root);
         }
 
         foreach (string name in deletes)
