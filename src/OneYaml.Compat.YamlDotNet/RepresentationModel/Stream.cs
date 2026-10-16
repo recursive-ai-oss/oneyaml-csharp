@@ -254,7 +254,7 @@ internal static class DocumentBuilder
 
                     if (s.HasTag(i))
                     {
-                        node.Tag = source.TagOf(i);
+                        node.SetTag(source.TagSlotOf(i));
                     }
 
                     // YamlDotNet reports a collection's end at its start; scalars end where their text ends.

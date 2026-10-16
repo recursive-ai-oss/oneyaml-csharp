@@ -119,6 +119,23 @@ internal readonly struct Pointer
         return sb.ToString();
     }
 
+    /// <summary>The first tokens as pointer text for a message: cut to a short excerpt with control characters escaped.</summary>
+    /// <param name="count">How many tokens.</param>
+    /// <returns>The excerpt; the full text stays available from <see cref="Escaped"/>.</returns>
+    public string Excerpt(int count)
+    {
+        // Stop building once the excerpt is full: a pointer of 600 KB must not cost 600 KB per error.
+        var sb = new StringBuilder();
+        for (int i = 0; i < count && i < Count && sb.Length <= MessageText.MaxChars; i++)
+        {
+            sb.Append('/');
+            ReadOnlySpan<byte> token = this[i];
+            AppendEscaped(sb, token.Length > MessageText.MaxChars * 4 ? token[..(MessageText.MaxChars * 4)] : token);
+        }
+
+        return MessageText.Bound(sb.ToString());
+    }
+
     /// <summary>Appends a token to a string builder, escaped.</summary>
     public static void AppendEscaped(StringBuilder sb, ReadOnlySpan<byte> token)
     {
@@ -222,6 +239,40 @@ internal readonly struct Pointer
     }
 }
 
+/// <summary>Keeps text taken from input short and on one line when it goes into a message.</summary>
+internal static class MessageText
+{
+    public const int MaxChars = 200;
+
+    public static string Bound(string text)
+    {
+        bool cut = text.Length > MaxChars;
+        ReadOnlySpan<char> head = cut ? text.AsSpan(0, MaxChars) : text;
+        var sb = new StringBuilder(head.Length + 1);
+        foreach (char c in head)
+        {
+            if (c < ' ' || c == '\u007f' || c == '\u0085' || c == '\u2028' || c == '\u2029')
+            {
+                sb.Append("\\u").Append(((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        if (cut)
+        {
+            sb.Append('…');
+        }
+
+        return sb.ToString();
+    }
+
+    public static string Bound(ReadOnlySpan<byte> utf8)
+        => Bound(Encoding.UTF8.GetString(utf8.Length > MaxChars * 4 ? utf8[..(MaxChars * 4)] : utf8) + (utf8.Length > MaxChars * 4 ? new string('…', 1) : string.Empty));
+}
+
 /// <summary>Pointer resolution and the pointer-addressed edits, over one state.</summary>
 internal static class PointerOps
 {
@@ -249,7 +300,7 @@ internal static class PointerOps
 
             if (!Pointer.TryIndex(token, out int idx))
             {
-                throw Path(s, YamlErrorCategory.PatchPath, $"The token '{Encoding.UTF8.GetString(token)}' cannot address an item: a sequence is addressed by an index (0, 1, ...), or '-' for the position after the last item.", container);
+                throw Path(s, YamlErrorCategory.PatchPath, $"The token '{MessageText.Bound(token)}' cannot address an item: a sequence is addressed by an index (0, 1, ...), or '-' for the position after the last item.", container);
             }
 
             position = idx;
@@ -265,7 +316,7 @@ internal static class PointerOps
             {
                 if (found >= 0)
                 {
-                    throw Path(s, YamlErrorCategory.RefusedAmbiguous, $"More than one key matches the pointer token '{Encoding.UTF8.GetString(token)}'.", k);
+                    throw Path(s, YamlErrorCategory.RefusedAmbiguous, $"More than one key matches the pointer token '{MessageText.Bound(token)}'.", k);
                 }
 
                 found = v;
@@ -339,7 +390,7 @@ internal static class PointerOps
 
         if (s.Node(node).Kind == NodeKind.Scalar)
         {
-            string where = resolved >= 0 ? $"The pointer '{p}' names nothing: '{p.Escaped(resolved)}' is a scalar (an empty value is a null), which has no members or items to address." : "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.";
+            string where = resolved >= 0 ? $"The pointer '{p.Excerpt(p.Count)}' names nothing: '{p.Excerpt(resolved)}' is a scalar (an empty value is a null), which has no members or items to address." : "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.";
             throw Path(s, YamlErrorCategory.PatchPath, where, node);
         }
 
@@ -357,11 +408,11 @@ internal static class PointerOps
     /// <returns>The error, category <see cref="YamlErrorCategory.PatchPath"/>.</returns>
     public static YamlException Missing(DocState s, in Pointer p, int at, int container)
     {
-        string has = at == 0 ? "the document root" : "'" + p.Escaped(at) + "'";
+        string has = at == 0 ? "the document root" : "'" + p.Excerpt(at) + "'";
         var sb = new StringBuilder();
-        sb.Append("The pointer '").Append(p).Append("' names nothing: ");
+        sb.Append("The pointer '").Append(p.Excerpt(p.Count)).Append("' names nothing: ");
         ref readonly CstNode c = ref s.Node(container);
-        string token = Encoding.UTF8.GetString(p[at]);
+        string token = MessageText.Bound(p[at]);
         if (c.Kind == NodeKind.Sequence)
         {
             if (p[at].Length == 1 && p[at][0] == (byte)'-')
@@ -386,36 +437,79 @@ internal static class PointerOps
         return Path(s, YamlErrorCategory.PatchPath, sb.ToString(), container);
     }
 
+    // The most joined tokens the hint tries. A key that spans more slashes than this is not a typo to explain.
+    private const int MaxHintTokens = 64;
+
     // A '/' in a key is written ~1 in a pointer. When the tokens from here on, joined with '/', name a key of the
-    // mapping, say so and show the pointer that works.
+    // mapping, say so and show the pointer that works. The work is bounded by the longest key of the mapping and by
+    // MaxHintTokens, so a pointer of many tokens costs one scan of the keys, not one per token.
     private static string? EscapeHint(DocState s, in Pointer p, int at, int container)
     {
-        if (s.Node(container).Kind != NodeKind.Mapping)
+        if (s.Node(container).Kind != NodeKind.Mapping || at + 1 >= p.Count)
         {
             return null;
         }
 
-        var joined = new List<byte>(p[at].ToArray());
-        for (int j = at + 1; j < p.Count; j++)
+        int longest = LongestKey(s, container);
+        byte[] joined = new byte[Math.Min(longest, p[at].Length + 64)];
+        int length = p[at].Length;
+        if (length > longest)
         {
-            joined.Add((byte)'/');
-            joined.AddRange(p[j].ToArray());
-            if (!HasKey(s, container, joined.ToArray()))
+            return null;
+        }
+
+        p[at].CopyTo(joined);
+        for (int j = at + 1; j < p.Count && j <= at + MaxHintTokens; j++)
+        {
+            ReadOnlySpan<byte> next = p[j];
+            if (length + 1 + next.Length > longest)
+            {
+                return null;
+            }
+
+            if (length + 1 + next.Length > joined.Length)
+            {
+                Array.Resize(ref joined, Math.Min(longest, Math.Max(joined.Length * 2, length + 1 + next.Length)));
+            }
+
+            joined[length++] = (byte)'/';
+            next.CopyTo(joined.AsSpan(length));
+            length += next.Length;
+            if (!HasKey(s, container, joined.AsSpan(0, length)))
             {
                 continue;
             }
 
             var fixedPointer = new StringBuilder(p.Escaped(at)).Append('/');
-            Pointer.AppendEscaped(fixedPointer, joined.ToArray());
+            Pointer.AppendEscaped(fixedPointer, joined.AsSpan(0, length));
             fixedPointer.Append(p.Escaped(p.Count).AsSpan(p.Escaped(j + 1).Length));
-            string key = Encoding.UTF8.GetString(joined.ToArray());
-            return $"A key '{key}' exists; a '/' inside a key is written '~1' in a pointer, so the pointer '{fixedPointer}' reaches it.";
+            string key = MessageText.Bound(joined.AsSpan(0, length));
+            return $"A key '{key}' exists; a '/' inside a key is written '~1' in a pointer, so the pointer '{MessageText.Bound(fixedPointer.ToString())}' reaches it.";
         }
 
         return null;
     }
 
-    private static bool HasKey(DocState s, int mapping, byte[] key)
+    private static int LongestKey(DocState s, int mapping)
+    {
+        int longest = 0;
+        int k = mapping + 1;
+        for (int i = 0; i < s.Node(mapping).Count; i += 2)
+        {
+            int v = k + s.Node(k).Size;
+            if (s.Node(k).Kind == NodeKind.Scalar)
+            {
+                // The source length is an upper bound of the decoded length for a plain or quoted key.
+                longest = Math.Max(longest, s.Node(k).End - s.Node(k).Start);
+            }
+
+            k = v + s.Node(v).Size;
+        }
+
+        return longest;
+    }
+
+    private static bool HasKey(DocState s, int mapping, ReadOnlySpan<byte> key)
     {
         int k = mapping + 1;
         for (int i = 0; i < s.Node(mapping).Count; i += 2)
@@ -704,7 +798,7 @@ internal static class PointerOps
     {
         if (s.Node(failedIn).Kind == NodeKind.Scalar)
         {
-            return Path(s, YamlErrorCategory.PatchPath, $"The pointer '{p}' names nothing: '{p.Escaped(failedAt)}' is a scalar (an empty value is a null), which has no members or items to address.", failedIn);
+            return Path(s, YamlErrorCategory.PatchPath, $"The pointer '{p.Excerpt(p.Count)}' names nothing: '{p.Excerpt(failedAt)}' is a scalar (an empty value is a null), which has no members or items to address.", failedIn);
         }
 
         return Missing(s, p, failedAt, failedIn);

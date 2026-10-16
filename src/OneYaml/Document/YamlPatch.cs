@@ -119,7 +119,7 @@ public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>
     /// <param name="path">An RFC 6901 pointer. For a mapping the member is added or replaced; for a sequence, the value is inserted before the item at the index, and <c>-</c> appends.</param>
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, a dictionary or sequence of these, or a value of any other type the serializer can write.</param>
     /// <returns>This patch.</returns>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     public YamlPatch Add(string path, object? value) => Append(PatchKind.Add, path, null, value, hasValue: true);
 
     /// <summary>Adds a <c>remove</c> operation.</summary>
@@ -131,7 +131,7 @@ public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>
     /// <param name="path">An RFC 6901 pointer to a value that must exist.</param>
     /// <param name="value">The new value, as for <see cref="Add"/>.</param>
     /// <returns>This patch.</returns>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     public YamlPatch Replace(string path, object? value) => Append(PatchKind.Replace, path, null, value, hasValue: true);
 
     /// <summary>Adds a <c>move</c> operation.</summary>
@@ -153,7 +153,7 @@ public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The expected value, as for <see cref="Add"/>.</param>
     /// <returns>This patch.</returns>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     public YamlPatch Test(string path, object? value) => Append(PatchKind.Test, path, null, value, hasValue: true);
 
     /// <summary>Adds an <c>add</c> operation with a value of any type <paramref name="typeInfo"/> describes, written as <see cref="YamlSerializer"/> writes it.</summary>

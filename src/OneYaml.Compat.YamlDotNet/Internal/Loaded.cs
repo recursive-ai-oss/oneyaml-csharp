@@ -55,13 +55,24 @@ internal sealed class Loaded : IDisposable
     private List<Dictionary<string, string>>? _tagDirectives;
     private bool _directivesScanned;
 
+    private Dictionary<(int Document, string Raw), TagSlot>? _tagSlots;
+
     // The full tag of a node: its written form resolved against the %TAG directives of the document the node is in.
     public TagName TagOf(int node)
+    {
+        TagSlot? slot = TagSlotOf(node);
+        return slot is null ? default : slot.Get();
+    }
+
+    // The tag of a node as a shared, lazily resolved slot. Resolving glues a directive's prefix to the suffix, and a
+    // prefix may be as long as the input, so a node must not own that string: nodes that write the same tag in the
+    // same document share one slot, and the string is built when somebody reads the tag.
+    public TagSlot? TagSlotOf(int node)
     {
         ReadOnlySpan<byte> raw = State.RawTag(node);
         if (raw.IsEmpty)
         {
-            return default;
+            return null;
         }
 
         if (!_directivesScanned)
@@ -73,29 +84,40 @@ internal sealed class Loaded : IDisposable
             }
         }
 
-        if (_tagDirectives is null || _tagDirectives.Count != State.DocCount)
+        int document = 0;
+        Dictionary<string, string>? handles = null;
+        if (_tagDirectives is not null && _tagDirectives.Count == State.DocCount)
         {
-            return Tags.FromRaw(raw);
+            // Documents hold their nodes in one contiguous range each; find the one holding this node.
+            int lo = 0;
+            int hi = State.DocCount - 1;
+            while (lo < hi)
+            {
+                int mid = (lo + hi + 1) >> 1;
+                int root = State.Doc(mid).Root;
+                if (root >= 0 && root <= node)
+                {
+                    lo = mid;
+                }
+                else
+                {
+                    hi = mid - 1;
+                }
+            }
+
+            document = lo;
+            handles = _tagDirectives[lo];
         }
 
-        // Documents hold their nodes in one contiguous range each; find the one holding this node.
-        int lo = 0;
-        int hi = State.DocCount - 1;
-        while (lo < hi)
+        _tagSlots ??= [];
+        string text = Encoding.UTF8.GetString(raw);
+        if (!_tagSlots.TryGetValue((document, text), out TagSlot? slot))
         {
-            int mid = (lo + hi + 1) >> 1;
-            int root = State.Doc(mid).Root;
-            if (root >= 0 && root <= node)
-            {
-                lo = mid;
-            }
-            else
-            {
-                hi = mid - 1;
-            }
+            slot = new TagSlot(raw.ToArray(), handles);
+            _tagSlots.Add((document, text), slot);
         }
 
-        return Tags.Resolve(raw, _tagDirectives[lo]);
+        return slot;
     }
 
     // %TAG directives per document. A directive belongs to the document that the next --- opens; they are only valid at the start
@@ -152,6 +174,24 @@ internal sealed class Loaded : IDisposable
 
     // Returns the pooled tree arrays; only Text and Lines may be used afterwards.
     public void Dispose() => Document.Dispose();
+}
+
+// A written tag and the directives it is resolved with; the full tag is built once, on first use.
+internal sealed class TagSlot(byte[] raw, Dictionary<string, string>? handles)
+{
+    private TagName _value;
+    private bool _resolved;
+
+    public TagName Get()
+    {
+        if (!_resolved)
+        {
+            _value = handles is null ? Tags.FromRaw(raw) : Tags.Resolve(raw, handles);
+            _resolved = true;
+        }
+
+        return _value;
+    }
 }
 
 // Line starts of a text, so a UTF-8 byte offset (what the engine reports) becomes a mark without rescanning the text.

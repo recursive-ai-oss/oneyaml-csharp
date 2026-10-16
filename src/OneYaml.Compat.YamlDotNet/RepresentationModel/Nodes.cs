@@ -210,6 +210,9 @@ public abstract class YamlNode
     // The most text, in characters, that ToString or a visitor walk may produce or see.
     internal const int MaxTextChars = 32 * 1024 * 1024;
 
+    // The tag as a string when set by hand, or the shared slot a loaded node resolves it from on first read: a long
+    // %TAG prefix must not be copied into every node that uses it.
+    private object? _tag;
     private Loaded? _source;
     private int _startOffset = -1;
     private int _endOffset = -1;
@@ -218,11 +221,22 @@ public abstract class YamlNode
     {
     }
 
+    internal void SetTag(TagSlot? slot) => _tag = slot;
+
     /// <summary>The anchor of the node, or the empty name.</summary>
     public AnchorName Anchor { get; set; }
 
     /// <summary>The tag of the node, or the empty tag.</summary>
-    public TagName Tag { get; set; }
+    public TagName Tag
+    {
+        get => _tag switch
+        {
+            string text => new TagName(text),
+            TagSlot slot => slot.Get(),
+            _ => default,
+        };
+        set => _tag = value.Value;
+    }
 
     /// <summary>Where the node starts in the source it was loaded from.</summary>
     public Mark Start => _source is null ? Mark.Empty : _source.MarkAt(_startOffset);
