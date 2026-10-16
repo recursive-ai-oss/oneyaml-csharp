@@ -120,7 +120,7 @@ They read the YAML 1.1 forms their targets document, and they do not copy their 
 
 ## The oneyaml family
 
-oneyaml-csharp is one of a family of YAML 1.2 libraries, each written from scratch in its own language with an API in that language's idiom, and all measured by the same conformance kit, [oneyaml-kit](https://github.com/recursive-ai-oss/oneyaml-kit). The Go library is [oneyaml-go](https://github.com/recursive-ai-oss/oneyaml-go).
+oneyaml-csharp is one of a family of YAML 1.2 libraries, each written from scratch in its own language with an API in that language's idiom, and all measured by the same conformance kit, [oneyaml-kit](https://github.com/recursive-ai-oss/oneyaml-kit). The Go library is [oneyaml-go](https://github.com/recursive-ai-oss/oneyaml-go) and the Rust library is [oneyaml-rust](https://github.com/recursive-ai-oss/oneyaml-rust).
 
 ## Stability
 
