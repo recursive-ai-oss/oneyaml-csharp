@@ -122,51 +122,50 @@ internal sealed partial class DocState : IDisposable
     /// <summary>Where the node's tag, as written, starts; the node must have one.</summary>
     public int TagStartOf(int node) => _props[(_nodes[node].Props * PropWidth) + 2];
 
-    /// <summary>The node's tag in full: the handle replaced by its prefix, as the reader reports it for text.</summary>
-    /// <param name="node">A tagged node.</param>
+    /// <summary>Says where a node's tag is written and where its prefix and suffix are, without building the full tag.</summary>
+    /// <param name="node">A node.</param>
     /// <param name="start">Where the tag is written.</param>
     /// <param name="length">How long it is as written.</param>
-    /// <returns>The resolved tag, or <see langword="null"/> when the node has none.</returns>
-    public string? ResolveTag(int node, out int start, out int length)
+    /// <param name="prefixStart">The prefix offset in the text, or -1 for <c>!</c> and -2 for <c>tag:yaml.org,2002:</c>.</param>
+    /// <param name="prefixLength">The prefix length, zero for the built-in ones.</param>
+    /// <param name="suffixStart">Where the suffix starts.</param>
+    /// <param name="suffixLength">How long the suffix is.</param>
+    /// <returns><see langword="false"/> when the node has no tag.</returns>
+    public bool TryTagParts(int node, out int start, out int length, out int prefixStart, out int prefixLength, out int suffixStart, out int suffixLength)
     {
-        start = length = 0;
+        start = length = prefixStart = prefixLength = suffixStart = suffixLength = 0;
         int p = _nodes[node].Props;
         if (p < 0 || _props[(p * PropWidth) + 2] < 0)
         {
-            return null;
+            return false;
         }
 
         start = _props[(p * PropWidth) + 2];
         length = _props[(p * PropWidth) + 3];
-        ReadOnlySpan<byte> src = Text;
-        ReadOnlySpan<byte> raw = src.Slice(start, length);
-        ReadOnlySpan<byte> prefix = default;
-        ReadOnlySpan<byte> suffix;
+        ReadOnlySpan<byte> raw = Text.Slice(start, length);
         if (raw.Length >= 3 && raw[1] == (byte)'<')
         {
-            suffix = raw[2..^1];
-        }
-        else
-        {
-            int bang = raw.Length > 1 ? raw[1..].IndexOf((byte)'!') : -1;
-            int handleLength = bang < 0 ? 1 : bang + 2;
-            ReadOnlySpan<byte> handle = raw[..handleLength];
-            suffix = raw[handleLength..];
-            prefix = handleLength == 2 && raw[1] == (byte)'!' ? "tag:yaml.org,2002:"u8 : handleLength == 1 ? "!"u8 : default;
-            if (HasDirectives)
-            {
-                FindDirectivePrefix(node, handle, ref prefix);
-            }
+            suffixStart = start + 2;
+            suffixLength = raw.Length - 3;
+            return true;
         }
 
-        byte[] buffer = new byte[prefix.Length + suffix.Length];
-        int n = YamlReader.DecodePercent(buffer, prefix, suffix);
-        return System.Text.Encoding.UTF8.GetString(buffer, 0, n);
+        int bang = raw.Length > 1 ? raw[1..].IndexOf((byte)'!') : -1;
+        int handleLength = bang < 0 ? 1 : bang + 2;
+        suffixStart = start + handleLength;
+        suffixLength = raw.Length - handleLength;
+        prefixStart = handleLength == 2 && raw[1] == (byte)'!' ? -2 : handleLength == 1 ? -1 : 0;
+        if (HasDirectives)
+        {
+            FindDirectivePrefix(node, raw[..handleLength], ref prefixStart, ref prefixLength);
+        }
+
+        return true;
     }
 
     // Looks for the document's %TAG directive naming the handle; the directives sit between the previous
     // document and the "---" that starts this one.
-    private void FindDirectivePrefix(int node, ReadOnlySpan<byte> handle, ref ReadOnlySpan<byte> prefix)
+    private void FindDirectivePrefix(int node, ReadOnlySpan<byte> handle, ref int prefixStart, ref int prefixLength)
     {
         int d = 0;
         while (d + 1 < DocCount && _docs[d + 1].Root <= node)
@@ -181,12 +180,16 @@ internal sealed partial class DocState : IDisposable
 
         ReadOnlySpan<byte> src = Text;
         int from = d == 0 ? 0 : _docs[d - 1].EndPos;
-        ReadOnlySpan<byte> head = src.Slice(from, Math.Max(0, _docs[d].StartPos - from));
-        while (!head.IsEmpty)
+        int pos = from;
+        int end = from + Math.Max(0, _docs[d].StartPos - from);
+        while (pos < end)
         {
-            int eol = head.IndexOf((byte)'\n');
-            ReadOnlySpan<byte> line = eol < 0 ? head : head[..eol];
-            head = eol < 0 ? default : head[(eol + 1)..];
+            ReadOnlySpan<byte> rest0 = src[pos..end];
+            int eol = rest0.IndexOf((byte)'\n');
+            int lineLength = eol < 0 ? rest0.Length : eol;
+            ReadOnlySpan<byte> line = rest0[..lineLength];
+            int lineStart = pos;
+            pos += eol < 0 ? rest0.Length : eol + 1;
             if (!line.StartsWith("%TAG"u8))
             {
                 continue;
@@ -199,9 +202,10 @@ internal sealed partial class DocState : IDisposable
                 continue;
             }
 
-            rest = rest[h..].TrimStart(" \t"u8);
-            int e = rest.IndexOfAny((byte)' ', (byte)'\t', (byte)'\r');
-            prefix = e < 0 ? rest : rest[..e];
+            ReadOnlySpan<byte> after = rest[h..].TrimStart(" \t"u8);
+            int e = after.IndexOfAny((byte)' ', (byte)'\t', (byte)'\r');
+            prefixLength = e < 0 ? after.Length : e;
+            prefixStart = lineStart + (line.Length - after.Length);
             return;
         }
     }

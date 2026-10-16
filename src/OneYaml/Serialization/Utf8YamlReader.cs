@@ -70,12 +70,22 @@ internal struct TapeEvent
     public int TagRef;
 }
 
-// The tag of a recorded node: where it was written, and its full form, so a node delivered again from the tape can still say it.
-internal readonly struct TagRecord(int start, int length, string resolved)
+// The tag of a recorded node: where it was written and where its prefix and suffix are, so a node delivered again
+// from the tape can still say it. The full string is built only when asked for; keeping one per node would make a
+// long %TAG prefix cost its length once for every tagged node.
+internal readonly struct TagRecord(int start, int length, int prefixStart, int prefixLength, int suffixStart, int suffixLength)
 {
     public readonly int Start = start;
     public readonly int Length = length;
-    public readonly string Resolved = resolved;
+    public readonly int PrefixStart = prefixStart;
+    public readonly int PrefixLength = prefixLength;
+    public readonly int SuffixStart = suffixStart;
+    public readonly int SuffixLength = suffixLength;
+
+    // Whether both records name the same tag text, judged on bytes.
+    public bool SameTag(in TagRecord other, ReadOnlySpan<byte> src)
+        => PrefixStart == other.PrefixStart && PrefixLength == other.PrefixLength
+           && src.Slice(SuffixStart, SuffixLength).SequenceEqual(src.Slice(other.SuffixStart, other.SuffixLength));
 }
 
 // An anchor definition. Names are offsets into the source, so nothing is allocated per anchor.
@@ -125,6 +135,10 @@ internal sealed class AnchorBook
     public int FrameCount;
     public List<TagRecord>? Tags;
 
+    // The last full tag built, so a run of nodes that share a tag shares its string.
+    private string? _lastTag;
+    private int _lastTagIndex = -1;
+
     public AnchorBook()
     {
     }
@@ -145,10 +159,27 @@ internal sealed class AnchorBook
     /// <summary>A book for a tape recorded from a document, with its arrays left empty until an entry is added.</summary>
     public static AnchorBook ForDocument() => new(forDocument: true);
 
+    /// <summary>The full form of a recorded tag, built when asked for.</summary>
+    public string ResolveTag(int index, ReadOnlySpan<byte> src)
+    {
+        List<TagRecord> tags = Tags!;
+        TagRecord record = tags[index];
+        if (_lastTag is not null && _lastTagIndex < tags.Count && record.SameTag(tags[_lastTagIndex], src))
+        {
+            return _lastTag;
+        }
+
+        _lastTag = YamlReader.BuildTag(src, record.PrefixStart, record.PrefixLength, record.SuffixStart, record.SuffixLength);
+        _lastTagIndex = index;
+        return _lastTag;
+    }
+
     public void Reset()
     {
         Count = 0;
         Tags?.Clear();
+        _lastTag = null;
+        _lastTagIndex = -1;
         Array.Clear(Buckets);
         if (Values is not null)
         {
@@ -360,7 +391,7 @@ public ref partial struct Utf8YamlReader
                 return _r.GetResolvedTag();
             }
 
-            return _tagRef == 0 ? null : _book!.Tags![_tagRef - 1].Resolved;
+            return _tagRef == 0 ? null : _book!.ResolveTag(_tagRef - 1, _src);
         }
     }
 
@@ -884,7 +915,8 @@ public ref partial struct Utf8YamlReader
     private int AddTag(AnchorBook book)
     {
         List<TagRecord> tags = book.Tags ??= [];
-        tags.Add(new TagRecord(_r.TagStart, _r.RawTag.Length, _r.GetResolvedTag()!));
+        _r.GetTagParts(out int prefixStart, out int prefixLength, out int suffixStart, out int suffixLength);
+        tags.Add(new TagRecord(_r.TagStart, _r.RawTag.Length, prefixStart, prefixLength, suffixStart, suffixLength));
         return tags.Count;
     }
 

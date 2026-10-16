@@ -221,6 +221,20 @@ internal static class ScalarDecoder
                         value = (value << 4) | (uint)(h <= '9' ? h - '0' : (h | 0x20) - 'a' + 10);
                     }
 
+                    if (digits == 4 && value >= 0xD800 && value <= 0xDBFF)
+                    {
+                        // The scanner has checked that a low surrogate escape follows; the pair is one character.
+                        uint low = 0;
+                        for (int k = 0; k < 4; k++)
+                        {
+                            byte h = raw[i + 8 + k];
+                            low = (low << 4) | (uint)(h <= '9' ? h - '0' : (h | 0x20) - 'a' + 10);
+                        }
+
+                        o += EncodeUtf8(0x10000 + ((value - 0xD800) << 10) + (low - 0xDC00), dest[o..]);
+                        return i + 12;
+                    }
+
                     o += EncodeUtf8(value, dest[o..]);
                     return i + 2 + digits;
                 }

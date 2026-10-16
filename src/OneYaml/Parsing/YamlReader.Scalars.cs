@@ -381,6 +381,35 @@ internal ref partial struct YamlReader
             value = (value << 4) | (uint)HexValue(h);
         }
 
+        if (digits == 4 && value >= 0xD800 && value <= 0xDBFF)
+        {
+            // A high surrogate is only half a character: JSON writes characters outside the BMP as a pair of
+            // \u escapes, so the next escape must be the low half. Anything else is refused.
+            if (At(p + 6) != (byte)'\\' || At(p + 7) != (byte)'u')
+            {
+                throw Error("A high surrogate escape must be followed by a low surrogate escape.", p);
+            }
+
+            uint low = 0;
+            for (int i = 0; i < 4; i++)
+            {
+                byte h = At(p + 8 + i);
+                if (!IsHex(h))
+                {
+                    throw Error("An escape sequence needs hexadecimal digits.", p + 8 + i);
+                }
+
+                low = (low << 4) | (uint)HexValue(h);
+            }
+
+            if (low < 0xDC00 || low > 0xDFFF)
+            {
+                throw Error("A high surrogate escape must be followed by a low surrogate escape.", p);
+            }
+
+            return p + 12;
+        }
+
         if (value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF))
         {
             throw Error("An escape sequence does not name a valid character.", p);

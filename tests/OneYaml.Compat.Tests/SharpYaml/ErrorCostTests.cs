@@ -43,6 +43,40 @@ public class SharpYamlErrorCostTests
         Assert.True(b < a * 6, $"1,000 items allocated {a:N0} bytes and 4,000 allocated {b:N0}");
     }
 
+    [ThreadStatic]
+    private static int t_thrown;
+
+    // Exceptions thrown on this thread while the work runs. A quoted number that goes to the engine first and is caught
+    // afterwards throws once per item, and each one costs time in step with the text read so far; counting the throws
+    // does not depend on how fast the machine is.
+    private static int Thrown(Action work)
+    {
+        static void Count(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e) => t_thrown++;
+        t_thrown = 0;
+        AppDomain.CurrentDomain.FirstChanceException += Count;
+        try
+        {
+            work();
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= Count;
+        }
+
+        return t_thrown;
+    }
+
+    [Fact]
+    public void Quoted_numbers_are_read_without_an_exception_per_item()
+    {
+        string yaml = QuotedNumbers(2_000);
+        Allocated(QuotedNumbers(10));
+
+        int thrown = Thrown(() => Assert.Equal(2_000, Cs.YamlSerializer.Deserialize<List<int>>(yaml)!.Count));
+
+        Assert.True(thrown < 20, $"reading 2,000 quoted numbers threw {thrown} exceptions");
+    }
+
     [Fact]
     public void Quoted_numbers_read_the_same_values_as_the_real_library()
     {

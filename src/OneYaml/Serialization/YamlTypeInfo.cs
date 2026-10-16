@@ -146,7 +146,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
                 {
                     if (extension is not null)
                     {
-                        throw new InvalidOperationException($"Type '{typeof(T)}' has more than one extension data member.");
+                        throw new NotSupportedException($"Type '{typeof(T)}' has more than one extension data member.");
                     }
 
                     extension = props[i];
@@ -212,7 +212,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
                 {
                     if (names[buckets[b] - 1].AsSpan().SequenceEqual(names[i]))
                     {
-                        throw new InvalidOperationException($"Type '{typeof(T)}' has two members that read the key '{props[i].Name}'.");
+                        throw new NotSupportedException($"Type '{typeof(T)}' has two members that read the key '{props[i].Name}'.");
                     }
 
                     b = (b + 1) & (size - 1);
@@ -221,7 +221,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
                 buckets[b] = i + 1;
                 if (ignoreCase is not null && !ignoreCase.TryAdd(props[i].Name, i))
                 {
-                    throw new InvalidOperationException($"Type '{typeof(T)}' has two members that read the key '{props[i].Name}' when case is ignored.");
+                    throw new NotSupportedException($"Type '{typeof(T)}' has two members that read the key '{props[i].Name}' when case is ignored.");
                 }
             }
 

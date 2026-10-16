@@ -25,6 +25,26 @@ public class KitInputTests
     }
 
     [Fact]
+    public void A_product_part_writes_every_combination_with_the_last_list_varying_fastest()
+    {
+        Assert.Equal("<a1x>\n<a2x>\n<a3x>\n<b1x>\n<b2x>\n<b3x>\n", Build("""
+            [{"product": {"prefix": "<", "suffix": ">\n", "choices": [["a", "b"], ["1", "2", "3"], ["x"]]}}]
+            """));
+        Assert.Equal("é€\nü\n", Build("""[{"product": {"suffix": "\n", "choices": [["é€", "ü"]]}}]"""));
+        Assert.Equal("\n\n", Build("""[{"product": {"suffix": "\n", "choices": [[""], [""]]}}, {"text": "\n"}]"""));
+    }
+
+    [Fact]
+    public void A_product_is_sized_before_it_is_built()
+    {
+        // 2^30 combinations: refused from the lists, without building one.
+        string lists = string.Join(",", Enumerable.Repeat("[\"a\", \"b\"]", 30));
+        using JsonDocument doc = JsonDocument.Parse("[{\"product\": {\"choices\": [" + lists + "]}}]");
+
+        Assert.Throws<InvalidOperationException>(() => KitInput.Build(doc.RootElement));
+    }
+
+    [Fact]
     public void A_repeat_that_spans_several_pieces_is_exact()
     {
         using JsonDocument doc = JsonDocument.Parse("""[{"text": "abc", "repeat": 1000003}]""");
@@ -40,6 +60,14 @@ public class KitInputTests
     [InlineData("""[{"numbers": {"count": 2, "step": 2}}]""")]
     [InlineData("""[{"numbers": {"start": 2}}]""")]
     [InlineData("""[{"text": "x", "repeat": 70000000}]""")]
+    [InlineData("""[{"product": {"prefix": "x"}}]""")]
+    [InlineData("""[{"product": {"choices": []}}]""")]
+    [InlineData("""[{"product": {"choices": [[]]}}]""")]
+    [InlineData("""[{"product": {"choices": [[1]]}}]""")]
+    [InlineData("""[{"product": {"choices": ["a"]}}]""")]
+    [InlineData("""[{"product": {"choices": [["a"]], "step": 1}}]""")]
+    [InlineData("""[{"product": {"choices": [["a"]]}, "text": "x"}]""")]
+    [InlineData("""[{"product": {"prefix": 1, "choices": [["a"]]}}]""")]
     [InlineData("""[]""")]
     [InlineData("""{"text": "x"}""")]
     public void An_unknown_or_invalid_recipe_fails_instead_of_being_skipped(string recipe)

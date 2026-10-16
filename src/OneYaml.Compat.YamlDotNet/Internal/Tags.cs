@@ -38,13 +38,20 @@ internal static class Tags
         return new TagName(text);
     }
 
-    // A written tag resolved with the handles a document declares: !!x and !x use the default prefixes unless redeclared, !h!x needs a declared handle.
-    public static TagName Resolve(ReadOnlySpan<byte> raw, Dictionary<string, string> handles)
+    // A written tag resolved with the handles a document declares: !!x and !x use the default prefixes unless redeclared,
+    // !h!x needs a declared handle. The result is the prefix a directive gave (or none) and the rest, whose text joined
+    // is the full tag.
+    public static (TagPrefix? Prefix, string Suffix) Split(ReadOnlySpan<byte> raw, Dictionary<string, TagPrefix>? handles)
     {
+        if (handles is null)
+        {
+            return (null, FromRaw(raw).Value!);
+        }
+
         string text = Encoding.UTF8.GetString(raw);
         if (text.StartsWith("!<", StringComparison.Ordinal))
         {
-            return FromRaw(raw);
+            return (null, FromRaw(raw).Value!);
         }
 
         string handle;
@@ -59,12 +66,12 @@ internal static class Tags
             (handle, suffix) = second < 0 ? ("!", text[1..]) : (text[..(second + 1)], text[(second + 1)..]);
         }
 
-        if (handles.TryGetValue(handle, out string? prefix))
+        if (handles.TryGetValue(handle, out TagPrefix? prefix))
         {
-            return new TagName(prefix + Uri.UnescapeDataString(suffix));
+            return (prefix, Uri.UnescapeDataString(suffix));
         }
 
-        return FromRaw(raw);
+        return (null, FromRaw(raw).Value!);
     }
 
     // The form written in a document: !!str for the core tags, !local as is, anything else verbatim.

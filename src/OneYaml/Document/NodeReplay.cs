@@ -366,26 +366,14 @@ internal static class NodeReplay
             return 0;
         }
 
-        // A run of nodes with one tag shares one string: the same text in one subtree resolves the same way.
-        List<TagRecord> tags = book.Tags ??= [];
-        ReadOnlySpan<byte> raw = s.RawTag(node);
-        if (tags.Count > 0)
-        {
-            TagRecord last = tags[^1];
-            if (s.Text.Slice(last.Start, last.Length).SequenceEqual(raw))
-            {
-                tags.Add(new TagRecord(s.TagStartOf(node), raw.Length, last.Resolved));
-                return tags.Count;
-            }
-        }
-
-        string? resolved = s.ResolveTag(node, out int start, out int length);
-        if (resolved is null)
+        if (!s.TryTagParts(node, out int start, out int length, out int ps, out int pl, out int ss, out int sl))
         {
             return 0;
         }
 
-        tags.Add(new TagRecord(start, length, resolved));
+        // Only offsets are kept: the full tag is built when the reader is asked for it.
+        List<TagRecord> tags = book.Tags ??= [];
+        tags.Add(new TagRecord(start, length, ps, pl, ss, sl));
         return tags.Count;
     }
 

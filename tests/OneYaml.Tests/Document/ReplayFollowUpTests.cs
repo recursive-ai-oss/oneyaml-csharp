@@ -172,11 +172,10 @@ public class ReplayFollowUpTests
     }
 }
 
-/// <summary>The cost of try-reads that miss, measured as processor time in a group that runs alone.</summary>
-[Collection(TimingGroup.Name)]
+/// <summary>The work of try-reads that miss, counted as bytes allocated.</summary>
 public class TryReadMissCostTests
 {
-    private static double SecondsPerMiss(int count)
+    private static double BytesPerMiss(int count)
     {
         string yaml = "items:\n" + string.Concat(Enumerable.Repeat("  - 99999999999\n", count));
         using YamlDocument doc = YamlDocument.Parse(yaml);
@@ -188,28 +187,23 @@ public class TryReadMissCostTests
             Assert.False(items[i].TryGetValue(out int _));
         }
 
-        double best = double.MaxValue;
-        for (int round = 0; round < 5; round++)
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < count; i++)
         {
-            CpuClock clock = CpuClock.Start();
-            for (int i = 0; i < count; i++)
-            {
-                Assert.False(items[i].TryGetValue(out int _));
-            }
-
-            best = Math.Min(best, clock.Elapsed.TotalSeconds);
+            Assert.False(items[i].TryGetValue(out int _));
         }
 
-        return best / count;
+        return (GC.GetAllocatedBytesForCurrentThread() - before) / (double)count;
     }
 
     [Fact]
-    public void A_try_read_of_an_out_of_range_number_costs_the_same_in_a_small_and_a_large_document()
+    public void A_try_read_of_an_out_of_range_number_allocates_the_same_in_a_small_and_a_large_document()
     {
-        // The kind check cannot rule these out, so the number converter refuses them. A located error looks up
-        // the line, column and path in the text before the node, which made each miss grow with the document.
-        double small = SecondsPerMiss(2_000);
-        double large = SecondsPerMiss(8_000);
-        Assert.True(large < small * 2.5, $"{small * 1e6:N1} us per miss at 2,000 items, {large * 1e6:N1} us at 8,000");
+        // The kind check cannot rule these out, so the number converter refuses them. A located error builds the
+        // line, column and path from the text before the node, which made each miss grow with the document.
+        double small = BytesPerMiss(2_000);
+        double large = BytesPerMiss(8_000);
+        Assert.True(large < small * 1.5 + 64, $"{small:N1} bytes per miss at 2,000 items, {large:N1} at 8,000");
+        Assert.True(large < 8192, $"{large:N1} bytes per miss at 8,000 items");
     }
 }

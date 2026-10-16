@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace OneYaml.Serialization.Metadata;
 
@@ -128,7 +129,7 @@ public abstract class YamlPropertyInfo<TDeclaring> : YamlPropertyInfo
     internal abstract void AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite);
 
     // For the extension member: writes the entries as mapping entries.
-    internal abstract void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance);
+    internal abstract void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey);
 }
 
 /// <summary>Assigns a member of a value type.</summary>
@@ -330,7 +331,9 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
         }
     }
 
-    internal override void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance)
+    // A key that a member takes, or that names the derived type, is not written from the dictionary: written twice it would
+    // make a mapping that reads back as a duplicate key, and a reader hands that key to the member, never to the dictionary.
+    internal override void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey)
     {
         if ((IDictionary<string, object?>?)(object?)_values.Getter!(instance) is not { } entries)
         {
@@ -339,6 +342,11 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
 
         foreach (KeyValuePair<string, object?> entry in entries)
         {
+            if (string.Equals(entry.Key, discriminatorKey, StringComparison.Ordinal) || info.Find(Encoding.UTF8.GetBytes(entry.Key)) >= 0)
+            {
+                continue;
+            }
+
             writer.WritePropertyName(entry.Key);
             _extensionConverter!.WriteValue(writer, entry.Value, _options!);
         }
@@ -662,7 +670,7 @@ public static class YamlMetadataServices
     /// <param name="options">The options the converter will be used with.</param>
     /// <param name="converter">An instance of the converter type.</param>
     /// <returns>The converter.</returns>
-    /// <exception cref="InvalidOperationException">The converter cannot convert the type.</exception>
+    /// <exception cref="NotSupportedException">The converter cannot convert the type.</exception>
     public static YamlConverter<T> GetAttributeConverter<T>(YamlSerializerOptions options, YamlConverter converter)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -670,17 +678,17 @@ public static class YamlMetadataServices
         YamlConverter? chosen = converter;
         if (!converter.CanConvert(typeof(T)))
         {
-            throw new InvalidOperationException($"The converter {converter.GetType()} named by YamlConverter cannot convert '{typeof(T)}'.");
+            throw new NotSupportedException($"The converter {converter.GetType()} named by YamlConverter cannot convert '{typeof(T)}'.");
         }
 
         if (converter is YamlConverterFactory factory)
         {
             chosen = factory.CreateConverter(typeof(T), options)
-                ?? throw new InvalidOperationException($"The converter factory {converter.GetType()} named by YamlConverter made no converter for '{typeof(T)}'.");
+                ?? throw new NotSupportedException($"The converter factory {converter.GetType()} named by YamlConverter made no converter for '{typeof(T)}'.");
         }
 
         return chosen as YamlConverter<T>
-            ?? throw new InvalidOperationException($"The converter {chosen.GetType()} named by YamlConverter cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
+            ?? throw new NotSupportedException($"The converter {chosen.GetType()} named by YamlConverter cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
     }
 
     /// <summary>Finds a converter in <see cref="YamlSerializerOptions.Converters"/> that handles the type, which takes precedence over generated metadata.</summary>
@@ -705,7 +713,7 @@ public static class YamlMetadataServices
 
             return chosen is YamlConverter<T> typed
                 ? new YamlTypeInfo<T>(options, typed)
-                : throw new InvalidOperationException($"The converter {chosen.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
+                : throw new NotSupportedException($"The converter {chosen.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
         }
 
         return null;

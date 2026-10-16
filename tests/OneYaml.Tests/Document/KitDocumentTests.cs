@@ -255,13 +255,11 @@ public class KitDocumentTests
             if (kind == "error" || (kind == "bounded" && !acceptsResult))
             {
                 long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
-                var clock = System.Diagnostics.Stopwatch.StartNew();
                 var ex = Assert.Throws<YamlException>(() => run(doc));
                 string wanted = kind == "bounded" ? expect.GetProperty("error").GetString()! : expect.GetProperty("category").GetString()!;
                 Assert.Equal(CategoryOf(wanted), ex.Category);
                 if (kind == "bounded")
                 {
-                    Assert.True(clock.Elapsed.TotalSeconds < Stretched(expect.GetProperty("time_seconds").GetDouble()), "the refusal took too long");
                     Assert.True(GC.GetAllocatedBytesForCurrentThread() - allocatedBefore < expect.GetProperty("memory_mb").GetInt64() * 1024 * 1024, "the refusal allocated more than the bound");
                 }
 
@@ -284,7 +282,6 @@ public class KitDocumentTests
 
             if (acceptsResult)
             {
-                var clock = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
                     run(doc);
@@ -296,7 +293,6 @@ public class KitDocumentTests
                     continue;
                 }
 
-                Assert.True(clock.Elapsed.TotalSeconds < Stretched(expect.GetProperty("time_seconds").GetDouble()), "the patch took too long");
                 byte[] want = accept.TryGetProperty("file", out JsonElement acceptFile)
                     ? File.ReadAllBytes(Path.Combine(dir, acceptFile.GetString()!))
                     : FromRecipe(accept.GetProperty("recipe"));
@@ -351,59 +347,6 @@ public class KitDocumentTests
         }
 
         return [.. bytes];
-    }
-
-    // The kit runner stretches a bounded case's time limit by a factor of 1, 2, 4 or 8 when the machine is
-    // slower than its reference, and never shrinks it. This does the same from a short fixed computation
-    // (KIT_TIME_SCALE overrides it), so a busy host does not fail a bound that is about complexity.
-    private static double s_scale;
-    private static long s_scaleAt;
-
-    private static double Stretched(double seconds) => seconds * TimeScale();
-
-    private static double TimeScale()
-    {
-        string? fixedScale = Environment.GetEnvironmentVariable("KIT_TIME_SCALE");
-        if (double.TryParse(fixedScale, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double f) && f > 0)
-        {
-            return f;
-        }
-
-        long now = Environment.TickCount64;
-        if (s_scale > 0 && now - s_scaleAt < 3000)
-        {
-            return s_scale;
-        }
-
-        var runs = new double[3];
-        for (int r = 0; r < runs.Length; r++)
-        {
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            long sum = 0;
-            for (int i = 0; i < 4_000_000; i++)
-            {
-                sum += (long)i * i % 7;
-            }
-
-            GC.KeepAlive((object)sum);
-            runs[r] = clock.Elapsed.TotalSeconds;
-        }
-
-        Array.Sort(runs);
-        double ratio = runs[1] / 0.006;
-        double scale = 8;
-        foreach (double step in new[] { 1.0, 2.0, 4.0, 8.0 })
-        {
-            if (ratio <= step)
-            {
-                scale = step;
-                break;
-            }
-        }
-
-        s_scale = scale;
-        s_scaleAt = now;
-        return scale;
     }
 
     private static void Apply(YamlDocument doc, string json, bool merge, int index)

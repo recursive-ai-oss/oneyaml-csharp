@@ -494,6 +494,47 @@ internal ref partial struct YamlReader
         return _src[_tagDirectives![(_tagPrefix * 4) + 2].._tagDirectives[(_tagPrefix * 4) + 3]];
     }
 
+    /// <summary>
+    /// Says where the current tag's prefix and suffix are, so that a caller can keep four integers per node and build
+    /// the full tag only if it is asked for. A prefix start of -1 means the built-in <c>!</c> and -2 means
+    /// <c>tag:yaml.org,2002:</c>; otherwise the prefix is the text at that offset.
+    /// </summary>
+    internal readonly void GetTagParts(out int prefixStart, out int prefixLength, out int suffixStart, out int suffixLength)
+    {
+        suffixStart = _tagSuffixStart;
+        suffixLength = _tagSuffixEnd - _tagSuffixStart;
+        if (_tagVerbatim)
+        {
+            prefixStart = 0;
+            prefixLength = 0;
+        }
+        else if (_tagPrefix < 0)
+        {
+            prefixStart = _tagPrefix;
+            prefixLength = 0;
+        }
+        else
+        {
+            prefixStart = _tagDirectives![(_tagPrefix * 4) + 2];
+            prefixLength = _tagDirectives[(_tagPrefix * 4) + 3] - prefixStart;
+        }
+    }
+
+    /// <summary>Builds a full tag from the parts that <see cref="GetTagParts"/> gave.</summary>
+    internal static string BuildTag(ReadOnlySpan<byte> src, int prefixStart, int prefixLength, int suffixStart, int suffixLength)
+    {
+        ReadOnlySpan<byte> prefix = prefixStart switch
+        {
+            -2 => "tag:yaml.org,2002:"u8,
+            -1 => "!"u8,
+            _ => src.Slice(prefixStart, prefixLength),
+        };
+        ReadOnlySpan<byte> suffix = src.Slice(suffixStart, suffixLength);
+        byte[] buffer = new byte[prefix.Length + suffix.Length];
+        int n = DecodePercent(buffer, prefix, suffix);
+        return Encoding.UTF8.GetString(buffer, 0, n);
+    }
+
     // Writes prefix then suffix with escaped ASCII characters expanded; a UTF-8 sequence stays as written.
     internal static int DecodePercent(Span<byte> buffer, ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
     {

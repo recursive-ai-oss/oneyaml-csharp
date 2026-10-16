@@ -269,7 +269,7 @@ internal sealed class NodeBinder
                 }
             }
 
-            throw Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
+            throw Error(c, node, $"Encountered an unresolved tag '{Oy.YamlException.Excerpt(tag.Value!, Oy.YamlException.MessageExcerpt)}'");
         }
 
         bool plain = (Oy.Parsing.ScalarStyle)s.Node(node).Style == Oy.Parsing.ScalarStyle.Plain;
@@ -286,7 +286,7 @@ internal sealed class NodeBinder
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Core.YamlException UnresolvedTag(BindContext c, int node, TagName tag) =>
-        Error(c, node, $"Encountered an unresolved tag '{tag.Value}'");
+        Error(c, node, $"Encountered an unresolved tag '{Oy.YamlException.Excerpt(tag.Value!, Oy.YamlException.MessageExcerpt)}'");
 
     private static object? BindScalar(BindContext c, int node, Type type, TagName tag)
     {
