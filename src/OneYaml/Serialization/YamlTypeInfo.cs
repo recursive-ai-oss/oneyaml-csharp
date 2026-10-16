@@ -58,7 +58,7 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
         : base(typeof(T), options)
     {
         _values = values;
-        Converter = new ObjectConverter<T>(this);
+        Converter = values.ConstructorCreator is not null ? new ConstructedObjectConverter<T>(this) : new ObjectConverter<T>(this);
     }
 
     /// <summary>The converter for the type.</summary>

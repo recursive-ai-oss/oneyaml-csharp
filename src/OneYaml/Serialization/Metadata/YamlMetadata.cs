@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace OneYaml.Serialization.Metadata;
 
@@ -253,8 +254,9 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
         }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override void ReadBoxed(ref Utf8YamlReader reader, object?[] slots) =>
-        slots[Slot] = _converter!.ReadValue(ref reader, _options!);
+        slots[Slot] = _converter!.ReadSlot(ref reader, _options!);
 
     internal override void Assign(ref TDeclaring instance, object? value)
     {

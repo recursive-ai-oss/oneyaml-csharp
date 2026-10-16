@@ -116,6 +116,24 @@ public abstract class YamlConverter<T> : YamlConverter
         return Read(ref reader, typeof(T), options);
     }
 
+    // ReadValue for the constructor path, which nests deepest: fully optimised from the start, so its frame is the small one
+    // whether the document is the first the process reads or the thousandth.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    internal T? ReadSlot(ref Utf8YamlReader reader, YamlSerializerOptions options)
+    {
+        if (!HandleNull && reader.IsNull)
+        {
+            if (s_nonNullableValueType)
+            {
+                throw NullNotAllowed(in reader);
+            }
+
+            return default;
+        }
+
+        return Read(ref reader, typeof(T), options);
+    }
+
     // The message is built out of line: ReadValue is on the call stack once for every level of a nested document.
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     private static YamlException NullNotAllowed(in Utf8YamlReader reader) =>

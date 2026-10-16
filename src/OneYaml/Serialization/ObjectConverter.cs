@@ -153,11 +153,6 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         int start = reader.Start;
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);
-        if (info.UsesConstructor)
-        {
-            return ReadThroughConstructor(ref reader, options, info, start, ref seen, ref merged);
-        }
-
         T instance = info.CreateInstance();
         ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, merging: false);
         if (info.RequiredCount > 0)
@@ -168,15 +163,19 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         return instance;
     }
 
-    // Kept apart from Read so that the frame of the common case, which every level of a nested document passes through,
-    // holds only what that case needs.
-    private T? ReadThroughConstructor(ref Utf8YamlReader reader, YamlSerializerOptions options, YamlTypeInfo<T> info, int start, ref MemberSet seen, ref MemberSet merged)
+    // What follows the members, out of line so that its locals are not in the frame that recurses.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static T? Construct(in Utf8YamlReader reader, YamlTypeInfo<T> info, int start, object?[] slots, ref MemberSet seen, ref MemberSet merged)
     {
-        object?[] slots = info.NewArguments();
-        T instance = default!;
-        ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: false);
-        CheckRequired(in reader, start, ref seen, ref merged);
-        instance = info.CreateWith(slots);
+        foreach (YamlPropertyInfo<T> p in info.Props)
+        {
+            if (p.IsRequired && !seen.Contains(p.Index) && !merged.Contains(p.Index))
+            {
+                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start);
+            }
+        }
+
+        T instance = info.CreateWith(slots);
         foreach (YamlPropertyInfo<T> p in info.Props)
         {
             if (p.ParameterIndex < 0 && (seen.Contains(p.Index) || merged.Contains(p.Index)))
@@ -186,6 +185,78 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
 
         return instance;
+    }
+
+    // The loop of the constructor path: it hands each value to its member and does nothing else.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal void ReadMembersBoxed(
+        ref Utf8YamlReader reader,
+        YamlSerializerOptions options,
+        ref T instance,
+        object?[] slots,
+        ref MemberSet seen,
+        ref MemberSet merged)
+    {
+        var skipped = default(SkippedKeys);
+        YamlPropertyInfo<T>? p;
+        while ((p = NextBoxed(ref reader, options, ref instance, slots, ref seen, ref merged, ref skipped)) is not null)
+        {
+            p.ReadBoxed(ref reader, slots);
+        }
+    }
+
+    // Moves to the value of the next key that a member takes and returns the member; null at the end of the mapping.
+    // The same walk as ReadMembers makes, apart from the frame it leaves to the loop above.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private YamlPropertyInfo<T>? NextBoxed(
+        ref Utf8YamlReader reader,
+        YamlSerializerOptions options,
+        ref T instance,
+        object?[] slots,
+        ref MemberSet seen,
+        ref MemberSet merged,
+        ref SkippedKeys skipped)
+    {
+        YamlTypeInfo<T> info = _info;
+        while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
+        {
+            if (reader.Type != YamlTokenType.Scalar)
+            {
+                throw CollectionKey(in reader);
+            }
+
+            if (ConverterGuards.IsMergeKey(in reader))
+            {
+                if (!reader.Read())
+                {
+                    throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+                }
+
+                ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                continue;
+            }
+
+            int keyStart = reader.Start;
+            int index = FindMember(ref reader, info);
+            if (index < 0)
+            {
+                SkipUnmapped(ref reader, options, ref skipped, keyStart);
+                continue;
+            }
+
+            if (!reader.Read())
+            {
+                throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+            }
+
+            if (Claim(ref reader, ref seen, ref merged, index, merging: false, keyStart))
+            {
+                return info.Props[index];
+            }
+        }
+
+        skipped.Release();
+        return null;
     }
 
     private void ReadMembers(
@@ -334,7 +405,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     // The messages are built out of line: a message builder in the reading methods would enlarge their frames, and the
     // frames of the levels above add up on a deeply nested input.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static YamlException NotCreatable(in Utf8YamlReader reader) =>
+    internal static YamlException NotCreatable(in Utf8YamlReader reader) =>
         reader.CreateException($"{ConverterGuards.DescribeType(typeof(T))} cannot be created: it has no public constructor to bind through.");
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -380,5 +451,50 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start);
             }
         }
+    }
+}
+
+// Binds a mapping to a type through its constructor. Every level's arguments are held until the innermost value is read, so
+// this is the path that nests deepest on the stack. The runtime compiles a method with a loop first as instrumented code whose
+// frame is twice the size, and a document that is read once never gets past that code, so the methods that recurse here are
+// compiled fully optimised from the start, and each holds only what its own work needs. It is a class of its own, not a
+// subclass of ObjectConverter: a class that can be derived from looks up its type arguments through its parent, at a cost
+// for every call.
+internal sealed class ConstructedObjectConverter<T> : YamlConverter<T>
+{
+    private readonly YamlTypeInfo<T> _info;
+    private readonly ObjectConverter<T> _plain;
+
+    public ConstructedObjectConverter(YamlTypeInfo<T> info)
+    {
+        _info = info;
+        _plain = new ObjectConverter<T>(info);
+    }
+
+    public override void Write(Utf8YamlEmitter writer, T value, YamlSerializerOptions options) => _plain.Write(writer, value, options);
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    public override T? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        if (reader.Type != YamlTokenType.MappingStart)
+        {
+            throw ConverterGuards.Expected(in reader, "a mapping", typeof(T));
+        }
+
+        ConverterGuards.EnsureStack(in reader);
+        YamlTypeInfo<T> info = _info;
+        if (!info.CanCreate)
+        {
+            throw ObjectConverter<T>.NotCreatable(in reader);
+        }
+
+        info.EnsureConfigured();
+        int start = reader.Start;
+        var seen = new MemberSet(info.Props.Length);
+        var merged = new MemberSet(info.Props.Length);
+        object?[] slots = info.NewArguments();
+        T instance = default!;
+        _plain.ReadMembersBoxed(ref reader, options, ref instance, slots, ref seen, ref merged);
+        return ObjectConverter<T>.Construct(in reader, info, start, slots, ref seen, ref merged);
     }
 }
