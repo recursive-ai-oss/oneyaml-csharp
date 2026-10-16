@@ -9,7 +9,8 @@ namespace OneYaml.Documents;
 /// <param name="Nl">The line break the document uses nearby.</param>
 /// <param name="Step">Columns a nested mapping is indented by.</param>
 /// <param name="SeqOffset">Columns a block sequence under a key is indented by (0 when its dashes are flush with the key).</param>
-internal readonly record struct Layout(string Nl, int Step, int SeqOffset);
+/// <param name="Mode">How strictly new plain scalars are checked: by the Core schema alone, or also against YAML 1.1 readings.</param>
+internal readonly record struct Layout(string Nl, int Step, int SeqOffset, StyleMode Mode = StyleMode.Edit);
 
 /// <summary>Writes values as YAML text with explicit stacks, so nesting depth costs no CLR stack.</summary>
 internal static class ValueWriter
@@ -30,8 +31,9 @@ internal static class ValueWriter
     /// <param name="ctx">Where the scalar sits.</param>
     /// <param name="parentIndent">Column of the owning key or dash, for block scalars.</param>
     /// <param name="contentIndent">Column of a block scalar's lines.</param>
+    /// <param name="mode">Whose reading a plain scalar must survive.</param>
     /// <returns>The style used.</returns>
-    public static ScalarWriteStyle WriteScalar(ByteBuffer o, in VNode n, ScalarWriteStyle preferred, EmitContext ctx, int parentIndent, int contentIndent)
+    public static ScalarWriteStyle WriteScalar(ByteBuffer o, in VNode n, ScalarWriteStyle preferred, EmitContext ctx, int parentIndent, int contentIndent, StyleMode mode = StyleMode.Edit)
     {
         if (n.Kind != VKind.Scalar)
         {
@@ -45,7 +47,7 @@ internal static class ValueWriter
         }
 
         var w = new Utf8YamlWriter(o);
-        return w.WriteString(n.Text, preferred, ctx, StyleMode.Edit, parentIndent, contentIndent);
+        return w.WriteString(n.Text, preferred, ctx, mode, parentIndent, contentIndent);
     }
 
     /// <summary>
@@ -59,9 +61,10 @@ internal static class ValueWriter
     /// <param name="ctx">A key context.</param>
     /// <param name="col">Column of the entry.</param>
     /// <param name="step">Columns a nested mapping is indented by.</param>
-    public static void WriteKey(ByteBuffer o, in VNode key, ScalarWriteStyle preferred, EmitContext ctx, int col, int step)
+    /// <param name="mode">Whose reading a plain scalar must survive.</param>
+    public static void WriteKey(ByteBuffer o, in VNode key, ScalarWriteStyle preferred, EmitContext ctx, int col, int step, StyleMode mode = StyleMode.Edit)
     {
-        ScalarWriteStyle used = WriteScalar(o, key, preferred, ctx, col, col + step);
+        ScalarWriteStyle used = WriteScalar(o, key, preferred, ctx, col, col + step, mode);
         bool flow = ctx == EmitContext.FlowKey;
         if (used != ScalarWriteStyle.ExplicitKeyRequired)
         {
@@ -75,7 +78,7 @@ internal static class ValueWriter
 
         // The explicit form has no length limit, so the key is written as a value would be.
         o.Write("? "u8);
-        ScalarWriteStyle k = WriteScalar(o, key, ScalarWriteStyle.Plain, flow ? EmitContext.FlowValue : EmitContext.BlockValue, col, col + step);
+        ScalarWriteStyle k = WriteScalar(o, key, ScalarWriteStyle.Plain, flow ? EmitContext.FlowValue : EmitContext.BlockValue, col, col + step, mode);
         if (flow)
         {
             o.Write((byte)' ');
@@ -138,7 +141,7 @@ internal static class ValueWriter
             stack[top] = f;
             if (f.IsMap)
             {
-                WriteKey(o, v[next], stack.Count == 1 ? keyStyle : ScalarWriteStyle.Plain, EmitContext.BlockKey, f.Col, layout.Step);
+                WriteKey(o, v[next], stack.Count == 1 ? keyStyle : ScalarWriteStyle.Plain, EmitContext.BlockKey, f.Col, layout.Step, layout.Mode);
                 next += v[next].Size;
             }
             else
@@ -169,7 +172,7 @@ internal static class ValueWriter
                     want = ScalarWriteStyle.Plain;
                 }
 
-                ScalarWriteStyle used = WriteScalar(o, val, want, EmitContext.BlockValue, f.Col, f.Col + layout.Step);
+                ScalarWriteStyle used = WriteScalar(o, val, want, EmitContext.BlockValue, f.Col, f.Col + layout.Step, layout.Mode);
                 if (!EndsWithBreak(used))
                 {
                     o.Write((byte)'\n');
@@ -202,7 +205,8 @@ internal static class ValueWriter
     /// <param name="o">The destination.</param>
     /// <param name="v">The value.</param>
     /// <param name="root">The node's index in the tree.</param>
-    public static void WriteFlow(ByteBuffer o, ValueTree v, int root)
+    /// <param name="mode">Whose reading a plain scalar must survive.</param>
+    public static void WriteFlow(ByteBuffer o, ValueTree v, int root, StyleMode mode = StyleMode.Edit)
     {
         var stack = new List<Frame>();
         int next = root;
@@ -227,7 +231,7 @@ internal static class ValueWriter
 
                 if (f.IsMap)
                 {
-                    WriteKey(o, v[next], ScalarWriteStyle.Plain, EmitContext.FlowKey, 0, 0);
+                    WriteKey(o, v[next], ScalarWriteStyle.Plain, EmitContext.FlowKey, 0, 0, mode);
                     o.Write(": "u8);
                     next += v[next].Size;
                     f.Remaining -= 2;
@@ -252,7 +256,7 @@ internal static class ValueWriter
             }
             else if (n.Kind == VKind.Scalar)
             {
-                WriteScalar(o, n, ScalarWriteStyle.Plain, EmitContext.FlowValue, 0, 0);
+                WriteScalar(o, n, ScalarWriteStyle.Plain, EmitContext.FlowValue, 0, 0, mode);
                 next++;
             }
             else

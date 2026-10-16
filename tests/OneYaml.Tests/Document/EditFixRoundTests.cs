@@ -190,8 +190,8 @@ public class EditFixRoundTests
     [Theory]
     [InlineData("--- # c\n")]
     [InlineData("---\n")]
-    [InlineData("--- !!map\n")]
-    [InlineData("--- !!map # c\n")]
+    [InlineData("--- !!str\n")]
+    [InlineData("--- !!null # c\n")]
     public void Adding_below_the_root_of_a_document_that_is_only_a_marker_is_refused_and_changes_nothing(string yaml)
     {
         foreach (Action<YamlDocument> add in new Action<YamlDocument>[]

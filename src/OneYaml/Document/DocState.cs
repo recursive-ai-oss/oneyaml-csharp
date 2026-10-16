@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using OneYaml.Emitting;
 using OneYaml.Parsing;
 using OneYaml.Text;
 
@@ -42,6 +43,9 @@ internal sealed partial class DocState : IDisposable
 
     /// <summary>Where the edits made on the way to the next state are noted, when views of the document exist.</summary>
     public EditTrace? Trace { get; set; }
+
+    /// <summary>How strictly plain text the edit engine writes is checked.</summary>
+    internal StyleMode EditMode { get; private set; } = StyleMode.Edit;
 
     /// <summary>Whether a mapping may hold the same key twice.</summary>
     public bool AllowDuplicateKeys { get; private set; }
@@ -179,12 +183,13 @@ internal sealed partial class DocState : IDisposable
     /// <param name="hasBom">Whether the stream had a byte order mark.</param>
     /// <param name="limits">The limits to enforce.</param>
     /// <param name="allowDuplicateKeys">Whether a mapping may hold the same key twice.</param>
+    /// <param name="quoteYaml11Lookalikes">Whether new plain text that a YAML 1.1 reader would misread is quoted.</param>
     /// <returns>The new state.</returns>
-    public static DocState Build(ReadOnlySpan<byte> utf8, YamlEncoding encoding, bool hasBom, YamlLimits limits, bool allowDuplicateKeys)
+    public static DocState Build(ReadOnlySpan<byte> utf8, YamlEncoding encoding, bool hasBom, YamlLimits limits, bool allowDuplicateKeys, bool quoteYaml11Lookalikes = false)
     {
         byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(utf8.Length, 1));
         utf8.CopyTo(buf);
-        var state = new DocState(buf, utf8.Length, encoding, hasBom, allowDuplicateKeys);
+        var state = new DocState(buf, utf8.Length, encoding, hasBom, allowDuplicateKeys) { EditMode = quoteYaml11Lookalikes ? StyleMode.EditQuoting : StyleMode.Edit };
         try
         {
             state.Parse(limits);
@@ -566,7 +571,7 @@ internal sealed partial class DocState : IDisposable
         int a = reader.HasAnchor ? reader.AnchorStart : -1;
         int aLen = reader.HasAnchor ? reader.Anchor.Length : 0;
         int t = reader.HasTag ? reader.TagStart : -1;
-        int tagClass = reader.HasTag ? (int)Utf8YamlReader.ClassifyResolvedTag(reader.GetResolvedTag()) : 0;
+        int tagClass = reader.HasTag ? (int)reader.GetTagClass() : 0;
         int tLen = reader.HasTag ? reader.RawTag.Length : 0;
         int first = int.MaxValue;
         if (a >= 0)

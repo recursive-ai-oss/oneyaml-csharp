@@ -63,6 +63,13 @@ public sealed record YamlDocumentOptions
     /// </summary>
     public bool AllowDuplicateKeys { get; init; }
 
+    /// <summary>
+    /// Quote a new plain string that a YAML 1.1 reader would take for something else (<c>yes</c>, <c>off</c>,
+    /// <c>2026-01-01</c>, <c>0x10</c>), the way <see cref="YamlSerializer"/> does. By default an edit keeps such text
+    /// plain, which is correct under the Core schema and changes the fewest bytes.
+    /// </summary>
+    public bool QuoteYaml11Lookalikes { get; init; }
+
     /// <summary>The options used when none are given.</summary>
     public static YamlDocumentOptions Default { get; } = new();
 }
