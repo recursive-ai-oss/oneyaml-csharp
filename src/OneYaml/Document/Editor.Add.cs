@@ -41,7 +41,7 @@ internal static partial class Editor
             seqOff = step;
         }
 
-        return new Layout(nl, step, seqOff);
+        return new Layout(nl, step, seqOff, s.EditMode);
     }
 
     // The step of the nearest block mapping, from the mapping out, that sits on its own lines under a key: how far its
@@ -73,7 +73,7 @@ internal static partial class Editor
     // A flow collection takes only the line break from its surroundings, so the document is not searched
     // for indentation it would not use.
     private static Layout FlowOrDetect(DocState s, int near)
-        => s.Node(near).IsFlow ? new Layout(s.BreakNear(s.Node(near).Start), 2, 2) : DetectLayout(s, near);
+        => s.Node(near).IsFlow ? new Layout(s.BreakNear(s.Node(near).Start), 2, 2, s.EditMode) : DetectLayout(s, near);
 
     // Looks at the entries of one block mapping for a nested block collection on its own lines.
     private static void Probe(DocState s, int map, ref int step, ref int seqOff)
@@ -262,17 +262,17 @@ internal static partial class Editor
         if (key is not null)
         {
             var kn = new VNode { Kind = VKind.Scalar, Scalar = ScalarKind.String, Size = 1, Text = key };
-            ValueWriter.WriteKey(text, kn, keyPref, EmitContext.FlowKey, 0, 0);
+            ValueWriter.WriteKey(text, kn, keyPref, EmitContext.FlowKey, 0, 0, lay.Mode);
             text.Write(": "u8);
         }
 
         if (v.IsScalar)
         {
-            ValueWriter.WriteScalar(text, v[0], valPref, EmitContext.FlowValue, 0, 0);
+            ValueWriter.WriteScalar(text, v[0], valPref, EmitContext.FlowValue, 0, 0, lay.Mode);
         }
         else
         {
-            ValueWriter.WriteFlow(text, v, 0);
+            ValueWriter.WriteFlow(text, v, 0, lay.Mode);
         }
 
         int count = c.Count;

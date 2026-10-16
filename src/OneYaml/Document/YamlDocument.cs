@@ -134,7 +134,7 @@ public sealed class YamlDocument : IDisposable
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
         using YamlInput input = YamlInput.FromChars(text, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false), limits);
+        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits);
     }
 
     /// <summary>Parses YAML bytes: UTF-8, UTF-16 or UTF-32, detected from a byte order mark or the first characters.</summary>
@@ -146,7 +146,7 @@ public sealed class YamlDocument : IDisposable
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
         using YamlInput input = YamlInput.FromBytes(bytes, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false), limits);
+        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits);
     }
 
     /// <summary>Reads a stream to its end and parses it.</summary>

@@ -79,4 +79,10 @@ internal enum StyleMode : byte
     /// so <c>yes</c> stays plain.
     /// </summary>
     Edit,
+
+    /// <summary>
+    /// Changing a value inside an existing document, and the caller asked that new plain text survive a YAML 1.1
+    /// reader too: <c>yes</c> and <c>2026-01-01</c> are quoted, as in <see cref="Dump"/>.
+    /// </summary>
+    EditQuoting,
 }

@@ -491,6 +491,20 @@ internal static class PointerOps
         }
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
+        if (!viaAlias && mode != Mode.Replace && IsEmptyCollection(s, cur, out bool emptySeq))
+        {
+            // A node with no content and a !!map or !!seq tag is an empty collection, not a null, so it takes its
+            // first member or item. Writing the collection in its place keeps the tag, which still fits.
+            ReadOnlySpan<byte> first = p[p.Count - 1];
+            bool item = first.SequenceEqual("-"u8) || first.SequenceEqual("0"u8);
+            if (emptySeq && !item)
+            {
+                throw Path(s, YamlErrorCategory.PatchPath, "The index is outside the sequence.", cur);
+            }
+
+            return Editor.Replace(s, limits, cur, ValueTree.Wrap(emptySeq ? null : first.ToArray(), v));
+        }
+
         var budget = new AliasBudget(s, limits);
         int container = Descend(s, ref budget, cur, ref viaAlias, p, p.Count - 1);
         if (viaAlias)
@@ -499,6 +513,20 @@ internal static class PointerOps
         }
 
         return WriteIn(s, limits, container, p[p.Count - 1], v, mode, p);
+    }
+
+    // A node written with no content whose tag says it is a mapping or a sequence.
+    private static bool IsEmptyCollection(DocState s, int node, out bool sequence)
+    {
+        sequence = false;
+        if (s.Node(node).Kind != NodeKind.Scalar || (s.Node(node).Flags & NodeFlags.Empty) == 0)
+        {
+            return false;
+        }
+
+        TagClass tag = s.TagClassOf(node);
+        sequence = tag == TagClass.Seq;
+        return tag is TagClass.Map or TagClass.Seq;
     }
 
     /// <summary>Writes a value into a collection under a token. The caller has followed and refused aliases.</summary>
@@ -561,6 +589,11 @@ internal static class PointerOps
         }
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
+        if (!viaAlias && mode != Mode.Replace && IsEmptyCollection(s, cur, out _))
+        {
+            return new Destination(s.PropStart(cur), cur, cur + s.Node(cur).Size, cur);
+        }
+
         var budget = new AliasBudget(s, limits);
         int container = Descend(s, ref budget, cur, ref viaAlias, p, p.Count - 1);
         if (viaAlias)

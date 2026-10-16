@@ -252,7 +252,7 @@ internal static partial class Editor
                     pref = ScalarWriteStyle.Plain;
                 }
 
-                ScalarWriteStyle used = ValueWriter.WriteScalar(body, sv, pref, ctx, ownerCol, contentIndent);
+                ScalarWriteStyle used = ValueWriter.WriteScalar(body, sv, pref, ctx, ownerCol, contentIndent, s.EditMode);
                 valueEndsWithBreak = ValueWriter.EndsWithBreak(used);
             }
         }
@@ -262,7 +262,7 @@ internal static partial class Editor
         }
         else if (flowStyle)
         {
-            ValueWriter.WriteFlow(body, v, 0);
+            ValueWriter.WriteFlow(body, v, 0, s.EditMode);
         }
 
         int regionStart;
@@ -293,9 +293,11 @@ internal static partial class Editor
                 edit.Write((byte)'\n');
             }
 
-            if (parent < 0 && (n.Flags & NodeFlags.Empty) != 0 && !valueEndsWithBreak && regionEnd < src.Length && !DocState.IsBreak(src[regionEnd]))
+            if (parent < 0 && (n.Flags & NodeFlags.Empty) != 0 && !valueEndsWithBreak && regionEnd < src.Length && !DocState.IsBreak(src[regionEnd])
+                && PastMarkerComment(src, regionEnd) == regionEnd)
             {
-                // An empty document that ends where a marker begins: the marker needs its own line.
+                // An empty document that ends where a marker begins: the marker needs its own line. A comment on
+                // the marker's line is not a marker, and it stays after the value.
                 edit.Write((byte)'\n');
             }
         }
@@ -312,6 +314,27 @@ internal static partial class Editor
             bool endsAtBreak = false;
             bool keptComment = false;
             regionStart = root ? (hasProps || hasTag ? s.PropStart(node) : n.Start) : slotStart;
+
+            // A comment after a scalar or a flow value (or in a block scalar's header) belongs to the entry's line.
+            // A block collection starts on the next line, so the comment moves up to the key instead of down to the
+            // collection's last line.
+            ReadOnlySpan<byte> trailing = default;
+            if (!root && newBlockNonEmpty && s.Node(parent).Kind == NodeKind.Mapping && !inFlow && (n.Flags & NodeFlags.Empty) == 0 && !oldBlockColl)
+            {
+                if (n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded)
+                {
+                    trailing = HeaderComment(s, node).Trim((byte)' ');
+                }
+                else
+                {
+                    int commentEnd = PastMarkerComment(src, n.End);
+                    if (commentEnd > n.End)
+                    {
+                        trailing = src.Slice(n.End, commentEnd - n.End).Trim((byte)' ');
+                        regionEnd = Math.Max(regionEnd, commentEnd);
+                    }
+                }
+            }
             if (root && newBlockNonEmpty)
             {
                 if (hasProps && propsUntouched)
@@ -327,17 +350,18 @@ internal static partial class Editor
                 else if (hasProps)
                 {
                     WriteProps(s, node, propsUntouched, anchor, edit);
+
+                    // A comment on the marker's line stays there, after the properties that remain.
+                    int propEnd = s.PropEnd(node);
+                    int commentEnd = PastMarkerComment(src, propEnd);
+                    if (commentEnd > propEnd)
+                    {
+                        edit.Write((byte)' ');
+                        edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim(" \t"u8));
+                    }
+
                     if ((n.Flags & NodeFlags.Empty) != 0)
                     {
-                        // A comment on the marker's line stays there, after the properties that remain.
-                        int propEnd = s.PropEnd(node);
-                        int commentEnd = PastMarkerComment(src, propEnd);
-                        if (commentEnd > propEnd)
-                        {
-                            edit.Write((byte)' ');
-                            edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim(" \t"u8));
-                        }
-
                         regionEnd = Math.Max(regionEnd, commentEnd);
                         endsAtBreak = commentEnd < src.Length && DocState.IsBreak(src[commentEnd]);
                     }
@@ -349,7 +373,7 @@ internal static partial class Editor
                     // The collection starts a line of its own; a block collection cannot share the line of a "---" marker.
                     // lineEnd is where the marker's line ends, once a tag that no longer fits is gone.
                     int lineEnd = regionStart;
-                    if ((n.Flags & NodeFlags.Empty) != 0)
+                    if ((n.Flags & NodeFlags.Empty) != 0 || hasTag)
                     {
                         // A comment on the marker's line stays there.
                         int tagEnd = hasTag ? s.PropEnd(node) : regionStart;
@@ -419,6 +443,12 @@ internal static partial class Editor
                 }
                 else if (parent >= 0)
                 {
+                    if (!trailing.IsEmpty)
+                    {
+                        edit.Write((byte)' ');
+                        edit.Write(trailing);
+                    }
+
                     edit.Write((byte)'\n');
                     int col = ownerCol + (v[0].Kind == VKind.Mapping ? lay.Step : lay.SeqOffset);
                     ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
@@ -451,6 +481,18 @@ internal static partial class Editor
                 }
 
                 edit.Write(body.WrittenSpan);
+                if (root && hasTag && (n.Flags & NodeFlags.Empty) == 0 && !valueEndsWithBreak)
+                {
+                    // The comment on the marker's line followed the properties; the value takes the line now.
+                    int propEnd = s.PropEnd(node);
+                    int commentEnd = PastMarkerComment(src, propEnd);
+                    if (commentEnd > propEnd)
+                    {
+                        edit.Write((byte)' ');
+                        edit.Write(src.Slice(propEnd, commentEnd - propEnd).Trim(" \t"u8));
+                    }
+                }
+
                 if (oldEndsWithBreak && !valueEndsWithBreak)
                 {
                     edit.Write((byte)'\n');
@@ -662,7 +704,7 @@ internal static partial class Editor
         lines.Write(": "u8);
         if (v.IsScalar)
         {
-            ScalarWriteStyle used = ValueWriter.WriteScalar(lines, v[0], ScalarWriteStyle.Plain, EmitContext.BlockValue, col, col + lay.Step);
+            ScalarWriteStyle used = ValueWriter.WriteScalar(lines, v[0], ScalarWriteStyle.Plain, EmitContext.BlockValue, col, col + lay.Step, lay.Mode);
             if (!ValueWriter.EndsWithBreak(used))
             {
                 lines.Write((byte)'\n');
