@@ -436,6 +436,7 @@ internal static partial class Editor
 
             if (newBlockNonEmpty)
             {
+                bool endsInBlock;
                 using var lines = new ByteBuffer();
                 if (parent >= 0 && s.Node(parent).Kind == NodeKind.Sequence)
                 {
@@ -449,7 +450,7 @@ internal static partial class Editor
                         edit.Write((byte)'\n');
                     }
 
-                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay, valueStyle: nested, blanksFollow: blanksFollow);
+                    ValueWriter.WriteBlock(lines, v, 0, ownerCol + 2, compact, lay, out endsInBlock, valueStyle: nested, blanksFollow: blanksFollow);
                 }
                 else if (parent >= 0)
                 {
@@ -461,16 +462,17 @@ internal static partial class Editor
 
                     edit.Write((byte)'\n');
                     int col = ownerCol + (v[0].Kind == VKind.Mapping ? lay.Step : lay.SeqOffset);
-                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
+                    ValueWriter.WriteBlock(lines, v, 0, col, false, lay, out endsInBlock, valueStyle: nested, blanksFollow: blanksFollow);
                 }
                 else
                 {
-                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
+                    ValueWriter.WriteBlock(lines, v, 0, 0, false, lay, out endsInBlock, valueStyle: nested, blanksFollow: blanksFollow);
                 }
 
                 ReadOnlySpan<byte> text = lines.WrittenSpan;
                 // An empty root has no line of its own yet, so the new lines keep their final break.
-                if ((!oldEndsWithBreak && !(root && (n.Flags & NodeFlags.Empty) != 0)) || (endsAtBreak && (n.Flags & NodeFlags.Empty) != 0))
+                // A stream that ends without a break gets none, unless the last line is a block scalar whose value needs it.
+                if ((!oldEndsWithBreak && !endsInBlock && !(root && (n.Flags & NodeFlags.Empty) != 0)) || (endsAtBreak && (n.Flags & NodeFlags.Empty) != 0))
                 {
                     text = text.Slice(0, text.Length - 1);
                 }
@@ -634,9 +636,9 @@ internal static partial class Editor
         if (newBlockNonEmpty)
         {
             using var lines = new ByteBuffer();
-            ValueWriter.WriteBlock(lines, v, 0, col, false, lay, valueStyle: nested, blanksFollow: blanksFollow);
+            ValueWriter.WriteBlock(lines, v, 0, col, false, lay, out bool endsInBlock, valueStyle: nested, blanksFollow: blanksFollow);
             ReadOnlySpan<byte> text = lines.WrittenSpan;
-            if (!oldEndsWithBreak)
+            if (!oldEndsWithBreak && !endsInBlock)
             {
                 text = text.Slice(0, text.Length - 1);
             }

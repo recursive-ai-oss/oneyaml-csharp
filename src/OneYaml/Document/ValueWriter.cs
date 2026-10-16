@@ -114,7 +114,25 @@ internal static class ValueWriter
     /// <param name="valueStyle">The style to prefer for the scalar values of the first-level entries.</param>
     /// <param name="blanksFollow">Whether blank lines follow the text; the last value is then never a kept block scalar, which would take them as content.</param>
     public static void WriteBlock(ByteBuffer o, ValueTree v, int root, int col, bool inlineFirst, in Layout layout, ScalarWriteStyle keyStyle = ScalarWriteStyle.Plain, ScalarWriteStyle valueStyle = ScalarWriteStyle.Plain, bool blanksFollow = false)
+        => WriteBlock(o, v, root, col, inlineFirst, layout, out _, keyStyle, valueStyle, blanksFollow);
+
+    /// <summary>
+    /// Writes a non-empty collection as block lines and reports whether the last line belongs to a block scalar, whose
+    /// final line break is part of its value and so cannot be dropped.
+    /// </summary>
+    /// <param name="o">The destination.</param>
+    /// <param name="v">The value.</param>
+    /// <param name="root">The collection's index in the tree.</param>
+    /// <param name="col">The column of the collection's entries.</param>
+    /// <param name="inlineFirst">Whether the first line continues the caller's line.</param>
+    /// <param name="layout">Indentation to copy.</param>
+    /// <param name="endsInBlockScalar">Whether the text ends with the content of a literal or folded scalar.</param>
+    /// <param name="keyStyle">The style to prefer for the keys of the first-level entries.</param>
+    /// <param name="valueStyle">The style to prefer for the scalar values of the first-level entries.</param>
+    /// <param name="blanksFollow">Whether blank lines follow the text.</param>
+    public static void WriteBlock(ByteBuffer o, ValueTree v, int root, int col, bool inlineFirst, in Layout layout, out bool endsInBlockScalar, ScalarWriteStyle keyStyle = ScalarWriteStyle.Plain, ScalarWriteStyle valueStyle = ScalarWriteStyle.Plain, bool blanksFollow = false)
     {
+        endsInBlockScalar = false;
         var stack = new List<Frame>();
         stack.Add(new Frame { Remaining = v[root].Count, Col = col, IsMap = v[root].Kind == VKind.Mapping, First = inlineFirst });
         int next = root + 1;
@@ -155,6 +173,7 @@ internal static class ValueWriter
                 o.Write(" *"u8);
                 o.Write(val.Text);
                 o.Write((byte)'\n');
+                endsInBlockScalar = false;
                 next++;
             }
             else if (val.Kind == VKind.Scalar)
@@ -173,7 +192,8 @@ internal static class ValueWriter
                 }
 
                 ScalarWriteStyle used = WriteScalar(o, val, want, EmitContext.BlockValue, f.Col, f.Col + layout.Step, layout.Mode);
-                if (!EndsWithBreak(used))
+                endsInBlockScalar = EndsWithBreak(used);
+                if (!endsInBlockScalar)
                 {
                     o.Write((byte)'\n');
                 }
@@ -183,6 +203,7 @@ internal static class ValueWriter
             else if (val.Count == 0)
             {
                 o.Write(val.Kind == VKind.Mapping ? " {}\n"u8 : " []\n"u8);
+                endsInBlockScalar = false;
                 next++;
             }
             else if (f.IsMap)

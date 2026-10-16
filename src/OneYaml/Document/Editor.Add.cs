@@ -158,6 +158,12 @@ internal static partial class Editor
             n = LastChild(s, n);
         }
 
+        if ((s.Node(n).Flags & NodeFlags.Bare) != 0)
+        {
+            // An explicit key with no value at all: the key's text is what ends the stream.
+            n = s.PrevSibling(n);
+        }
+
         ref readonly CstNode sc = ref s.Node(n);
         if (!IsBlockScalar(sc) || (Chomping)sc.Chomp == Chomping.Strip)
         {
@@ -566,7 +572,10 @@ internal static partial class Editor
 
             // Without a comma of its own an entry that is not the last one is separated from the next by the
             // comma at the start of the next line; taking its line alone would leave that comma first.
-            if (s.StartsLine(entryAt) && (ownComma || nextEntry < 0) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
+            // The last entry without a comma of its own may have a trailing comma on a later line; the lines alone
+            // would go and leave that comma behind the previous entry's.
+            bool commaLater = !ownComma && nextEntry < 0 && DocState.SkipTrivia(src, after) is int t && t < src.Length && src[t] == (byte)',';
+            if (s.StartsLine(entryAt) && !commaLater && (ownComma || nextEntry < 0) && (after >= src.Length || DocState.IsBreak(src[after]) || (src[after] == (byte)'#' && s.IsCommentAt(after))))
             {
                 // The item has its lines to itself, its own comment included: they go, and nothing else moves.
                 using var lines = new ByteBuffer(1);
@@ -622,8 +631,29 @@ internal static partial class Editor
             stop = map ? s.EntryStart(nextEntry) : s.DashOf(nextEntry, node);
         }
 
-        _ = nl;
         using var none = new ByteBuffer(1);
+        if (map && nextEntry >= 0 && prevEntry >= 0 && (s.Node(prevEntry).Flags & NodeFlags.Bare) != 0 && s.StartsLine(entryStart)
+            && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0 && IsColonOnlyEntry(src, s.Node(node).End))
+        {
+            // A key with no value, then an entry that is only a colon: without this entry between them the colon
+            // would turn into the key's value. A colon line of its own gives the key its empty value.
+            none.WriteSpaces(entryStart - s.LineStart(entryStart));
+            none.Write((byte)':');
+            none.WriteAscii(nl);
+        }
+
         return Commit(s, limits, start, stop, none);
+    }
+
+    // Whether the entry that follows the text up to an offset is a colon with no key before it.
+    private static bool IsColonOnlyEntry(ReadOnlySpan<byte> src, int from)
+    {
+        int i = from;
+        while (i < src.Length && src[i] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+        {
+            i++;
+        }
+
+        return i < src.Length && src[i] == (byte)':' && (i + 1 >= src.Length || src[i + 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r');
     }
 }

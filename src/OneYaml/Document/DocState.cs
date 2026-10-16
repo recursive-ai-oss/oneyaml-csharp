@@ -710,6 +710,15 @@ internal sealed partial class DocState : IDisposable
             {
                 n.Start = n.End = q;
             }
+            else if (parent >= 0 && !_nodes[parent].IsFlow)
+            {
+                // A comment after the "?" hides it from the walk back: look for it forward from the entry's start.
+                int at = SkipTrivia(src, prev >= 0 ? _nodes[prev].End : _nodes[parent].Start);
+                if (at < n.Start && src[at] == (byte)'?' && (at + 1 >= src.Length || src[at + 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r'))
+                {
+                    n.Start = n.End = at + 1;
+                }
+            }
 
             return;
         }
@@ -729,7 +738,7 @@ internal sealed partial class DocState : IDisposable
         if (p.Kind == NodeKind.Mapping && prev >= 0)
         {
             int at = SkipTrivia(src, _nodes[prev].End);
-            if (at < src.Length && src[at] == (byte)':' && IsValueIndicator(prev, at))
+            if (at < src.Length && src[at] == (byte)':' && IsValueIndicator(prev, at) && (p.IsFlow || ColonBelongsTo(src, parent, prev, at)))
             {
                 n.Start = n.End = at + 1;
             }
@@ -748,6 +757,31 @@ internal sealed partial class DocState : IDisposable
                 n.Start = n.End = at + 1;
             }
         }
+    }
+
+    // A colon on a later line than the key before it belongs to this block mapping only when it stands in the
+    // mapping's own column; further left it belongs to a mapping around it (a nested "? k", then ":" at the margin).
+    private bool ColonBelongsTo(ReadOnlySpan<byte> src, int mapping, int key, int colon)
+    {
+        int lineStart = colon;
+        while (lineStart > 0 && src[lineStart - 1] is not ((byte)'\n' or (byte)'\r'))
+        {
+            lineStart--;
+        }
+
+        if (lineStart <= _nodes[key].End)
+        {
+            return true;
+        }
+
+        int mappingStart = _nodes[mapping].Start;
+        int mappingLine = mappingStart;
+        while (mappingLine > 0 && src[mappingLine - 1] is not ((byte)'\n' or (byte)'\r'))
+        {
+            mappingLine--;
+        }
+
+        return colon - lineStart == mappingStart - mappingLine;
     }
 
     /// <summary>Skips blanks, line breaks and comments.</summary>

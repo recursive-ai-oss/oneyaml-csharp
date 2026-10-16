@@ -18,7 +18,7 @@ internal static class PatchOracle
         Model root = models[document];
         if (merge)
         {
-            Model.Merge(root, patch);
+            Model.Merge(root, patch, root);
             return;
         }
 

@@ -1071,7 +1071,7 @@ internal sealed partial class DocState
             ref CstNode an = ref _nodes[a];
             if (!an.IsFlow)
             {
-                an.Aux = SkipTrivia(all, an.End);
+                an.Aux = SkipTriviaAndMark(all, an.End);
             }
         }
 
@@ -1080,8 +1080,21 @@ internal sealed partial class DocState
             ref CstNode x = ref _nodes[i];
             if ((x.Kind is NodeKind.Mapping or NodeKind.Sequence && !x.IsFlow) || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
             {
-                x.Aux = SkipTrivia(all, x.End);
+                x.Aux = SkipTriviaAndMark(all, x.End);
             }
         }
+    }
+
+    // Like SkipTrivia, and past a byte order mark at the start of a line as well: the reader does not count one
+    // that sits in front of a document marker as a token, so the next token starts after it.
+    private static int SkipTriviaAndMark(ReadOnlySpan<byte> src, int from)
+    {
+        int at = SkipTrivia(src, from);
+        while (at >= 1 && at + 3 <= src.Length && src[at] == 0xEF && src[at + 1] == 0xBB && src[at + 2] == 0xBF && IsBreak(src[at - 1]))
+        {
+            at = SkipTrivia(src, at + 3);
+        }
+
+        return at;
     }
 }
