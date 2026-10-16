@@ -24,12 +24,38 @@ public sealed partial class Utf8YamlEmitter
     /// </summary>
     /// <param name="tag">The resolved tag.</param>
     /// <exception cref="ArgumentNullException"><paramref name="tag"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="tag"/> is empty, too long, or has an unpaired surrogate.</exception>
+    /// <exception cref="ArgumentException"><paramref name="tag"/> is empty, too long, has an unpaired surrogate, or is a tag as written in a source (<c>!&lt;...&gt;</c>) rather than a resolved one.</exception>
     /// <exception cref="YamlException">The next value already has a tag.</exception>
-    /// <remarks>A tag applies to a value, not to a mapping key; writing a key after it, or ending a collection, is an error.</remarks>
+    /// <remarks>The secondary shorthand is resolved for you: <c>!!str</c> is taken as <c>tag:yaml.org,2002:str</c>. A named handle such as
+    /// <c>!e!widget</c> cannot be resolved without its <c>%TAG</c> line, so pass the resolved tag (<see cref="YamlNode.Tag"/>) instead.
+    /// A tag applies to a value, not to a mapping key; writing a key after it, or ending a collection, is an error.</remarks>
     public void WriteTag(string tag)
     {
         ArgumentNullException.ThrowIfNull(tag);
+        if (tag.Length == 0 || tag.Length > MaxPropertyChars)
+        {
+            throw new ArgumentException($"A tag must have between 1 and {MaxPropertyChars} characters.", nameof(tag));
+        }
+
+        // Shorthand forms would otherwise be percent-encoded into a different tag, silently.
+        if (tag.StartsWith("!!", StringComparison.Ordinal))
+        {
+            if (tag.Length == 2)
+            {
+                throw new ArgumentException("The tag '!!' names nothing.", nameof(tag));
+            }
+
+            tag = string.Concat("tag:yaml.org,2002:", tag.AsSpan(2));
+        }
+        else if (tag.StartsWith("!<", StringComparison.Ordinal) && tag.EndsWith('>'))
+        {
+            throw new ArgumentException("The tag is written in its verbatim form; pass the resolved tag instead.", nameof(tag));
+        }
+        else if (IsNamedHandleShorthand(tag))
+        {
+            throw new ArgumentException("The tag uses a named handle, which needs its %TAG directive to resolve; pass the resolved tag instead.", nameof(tag));
+        }
+
         if (tag.Length == 0 || tag.Length > MaxPropertyChars)
         {
             throw new ArgumentException($"A tag must have between 1 and {MaxPropertyChars} characters.", nameof(tag));
@@ -78,6 +104,27 @@ public sealed partial class Utf8YamlEmitter
         }
 
         _hasTag = true;
+    }
+
+    // "!name!suffix": a handle declared by a %TAG directive. Handle characters are letters, digits and '-'.
+    private static bool IsNamedHandleShorthand(string tag)
+    {
+        int close = tag.IndexOf('!', 1);
+        if (close < 2)
+        {
+            return false;
+        }
+
+        for (int i = 1; i < close; i++)
+        {
+            char c = tag[i];
+            if (!(char.IsAsciiLetterOrDigit(c) || c == '-'))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

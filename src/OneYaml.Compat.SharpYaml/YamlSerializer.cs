@@ -102,7 +102,7 @@ public static class YamlSerializer
                 return ReadPrefix(yaml, cut, info);
             }
 
-            System.Collections.Generic.List<T?> all = Oy.YamlSerializer.DeserializeAll(yaml.ToString(), info);
+            System.Collections.Generic.IReadOnlyList<T?> all = Oy.YamlSerializer.DeserializeAll(yaml.ToString(), info);
             return all.Count > 0 ? all[0] : default;
         }
         catch (Oy.YamlException error)

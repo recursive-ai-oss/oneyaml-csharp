@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Numerics;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using OneYaml.Parsing;
 
 namespace OneYaml;
@@ -170,6 +172,38 @@ internal static class BuiltInConverters
         if (type == typeof(object))
         {
             return new GenericConverter();
+        }
+
+        // The System.Text.Json document types hold the same kinds of value as an untyped load, so they bind to it.
+        if (type == typeof(JsonElement))
+        {
+            return new JsonElementConverter();
+        }
+
+        if (type == typeof(JsonNode))
+        {
+            return new JsonNodeConverter<JsonNode>();
+        }
+
+        if (type == typeof(JsonObject))
+        {
+            return new JsonNodeConverter<JsonObject>();
+        }
+
+        if (type == typeof(JsonArray))
+        {
+            return new JsonNodeConverter<JsonArray>();
+        }
+
+        if (type == typeof(JsonValue))
+        {
+            return new JsonNodeConverter<JsonValue>();
+        }
+
+        if (type == typeof(JsonDocument))
+        {
+            // It is disposable and owns pooled memory: a copy that nobody disposes would leak, and sharing one is no value.
+            throw new NotSupportedException("JsonDocument cannot be bound: it must be disposed, which a member of a model cannot do. Use JsonElement or JsonNode.");
         }
 
         return null;

@@ -196,18 +196,23 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     }
 
     // The mapping start is behind the reader, which is on the first key (or the end of an empty mapping). A polymorphic
-    // base that is read as itself looked at the first key to see whether it names a derived type, and found it did not.
-    internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
-        ReadBody(ref reader, options, start, ReadResume, discriminatorKey);
+    // base that is read as itself looked at the mapping and found no key that names a derived type.
+    internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
+        ReadBody(ref reader, options, start, ReadResume, null);
 
     // The mapping start and the discriminator key are behind the reader, which is on the discriminator's value.
     internal T? ReadAfterDiscriminator(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
         ReadBody(ref reader, options, start, ReadNormal, discriminatorKey);
 
+    // The mapping start is behind the reader, which is on the first key; the discriminator key is somewhere in the
+    // mapping, not first, and is skipped when it comes.
+    internal T? ReadWithDiscriminatorAhead(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
+        ReadBody(ref reader, options, start, ReadScouted, discriminatorKey);
+
     // Compiled fully optimised from the start, like the other methods that recurse once per level: a document read once
     // never leaves the first, larger code, and the depth limit has to fit on a 1 MB stack.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private T? ReadBody(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, int mode, byte[] discriminatorKey)
+    private T? ReadBody(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, int mode, byte[]? discriminatorKey)
     {
         ConverterGuards.EnsureStack(in reader);
         YamlTypeInfo<T> info = _info;
@@ -268,7 +273,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         {
             if (p.IsRequired && !seen.Contains(p.Index) && !merged.Contains(p.Index))
             {
-                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start);
+                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start, atCollection: true);
             }
         }
 
@@ -286,6 +291,9 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     private const int ReadNormal = 0;
     private const int ReadMerging = 1;
     private const int ReadResume = 2;
+
+    // As ReadResume, and the key that names the derived type may be anywhere in the mapping: it is skipped, once.
+    private const int ReadScouted = 3;
 
     // The loop of the constructor path: it hands each value to its member and does nothing else.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -441,14 +449,21 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         YamlTypeInfo<T> info = _info;
         bool merging = mode == ReadMerging;
         var skipped = default(SkippedKeys);
-        byte[]? misplaced = null;
+        byte[]? ahead = null;
         if (discriminatorKey is not null)
         {
-            Seed(ref skipped, ref misplaced, discriminatorKey, mode == ReadResume, reader.Source);
+            if (mode == ReadScouted)
+            {
+                ahead = discriminatorKey;
+            }
+            else
+            {
+                Seed(ref skipped, discriminatorKey, reader.Source);
+            }
         }
 
         Dictionary<string, object?>? extra = null;
-        while ((mode != ReadResume ? reader.Read() : Resumed(ref mode)) && reader.Type != YamlTokenType.MappingEnd)
+        while ((mode < ReadResume ? reader.Read() : Resumed(ref mode)) && reader.Type != YamlTokenType.MappingEnd)
         {
             if (reader.Type != YamlTokenType.Scalar)
             {
@@ -467,14 +482,15 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             }
 
             int keyStart = reader.Start;
+            if (ahead is not null && ConverterGuards.KeyEquals(ref reader, ahead))
+            {
+                SkipDiscriminator(ref reader, ref skipped, keyStart);
+                continue;
+            }
+
             int index = FindMember(ref reader, info);
             if (index < 0)
             {
-                if (misplaced is not null)
-                {
-                    CheckMisplaced(ref reader, misplaced);
-                }
-
                 if (info.Extension is not null)
                 {
                     ReadExtra(ref reader, options, ref skipped, ref extra, keyStart);
@@ -517,38 +533,26 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void Seed(ref SkippedKeys skipped, ref byte[]? misplaced, byte[] key, bool resumed, ReadOnlySpan<byte> source)
-    {
-        if (resumed)
-        {
-            misplaced = key;
-        }
-        else
-        {
-            skipped.Add(new SkipKey(0, 0, key), source);
-        }
-    }
+    private static void Seed(ref SkippedKeys skipped, byte[] key, ReadOnlySpan<byte> source) =>
+        skipped.Add(new SkipKey(0, 0, key), source);
 
-    // The key that names the derived type came after another key, so it did not choose a type.
+    // The key that names the derived type, found after other keys: it chose the type already, so its value is not read
+    // again, and a second one is a repeated key.
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void CheckMisplaced(ref Utf8YamlReader reader, byte[] key)
+    private static void SkipDiscriminator(ref Utf8YamlReader reader, ref SkippedKeys skipped, int keyStart)
     {
-        byte[]? rented = null;
-        try
+        SkipKey key = SkippedKeys.Capture(ref reader);
+        if (!reader.Read())
         {
-            Span<byte> scratch = stackalloc byte[128];
-            if (reader.Text(scratch, ref rented).SequenceEqual(key))
-            {
-                throw reader.CreateException($"The key '{Encoding.UTF8.GetString(key)}' names the derived type of {ConverterGuards.DescribeType(typeof(T))}, so it must be the first key of the mapping.");
-            }
+            throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
         }
-        finally
+
+        if (!skipped.Add(key, reader.Source))
         {
-            if (rented is not null)
-            {
-                ArrayPool<byte>.Shared.Return(rented);
-            }
+            throw DuplicateKey(in reader, keyStart);
         }
+
+        reader.Skip();
     }
 
     // The first key was read already: the loop starts on it instead of reading one.
@@ -734,7 +738,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         {
             if (p.IsRequired && !seen.Contains(p.Index) && !merged.Contains(p.Index))
             {
-                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start);
+                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start, atCollection: true);
             }
         }
     }

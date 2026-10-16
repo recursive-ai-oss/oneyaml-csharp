@@ -74,7 +74,7 @@ public class DocumentFollowUpTests
         // Building the 50 KB tag for every node would take tens of megabytes; the text itself is 50 KB.
         Assert.True(allocated < 2_000_000, $"allocated {allocated} bytes");
         Assert.Equal(600, doc.Root.Count);
-        Assert.StartsWith("!e!x0", doc.Root[0].Tag);
+        Assert.StartsWith("!e!x0", doc.Root[0].RawTag, StringComparison.Ordinal);
     }
 
     // ---- Opt-in quoting of YAML 1.1 lookalikes ----

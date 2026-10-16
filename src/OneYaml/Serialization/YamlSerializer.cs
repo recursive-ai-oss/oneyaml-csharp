@@ -14,6 +14,14 @@ namespace OneYaml;
 /// <remarks>
 /// A <see cref="DateTime"/> read from a timestamp that has an offset is converted to the local time of the
 /// machine, as <see cref="System.Text.Json.JsonSerializer"/> does, so the result depends on its time zone; use <see cref="DateTimeOffset"/> to keep the offset.
+/// <para>
+/// Tags are dropped wherever the target is <see cref="object"/> (a root, a member, a list or dictionary item of
+/// <see cref="object"/>): a value tagged <c>!Sub</c> reads as the plain string, a mapping tagged <c>!!omap</c> as a dictionary. That
+/// is the shape of the untyped model, and code may rely on it: a value of that model is a <see cref="string"/>,
+/// <see cref="long"/>, <see cref="System.Numerics.BigInteger"/>, <see cref="double"/>, <see cref="bool"/>, a dictionary, a list, or null, and nothing else. Keeping
+/// tags would need a new representation, so it could only come as an option that is off by default. To read tags today use a
+/// <see cref="YamlConverter{T}"/> and <see cref="Utf8YamlReader.Tag"/>, or a <see cref="YamlDocument"/>, which keeps them.
+/// </para>
 /// </remarks>
 public static partial class YamlSerializer
 {
@@ -227,7 +235,7 @@ public static partial class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
-    public static List<T?> DeserializeAll<T>(string yaml, YamlSerializerOptions? options = null)
+    public static IReadOnlyList<T?> DeserializeAll<T>(string yaml, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         return ReadAll(yaml, Info<T>(options));
@@ -239,7 +247,7 @@ public static partial class YamlSerializer
     /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
     /// <returns>One value per document, in order.</returns>
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
-    public static List<T?> DeserializeAll<T>(string yaml, YamlTypeInfo<T> typeInfo)
+    public static IReadOnlyList<T?> DeserializeAll<T>(string yaml, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(typeInfo);
@@ -254,7 +262,7 @@ public static partial class YamlSerializer
     /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
-    public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlSerializerOptions? options = null)
+    public static IReadOnlyList<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlSerializerOptions? options = null)
     {
         YamlTypeInfo<T> info = Info<T>(options);
         using YamlInput input = InputFromBytes(utf8Yaml, info.Options);
@@ -267,7 +275,7 @@ public static partial class YamlSerializer
     /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
     /// <returns>One value per document, in order.</returns>
     /// <exception cref="YamlException">The bytes are not valid YAML, do not fit the type, or exceed a limit.</exception>
-    public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlTypeInfo<T> typeInfo)
+    public static IReadOnlyList<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
         using YamlInput input = InputFromBytes(utf8Yaml, typeInfo.Options);

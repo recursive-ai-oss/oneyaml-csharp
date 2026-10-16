@@ -554,8 +554,8 @@ public class ApiShapeTests
     public void Several_documents_are_read_from_a_stream_and_a_reader()
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(DocsYaml));
-        List<Endpoint?> fromStream = YamlSerializer.DeserializeAll<Endpoint>(stream);
-        List<Endpoint?> fromReader = YamlSerializer.DeserializeAll<Endpoint>(new StringReader(DocsYaml));
+        IReadOnlyList<Endpoint?> fromStream = YamlSerializer.DeserializeAll<Endpoint>(stream);
+        IReadOnlyList<Endpoint?> fromReader = YamlSerializer.DeserializeAll<Endpoint>(new StringReader(DocsYaml));
 
         Assert.Equal(["/a", "/b", "/c"], fromStream.Select(e => e!.Path));
         Assert.Equal([1, 2, 3], fromReader.Select(e => e!.Weight));

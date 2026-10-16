@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using OneYaml.Parsing;
@@ -380,7 +381,7 @@ public ref partial struct Utf8YamlReader
     /// <remarks>
     /// <c>!!str</c> reads as <c>tag:yaml.org,2002:str</c>, a local tag such as <c>!Sub</c> as <c>!Sub</c>, and the bare <c>!</c> as <c>!</c>.
     /// Reading it makes a string (the last one is kept, so a run of nodes with one tag shares it); use
-    /// <see cref="TryGetTag"/> to compare without allocating. A node that an alias brings in has the tag it was written with.
+    /// <see cref="TryGetRawTag"/> to compare the tag as written without allocating. A node that an alias brings in has the tag it was written with.
     /// </remarks>
     public string? Tag
     {
@@ -395,10 +396,19 @@ public ref partial struct Utf8YamlReader
         }
     }
 
+    /// <summary>Gets the tag of the current node resolved against the document's <c>%TAG</c> directives, as <see cref="Tag"/> reads it.</summary>
+    /// <param name="tag">The resolved tag; <see langword="null"/> when there is none.</param>
+    /// <returns><see langword="true"/> when the node has a tag.</returns>
+    public bool TryGetTag([NotNullWhen(true)] out string? tag)
+    {
+        tag = Tag;
+        return tag is not null;
+    }
+
     /// <summary>Gets the tag of the current node exactly as written, such as <c>!Sub</c>, <c>!!str</c> or <c>!&lt;tag:example.com,2000:x&gt;</c>, without allocating.</summary>
     /// <param name="rawTag">The tag's UTF-8 text in the input; empty when there is none.</param>
     /// <returns><see langword="true"/> when the node has a tag.</returns>
-    public readonly bool TryGetTag(out ReadOnlySpan<byte> rawTag)
+    public readonly bool TryGetRawTag(out ReadOnlySpan<byte> rawTag)
     {
         if (!_replayed)
         {
@@ -500,6 +510,7 @@ public ref partial struct Utf8YamlReader
     internal void Dispose()
     {
         _r.Dispose();
+        ReleaseLook();
         _book?.ReturnBuffers();
     }
 
@@ -509,6 +520,7 @@ public ref partial struct Utf8YamlReader
     internal bool BeginDocument(bool synthesizeEmptyStream)
     {
         _book?.Reset();
+        ReleaseLook();
         _replayed = false;
         _depth = 0;
         _liveDepth = 0;
@@ -583,6 +595,22 @@ public ref partial struct Utf8YamlReader
     /// <summary>Moves to the next token of the document.</summary>
     /// <returns><see langword="false"/> at the end of the document.</returns>
     public bool Read()
+    {
+        if (_look is not null)
+        {
+            return ReadLooked();
+        }
+
+        if (_book is { FrameCount: > 0 } && ReadReplay())
+        {
+            return true;
+        }
+
+        return ReadLive();
+    }
+
+    // The same step without the log: the next event from the tape or the text.
+    private bool ReadCore()
     {
         if (_book is { FrameCount: > 0 } && ReadReplay())
         {
@@ -962,7 +990,8 @@ public ref partial struct Utf8YamlReader
     /// <summary>Skips the value the reader is on, including all of a collection.</summary>
     public void Skip()
     {
-        if (_book is { FrameCount: > 0 } b)
+        // Not while events are being delivered from the log: the frame then stands further on than the event.
+        if (_look is null && _book is { FrameCount: > 0 } b)
         {
             ref ReplayFrame f = ref b.Frames[b.FrameCount - 1];
             if (f.Pos == f.Start + 1)

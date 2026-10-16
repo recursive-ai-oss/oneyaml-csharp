@@ -12,27 +12,8 @@ public abstract class YamlSerializerContext : IYamlTypeInfoResolver
     /// <param name="options">Settings to start from; the context's own options copy them and use the context as resolver.</param>
     protected YamlSerializerContext(YamlSerializerOptions? options = null)
     {
-        Options = new YamlSerializerOptions
-        {
-            // A null policy in the given options is a choice (names as written), so only a missing options object gets the default.
-            PropertyNamingPolicy = options is null ? System.Text.Json.JsonNamingPolicy.CamelCase : options.PropertyNamingPolicy,
-            PropertyNameCaseInsensitive = options?.PropertyNameCaseInsensitive ?? false,
-            UnmappedMemberHandling = options?.UnmappedMemberHandling ?? YamlUnmappedMemberHandling.Skip,
-            Limits = options?.Limits ?? YamlLimits.Default,
-            MergeKeys = options?.MergeKeys ?? false,
-            EnumNamingPolicy = options?.EnumNamingPolicy,
-            SourceName = options?.SourceName,
-            IndentSize = options?.IndentSize ?? 2,
-            DefaultIgnoreCondition = options?.DefaultIgnoreCondition ?? YamlIgnoreCondition.Never,
-            TypeInfoResolver = this,
-        };
-        if (options is not null)
-        {
-            foreach (YamlConverter converter in options.Converters)
-            {
-                Options.Converters.Add(converter);
-            }
-        }
+        // A null policy in the given options is a choice (names as written), so only a missing options object gets the default.
+        Options = new YamlSerializerOptions(options ?? YamlSerializerOptions.Default) { TypeInfoResolver = this };
     }
 
     /// <summary>The options this context's metadata belongs to.</summary>

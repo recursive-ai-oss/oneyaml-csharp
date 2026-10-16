@@ -50,14 +50,14 @@ internal static class NodeValues
         ref readonly CstNode n = ref s.Node(node);
         if (n.Kind != NodeKind.Scalar)
         {
-            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The node is not a scalar.", s.Text, n.Start) : null;
+            error = wantError ? YamlException.Located(YamlErrorCategory.Binding, "The node is not a scalar.", s.Text, n.Start, ErrorPath.Find(s.Text, n.Start, atCollection: true)) : null;
             return false;
         }
 
         ScalarKind kind = s.KindOf(node, out bool valid);
         if (!valid)
         {
-            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The scalar's tag does not fit its text.", s.Text, n.Start) : null;
+            error = wantError ? YamlException.Located(YamlErrorCategory.Binding, "The scalar's tag does not fit its text.", s.Text, n.Start, ErrorPath.Find(s.Text, n.Start, atCollection: false)) : null;
             return false;
         }
 
@@ -69,7 +69,7 @@ internal static class NodeValues
                 return true;
             }
 
-            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The scalar is null.", s.Text, n.Start) : null;
+            error = wantError ? YamlException.Located(YamlErrorCategory.Binding, "The scalar is null.", s.Text, n.Start, ErrorPath.Find(s.Text, n.Start, atCollection: false)) : null;
             return false;
         }
 
@@ -94,6 +94,17 @@ internal static class NodeValues
         {
             reader.Dispose();
         }
+    }
+
+    /// <summary>Whether <see cref="TryGet{T}"/> reads the type itself: the scalar types it lists, their nullable forms and <see cref="object"/>.</summary>
+    public static bool IsLeafType(Type type)
+    {
+        Type u = Nullable.GetUnderlyingType(type) ?? type;
+        return u == typeof(object) || u == typeof(string) || u == typeof(bool) || u == typeof(int) || u == typeof(long)
+            || u == typeof(short) || u == typeof(sbyte) || u == typeof(byte) || u == typeof(ushort) || u == typeof(uint)
+            || u == typeof(ulong) || u == typeof(BigInteger) || u == typeof(double) || u == typeof(float)
+            || u == typeof(decimal) || u == typeof(char) || u == typeof(Guid) || u == typeof(DateTime)
+            || u == typeof(DateTimeOffset) || u == typeof(DateOnly) || u == typeof(TimeOnly) || u == typeof(TimeSpan);
     }
 
     private static bool KindMayFit(Type type, ScalarKind kind)

@@ -58,7 +58,7 @@ public class ReplayFollowUpTests
     {
         public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
         {
-            string raw = reader.TryGetTag(out ReadOnlySpan<byte> tag) ? Encoding.UTF8.GetString(tag) : string.Empty;
+            string raw = reader.TryGetRawTag(out ReadOnlySpan<byte> tag) ? Encoding.UTF8.GetString(tag) : string.Empty;
             return reader.Tag + "|" + raw;
         }
 
@@ -96,7 +96,7 @@ public class ReplayFollowUpTests
         Assert.Equal(direct.E, replayed.E);
     }
 
-    [YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+    [YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
     [YamlDerivedType(typeof(Cat), "cat")]
     [YamlDerivedType(typeof(Dog), "!dog")]
     private abstract class Animal;

@@ -195,12 +195,11 @@ public class AttributeBehaviorTests
     }
 
     [Theory, MemberData(nameof(Paths))]
-    public void A_key_discriminator_must_come_first(bool generated)
+    public void A_key_discriminator_may_come_after_other_keys(bool generated)
     {
-        YamlException ex = Assert.Throws<YamlException>(() => Read<Home>(generated, "pet:\n  name: Tom\n  $type: cat\n"));
+        Cat cat = Assert.IsType<Cat>(Read<Home>(generated, "pet:\n  name: Tom\n  $type: cat\n")!.Pet);
 
-        Assert.Equal(YamlErrorCategory.Binding, ex.Category);
-        Assert.Contains("$type", ex.Message, StringComparison.Ordinal);
+        Assert.Equal("Tom", cat.Name);
     }
 
     [Theory, MemberData(nameof(Paths))]

@@ -45,13 +45,12 @@ public class AttributeFollowUpTests
     // ---- a discriminator that is not the first key ----
 
     [Theory, MemberData(nameof(Paths))]
-    public void A_discriminator_after_another_key_is_refused_on_a_base_that_can_be_created(int path)
+    public void A_discriminator_after_another_key_names_the_derived_type(int path)
     {
-        YamlException ex = Assert.Throws<YamlException>(() => Read<Vehicle>(path, "wheels: 3\nkind: car\n"));
+        Car car = Assert.IsType<Car>(Read<Vehicle>(path, "wheels: 3\ncolour: red\nkind: car\n"));
 
-        Assert.Equal(YamlErrorCategory.Binding, ex.Category);
-        Assert.Equal(2, ex.Line);
-        Assert.Contains("kind", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(3, car.Wheels);
+        Assert.Equal("red", car.Colour);
         Assert.Equal(3, Read<Vehicle>(path, "wheels: 3\nother: car\n")!.Wheels);
     }
 

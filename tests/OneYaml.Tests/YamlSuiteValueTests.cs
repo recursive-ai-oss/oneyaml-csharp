@@ -44,7 +44,7 @@ public class YamlSuiteValueTests
         string caseDir = Path.Combine(Corpus.SuiteDirectory!, id.Replace('/', Path.DirectorySeparatorChar));
         byte[] yaml = File.ReadAllBytes(Path.Combine(caseDir, "in.yaml"));
         List<JsonDocument> expected = Corrected(id) ?? ValueModel.ParseValues(File.ReadAllBytes(Path.Combine(caseDir, "in.json")));
-        List<object?> actual;
+        IReadOnlyList<object?> actual;
         try
         {
             actual = YamlSerializer.DeserializeAll<object>(Convert(yaml));

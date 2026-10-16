@@ -27,7 +27,7 @@ internal sealed class DocumentTarget : FuzzTarget
             // The documented outcome for input that is not valid or over a limit.
         }
 
-        List<object?>? generic = null;
+        IReadOnlyList<object?>? generic = null;
         try
         {
             generic = YamlSerializer.DeserializeAll<object>(input, serializerOptions);

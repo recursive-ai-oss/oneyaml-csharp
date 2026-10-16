@@ -28,6 +28,12 @@ internal sealed class Parser
         "System.Int128",
         "System.UInt128",
         "System.Half",
+        "System.Text.Json.JsonElement",
+        "System.Text.Json.JsonDocument",
+        "System.Text.Json.Nodes.JsonNode",
+        "System.Text.Json.Nodes.JsonObject",
+        "System.Text.Json.Nodes.JsonArray",
+        "System.Text.Json.Nodes.JsonValue",
     ];
 
     private static readonly string[] s_reserved =
@@ -796,7 +802,7 @@ internal sealed class Parser
                 {
                     key ??= text;
                 }
-                else if (named.Key == "Discriminator" && source == yaml && named.Value.Value is int kind)
+                else if (named.Key == "DiscriminatorKind" && source == yaml && named.Value.Value is int kind)
                 {
                     result.Kind = kind;
                 }

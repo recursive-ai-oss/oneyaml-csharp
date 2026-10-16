@@ -37,10 +37,13 @@ public sealed class YamlDocument : IDisposable
     private AliasBudget _walk;
     private YamlSerializerOptions? _bindOptions;
 
-    private YamlDocument(DocState state, YamlLimits limits)
+    private readonly string? _sourceName;
+
+    private YamlDocument(DocState state, YamlLimits limits, string? sourceName)
     {
         _state = state;
         _limits = limits;
+        _sourceName = sourceName;
         ResetWalk();
     }
 
@@ -68,13 +71,15 @@ public sealed class YamlDocument : IDisposable
 
     internal YamlLimits Limits => _limits;
 
+    internal string? SourceName => _sourceName;
+
     // The alias budget of the walk that started at the last root taken, shared by every view derived from it.
     internal ref AliasBudget Walk => ref _walk;
 
     internal void ResetWalk() => _walk = new AliasBudget(State, _limits);
 
     // Options for reading scalars through the binder's converters, carrying this document's limits.
-    internal YamlSerializerOptions BindOptions => _bindOptions ??= ReferenceEquals(_limits, YamlLimits.Default) ? YamlSerializerOptions.Default : new YamlSerializerOptions { Limits = _limits };
+    internal YamlSerializerOptions BindOptions => _bindOptions ??= ReferenceEquals(_limits, YamlLimits.Default) ? YamlSerializerOptions.Default : new YamlSerializerOptions { Limits = _limits, SourceName = _sourceName };
 
     // How many edits the document has had. A view whose epoch has a lower number follows the edits made since.
     internal int EditCount => _editCount;
@@ -133,8 +138,15 @@ public sealed class YamlDocument : IDisposable
     public static YamlDocument Parse(ReadOnlySpan<char> text, YamlDocumentOptions? options = null)
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
-        using YamlInput input = YamlInput.FromChars(text, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits);
+        try
+        {
+            using YamlInput input = YamlInput.FromChars(text, limits);
+            return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits, options?.SourceName);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options?.SourceName))
+        {
+            throw;
+        }
     }
 
     /// <summary>Parses YAML bytes: UTF-8, UTF-16 or UTF-32, detected from a byte order mark or the first characters.</summary>
@@ -145,8 +157,15 @@ public sealed class YamlDocument : IDisposable
     public static YamlDocument Parse(ReadOnlySpan<byte> bytes, YamlDocumentOptions? options = null)
     {
         YamlLimits limits = options?.Limits ?? YamlLimits.Default;
-        using YamlInput input = YamlInput.FromBytes(bytes, limits);
-        return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits);
+        try
+        {
+            using YamlInput input = YamlInput.FromBytes(bytes, limits);
+            return new YamlDocument(DocState.Build(input.Utf8Text, input.Encoding, input.HasByteOrderMark, limits, options?.AllowDuplicateKeys ?? false, options?.QuoteYaml11Lookalikes ?? false), limits, options?.SourceName);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options?.SourceName))
+        {
+            throw;
+        }
     }
 
     /// <summary>Reads a stream to its end and parses it.</summary>
@@ -158,7 +177,7 @@ public sealed class YamlDocument : IDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
-        CheckRemaining(stream, max);
+        CheckRemaining(stream, max, options?.SourceName);
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -169,7 +188,7 @@ public sealed class YamlDocument : IDisposable
             }
 
             buffer.Advance(n);
-            CheckSize(buffer.Count, max);
+            CheckSize(buffer.Count, max, options?.SourceName);
         }
 
         return Parse(buffer.WrittenSpan, options);
@@ -185,7 +204,7 @@ public sealed class YamlDocument : IDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
-        CheckRemaining(stream, max);
+        CheckRemaining(stream, max, options?.SourceName);
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -196,27 +215,27 @@ public sealed class YamlDocument : IDisposable
             }
 
             buffer.Advance(n);
-            CheckSize(buffer.Count, max);
+            CheckSize(buffer.Count, max, options?.SourceName);
         }
 
         return Parse(buffer.WrittenSpan, options);
     }
 
     // A stream that knows its length is refused before anything is read or rented.
-    private static void CheckRemaining(Stream stream, long max)
+    private static void CheckRemaining(Stream stream, long max, string? sourceName)
     {
         if (stream.CanSeek && stream.Length - stream.Position > max)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
     }
 
     // Stops reading as soon as the input passes the limit, so an endless stream cannot fill memory first.
-    private static void CheckSize(int length, long max)
+    private static void CheckSize(int length, long max, string? sourceName)
     {
         if (length > max)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
     }
 
@@ -644,6 +663,15 @@ public sealed class YamlDocument : IDisposable
     /// <exception cref="YamlException">The pointer names nothing, or the scalar is not of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
     public T Get<T>(string path, int document = 0) => GetNode(path, document).GetValue<T>();
 
+    /// <summary>Reads the value a pointer names as a type using generated metadata. It reads whatever <see cref="Set{T}(string, T, YamlTypeInfo{T}, int)"/> can write.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <param name="document">The index of the document in the stream.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The pointer names nothing, or the node does not fit the type.</exception>
+    public T Get<T>(string path, YamlTypeInfo<T> typeInfo, int document = 0) => GetNode(path, document).GetValue(typeInfo);
+
     /// <summary>Reads a scalar a pointer names as a CLR value, if it is there and has that type.</summary>
     /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
     /// <param name="path">An RFC 6901 pointer.</param>
@@ -656,6 +684,12 @@ public sealed class YamlDocument : IDisposable
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
         int node = PointerOps.Find(s, _limits, document, p);
+        if (node >= 0 && !NodeValues.IsLeafType(typeof(T)))
+        {
+            ResetWalk();
+            return new YamlNode(this, node, Track(), false).TryGetValue(out value);
+        }
+
         if (node >= 0 && NodeValues.TryGet(s, node, BindOptions, out value, out _, wantError: false))
         {
             return true;

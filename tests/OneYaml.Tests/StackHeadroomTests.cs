@@ -47,7 +47,7 @@ internal abstract record KeyRecordBase;
 
 internal sealed record KeyRecNode(KeyRecordBase? C, string? S) : KeyRecordBase;
 
-[YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+[YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
 [YamlDerivedType(typeof(TagNode), "n")]
 internal abstract class TagBase;
 
@@ -58,7 +58,7 @@ internal sealed class TagNode : TagBase
     public string? S { get; set; }
 }
 
-[YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+[YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
 [YamlDerivedType(typeof(TagRecNode), "n")]
 internal abstract record TagRecordBase;
 
@@ -294,6 +294,9 @@ public class StackHeadroomTests
 
     private static string KeyChain(int levels) => PolymorphicChain(levels, "{$type: n, c: ", "}", "{$type: n, s: \"a\\tb\"}");
 
+    // The same chain with the key naming the derived type after another key, so every level looks ahead for it.
+    private static string KeyChainAfterAnotherKey(int levels) => PolymorphicChain(levels, "{s: x, $type: n, c: ", "}", "{s: \"a\\tb\", $type: n}");
+
     private static string TagChain(int levels) => PolymorphicChain(levels, "!n {c: ", "}", "!n {s: \"a\\tb\"}");
 
     private static int Depth(object? node)
@@ -325,6 +328,23 @@ public class StackHeadroomTests
             Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyBase>(yaml)));
             Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
             Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<KeyBase>()));
+        });
+    }
+
+    [Fact]
+    public void A_key_that_names_the_derived_type_after_another_key_reaches_the_depth_limit_by_every_path()
+    {
+        SkipWhenUnoptimised();
+        string yaml = KeyChainAfterAnotherKey(Levels);
+        YamlTypeInfo<KeyBase> info = Generated<KeyBase>();
+        YamlTypeInfo<KeyRecordBase> recordInfo = Generated<KeyRecordBase>();
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
+            Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<KeyBase>()));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyRecordBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, recordInfo)));
         });
     }
 

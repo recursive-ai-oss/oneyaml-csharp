@@ -86,7 +86,7 @@ public class KitValueTests
         {
             case "value":
                 {
-                    List<object?> actual = YamlSerializer.DeserializeAll<object>(input);
+                    IReadOnlyList<object?> actual = YamlSerializer.DeserializeAll<object>(input);
                     AssertValue(actual, ReadExpected(dir, expect));
                     break;
                 }
@@ -111,7 +111,7 @@ public class KitValueTests
     {
         long memory = expect.GetProperty("memory_mb").GetInt64() * 1024 * 1024;
         long before = GC.GetAllocatedBytesForCurrentThread();
-        List<object?>? actual = null;
+        IReadOnlyList<object?>? actual = null;
         YamlException? error = null;
         try
         {
@@ -151,7 +151,7 @@ public class KitValueTests
         return expect.GetProperty("value");
     }
 
-    private static void AssertValue(List<object?> actual, JsonElement expected)
+    private static void AssertValue(IReadOnlyList<object?> actual, JsonElement expected)
     {
         Assert.Equal(expected.GetArrayLength(), actual.Count);
         var report = new ValueModel.Report();

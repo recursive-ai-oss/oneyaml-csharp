@@ -68,7 +68,19 @@ public sealed record YamlDocumentOptions
     /// <c>2026-01-01</c>, <c>0x10</c>), the way <see cref="YamlSerializer"/> does. By default an edit keeps such text
     /// plain, which is correct under the Core schema and changes the fewest bytes.
     /// </summary>
+    /// <remarks>
+    /// Judging plainness by the Core schema (the YAML 1.2 default, <c>yes</c> and <c>off</c> are strings) is deliberate, and so is
+    /// leaving the option off: the editor changes only what the edit needs and does not rewrite text for readers of an older
+    /// YAML. <see cref="YamlSerializer"/> quotes such text because it writes whole documents for any reader. Turn this on when
+    /// the edited file is also read by a YAML 1.1 reader.
+    /// </remarks>
     public bool QuoteYaml11Lookalikes { get; init; }
+
+    /// <summary>
+    /// A name for the input, such as a file name. It prefixes the message of every <see cref="YamlException"/> the document raises
+    /// (parsing, reading, editing, binding a node) and is kept in <see cref="YamlException.SourceName"/>.
+    /// </summary>
+    public string? SourceName { get; init; }
 
     /// <summary>The options used when none are given.</summary>
     public static YamlDocumentOptions Default { get; } = new();

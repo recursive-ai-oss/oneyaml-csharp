@@ -22,7 +22,7 @@ public static partial class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
-    public static List<T?> DeserializeAll<T>(Stream utf8Yaml, YamlSerializerOptions? options = null)
+    public static IReadOnlyList<T?> DeserializeAll<T>(Stream utf8Yaml, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(utf8Yaml);
         return ReadAllFromStream(utf8Yaml, Info<T>(options));
@@ -34,7 +34,7 @@ public static partial class YamlSerializer
     /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
     /// <returns>One value per document, in order.</returns>
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
-    public static List<T?> DeserializeAll<T>(Stream utf8Yaml, YamlTypeInfo<T> typeInfo)
+    public static IReadOnlyList<T?> DeserializeAll<T>(Stream utf8Yaml, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(utf8Yaml);
         ArgumentNullException.ThrowIfNull(typeInfo);
@@ -49,7 +49,7 @@ public static partial class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
-    public static List<T?> DeserializeAll<T>(TextReader yaml, YamlSerializerOptions? options = null)
+    public static IReadOnlyList<T?> DeserializeAll<T>(TextReader yaml, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         return ReadAll(yaml.ReadToEnd(), Info<T>(options));
@@ -61,7 +61,7 @@ public static partial class YamlSerializer
     /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
     /// <returns>One value per document, in order.</returns>
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
-    public static List<T?> DeserializeAll<T>(TextReader yaml, YamlTypeInfo<T> typeInfo)
+    public static IReadOnlyList<T?> DeserializeAll<T>(TextReader yaml, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(typeInfo);
