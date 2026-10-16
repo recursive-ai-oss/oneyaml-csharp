@@ -14,16 +14,18 @@
 
   <PropertyGroup Label="Package">
     <PackageId>OneYaml.Compat.YamlDotNet</PackageId>
-    <Description>A drop-in replacement for the commonly used YamlDotNet API (serializer, deserializer, representation model) that runs on OneYaml.</Description>
+    <Description>A compatibility adapter for code written against YamlDotNet 18 (serializer builders and representation model), running on OneYaml. Every difference is listed.</Description>
     <Authors>Recursive AI, LLC</Authors>
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>yaml;yamldotnet;compat;serializer</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
     <ProjectReference Include="../OneYaml/OneYaml.csproj" />
     <InternalsVisibleTo Include="OneYaml.Compat.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />

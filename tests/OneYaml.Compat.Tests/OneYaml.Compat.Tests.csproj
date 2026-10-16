@@ -23,4 +23,11 @@
     <ProjectReference Include="../../src/OneYaml.Compat.SharpYaml/OneYaml.Compat.SharpYaml.csproj" />
   </ItemGroup>
 
+  <!-- The compat samples of the documentation; the shared runner comes from the main test project, and the
+       samples are copied next to the tests so the runner can read the output each sample promises. -->
+  <ItemGroup>
+    <Compile Include="../OneYaml.Tests/DocSamples/DocSample.cs" Link="DocSamples/DocSample.cs" />
+    <None Include="DocSamples/**/*.cs" Link="docsync/samples/OneYaml.Compat.Tests/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

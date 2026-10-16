@@ -17,17 +17,19 @@ public static partial class YamlSerializer
     /// <param name="value">The value.</param>
     /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
     /// <returns>The YAML text. It reads back as the value, under the Core schema and under YAML 1.1.</returns>
+    /// <exception cref="YamlException">The value refers back to itself, is nested deeper than the limit, or has text that cannot be written (an unpaired surrogate).</exception>
     /// <example>
     /// <code language="csharp">
     /// var config = new Config(3, "make build\nmake test\n");
-    /// string yaml = YamlSerializer.Serialize(config);
+    /// Console.Write(YamlSerializer.Serialize(config));
     /// // replicas: 3
     /// // script: |
     /// //   make build
     /// //   make test
+    ///
+    /// record Config(int Replicas, string Script);
     /// </code>
     /// </example>
-    /// <exception cref="YamlException">The value refers back to itself, is nested deeper than the limit, or has text that cannot be written (an unpaired surrogate).</exception>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
     public static string Serialize<T>(T value, YamlSerializerOptions? options = null) => WriteString(value, Info<T>(options));

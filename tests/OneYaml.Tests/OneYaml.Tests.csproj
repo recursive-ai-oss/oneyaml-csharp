@@ -23,4 +23,28 @@
     <ProjectReference Include="../../src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <!-- The documentation and the samples it shows, copied next to the tests in DocSamples: they check that every
+       C# block in the documents is a sample that compiles and prints what the document says, and that links resolve. -->
+  <PropertyGroup>
+    <_RepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../'))</_RepoRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="DocSamples/**/*.cs" Link="docsync/samples/OneYaml.Tests/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../OneYaml.Compat.Tests/DocSamples/**/*.cs" Link="docsync/samples/OneYaml.Compat.Tests/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(_RepoRoot)*.md" Link="docsync/repo/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(_RepoRoot)docs/**/*.md" Link="docsync/repo/docs/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(_RepoRoot).github/**/*.md" Link="docsync/repo/.github/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(_RepoRoot)src/**/README.md" Link="docsync/repo/src/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The list of files a relative link in the documents may point at. Written by each per-framework build only:
+       the outer build of a multi-target project has no output directory. -->
+  <Target Name="WriteDocLinkManifest" AfterTargets="Build" Condition="'$(TargetFramework)' != ''">
+    <ItemGroup>
+      <_DocLinkTarget Include="$(_RepoRoot)**/*" Exclude="$(_RepoRoot).git/**;$(_RepoRoot).git;$(_RepoRoot)**/bin/**;$(_RepoRoot)**/obj/**" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(OutDir)docsync/manifest.txt" Lines="@(_DocLinkTarget->'%(RecursiveDir)%(Filename)%(Extension)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
+
 </Project>

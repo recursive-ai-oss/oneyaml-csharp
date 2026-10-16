@@ -1,0 +1,9 @@
+# The samples are shown in the documentation as a reader would write them in a small program:
+# types without access modifiers, records left unsealed, culture-default formatting and inline arrays.
+[*.cs]
+dotnet_diagnostic.IDE0040.severity = none
+dotnet_diagnostic.CA1852.severity = none
+dotnet_diagnostic.CA1305.severity = none
+dotnet_diagnostic.CA1307.severity = none
+dotnet_diagnostic.CA1310.severity = none
+dotnet_diagnostic.CA1861.severity = none

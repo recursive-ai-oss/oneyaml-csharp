@@ -14,16 +14,18 @@
 
   <PropertyGroup Label="Package">
     <PackageId>OneYaml.Compat.SharpYaml</PackageId>
-    <Description>A drop-in replacement for the SharpYaml 3 serializer API (YamlSerializer, YamlSerializerOptions, attributes) that runs on OneYaml.</Description>
+    <Description>A compatibility adapter for code written against the SharpYaml 3 serializer (YamlSerializer, YamlSerializerOptions, attributes), running on OneYaml. Every difference is listed.</Description>
     <Authors>Recursive AI, LLC</Authors>
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>yaml;sharpyaml;compat;serializer</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
     <ProjectReference Include="../OneYaml/OneYaml.csproj" />
     <InternalsVisibleTo Include="OneYaml.Compat.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />
