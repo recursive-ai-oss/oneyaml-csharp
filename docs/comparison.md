@@ -2,9 +2,11 @@
 
 How oneyaml-csharp compares with the .NET YAML libraries it is most often weighed against: YamlDotNet, SharpYaml and VYaml.
 
-**Bias.** This page is written by the authors of oneyaml-csharp. We chose the criteria, and they are the ones this library was built for: YAML 1.2 behaviour, editing a file without disturbing it, and bounded handling of untrusted input. A project with other priorities would draw a different table. We tried to state each library's strengths as its own users would. Library facts come from the libraries' own documentation and from a survey we ran on 2026-09-30 against YamlDotNet 18.1.0, SharpYaml 3.14.0 and VYaml 1.4.0; libraries change, so check the current release before you rely on a line here.
+**Bias.** This page is written by the authors of oneyaml-csharp. We chose the criteria, and they are the ones this library was built for: YAML 1.2 behaviour, editing a file without disturbing it, and bounded handling of untrusted input. A project with other priorities would draw a different table. We tried to state each library's strengths as its own users would.
 
-This page compares features and behaviour. Speed and memory are in [Performance](performance.md), generated from measurements; conformance counts are in [Conformance](conformance.md).
+**Versions.** This page describes YamlDotNet 18.1.0, SharpYaml 3.14.0 and VYaml 1.4.0. Library facts come from the libraries' own documentation and from a survey we ran against those versions on 2026-09-30. On 2026-10-16 the current releases were YamlDotNet 18.1.0, SharpYaml 3.16.0 and VYaml 1.4.1; we read the release notes and READMEs of the newer two and found nothing that changes a line here, but we did not repeat the behaviour tests (depth limits, aliases) against them. Libraries change, so check the current release before you rely on a line here.
+
+This page compares features and behaviour and has no figures. Speed and memory are in [Performance](performance.md), generated from the kit's release run, whose method line names the library versions it measured; these can be newer than the ones above. Conformance counts are in [Conformance](conformance.md).
 
 ## What each library is
 
@@ -28,7 +30,7 @@ Compare libraries on the job they share.
 
 - You change YAML files that people also edit by hand, and the diff must hold only your change.
 - You want to apply a JSON Patch or a merge patch to a YAML file and keep its comments.
-- You want YAML 1.2 as the specification says, with the yaml-test-suite results published ([Conformance](conformance.md)).
+- You want YAML 1.2 as the specification says, measured against the yaml-test-suite with every known deviation listed ([Conformance](conformance.md)).
 - You read YAML from outside your program and want bounds on by default, with a stricter preset to opt into.
 - You already know System.Text.Json and want the same options, attributes and source generation for YAML.
 

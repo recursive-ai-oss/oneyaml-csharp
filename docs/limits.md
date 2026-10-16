@@ -86,10 +86,21 @@ catch (YamlException e)
 
 `MaxInputBytes` is checked against the input as given and again against its UTF-8 form. `YamlDocument.Parse(Stream)` refuses a seekable stream that is longer than the limit before reading it, and stops reading any other stream as soon as it passes the limit.
 
+## The compatibility adapters
+
+The adapters read with `YamlLimits.Default` unless you give them limits. Neither YamlDotNet nor SharpYaml has these settings; the adapters add them so that outside input can be read through them too:
+
+| Adapter | Where the limits go |
+|---|---|
+| `OneYaml.Compat.YamlDotNet` | `DeserializerBuilder.WithLimits(YamlLimits)`, `YamlStream.Load(TextReader, YamlLimits)`, `new Parser(TextReader, YamlLimits)` |
+| `OneYaml.Compat.SharpYaml` | `YamlSerializerOptions.Limits` (`null` means `YamlLimits.Default`) |
+
+Pass `YamlLimits.Untrusted` for input you do not control. The adapters' own depth settings, `WithMaximumRecursion` and `MaxDepth`, can lower the depth further, never raise it above these limits. The migration guides show each one ([from YamlDotNet](migrate-yamldotnet.md#input-you-do-not-control), [from SharpYaml](migrate-sharpyaml.md#input-you-do-not-control)).
+
 ## What the limits do not cover
 
 - **Your converters.** Code in a `YamlConverter<T>` runs outside these bounds. A converter that recurses for each level of nesting should call `RuntimeHelpers.EnsureSufficientExecutionStack`, especially under `YamlLimits.None`.
-- **The compatibility adapters.** `OneYaml.Compat.YamlDotNet` and `OneYaml.Compat.SharpYaml` always run with `YamlLimits.Default` and have no `Untrusted` mode. Read input you do not control with the `OneYaml` API.
+- **The compatibility adapters without limits given.** They read with `YamlLimits.Default`, which does not cap input size, scalar size or documents ([The compatibility adapters](#the-compatibility-adapters)).
 - **Memory without `Untrusted`.** Under `Default` there is no cap on input size, scalar size or documents per stream, so memory grows with the input. A `YamlDocument` keeps the whole text and an index of it.
 - **What you write.** `Serialize` writes a value that is shared in several places once for each place, so its output can be far larger than the object graph in memory.
 

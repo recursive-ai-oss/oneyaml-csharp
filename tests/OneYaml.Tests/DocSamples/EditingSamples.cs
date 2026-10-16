@@ -208,6 +208,78 @@ public class EditingSamples
         // replicas: 3
         #endregion
     });
+
+    [Fact]
+    public void EditManifest() => DocSample.Run(nameof(EditManifest), () =>
+    {
+        #region EditManifest
+        byte[] input = """
+            # Service for the web tier
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: web
+            ---
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: web
+            spec:
+              replicas: 2              # scaled by the release job
+              template:
+                spec:
+                  containers:
+                    - name: web
+                      image: web:1.4
+                      env:
+                        # left over from the old proxy
+                        - name: PROXY_URL
+                          value: http://proxy:3128
+                        - name: LOG_COLOR
+                          value: auto
+            """u8.ToArray(); // in a real job: File.ReadAllBytes(path)
+
+        var options = new YamlDocumentOptions
+        {
+            Limits = YamlLimits.Untrusted, // also bounds input size, scalar size and document count
+            QuoteYaml11Lookalikes = true,  // so a YAML 1.1 reader sees 'no' as a string
+        };
+        using var doc = YamlDocument.Parse(input, options);
+
+        // Find the Deployment by its kind, not by its place in the file.
+        int deploy = Enumerable.Range(0, doc.Documents.Count).First(i => doc.Get<string>("/kind", i) == "Deployment");
+        const string Web = "/spec/template/spec/containers/0";
+        doc.Set("/spec/replicas", 3, deploy);
+        doc.Set($"{Web}/image", "web:1.5", deploy);
+        doc.Set($"{Web}/env/1/value", "no", deploy);
+        doc.Remove($"{Web}/env/0", deploy); // the comment line above it goes too
+
+        using var file = new MemoryStream(); // in a real job: File.Create(path)
+        doc.WriteTo(file);                   // in the encoding the input had
+        file.Position = 0;
+        Console.Write(new StreamReader(file).ReadToEnd());
+        // # Service for the web tier
+        // apiVersion: v1
+        // kind: Service
+        // metadata:
+        //   name: web
+        // ---
+        // apiVersion: apps/v1
+        // kind: Deployment
+        // metadata:
+        //   name: web
+        // spec:
+        //   replicas: 3              # scaled by the release job
+        //   template:
+        //     spec:
+        //       containers:
+        //         - name: web
+        //           image: web:1.5
+        //           env:
+        //             - name: LOG_COLOR
+        //               value: 'no'
+        #endregion
+    });
 }
 
 #region EditReading

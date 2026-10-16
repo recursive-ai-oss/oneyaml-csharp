@@ -6,10 +6,11 @@ Switching is a package swap and a `using` change: `using SharpYaml;` becomes `us
 (and `SharpYaml.Serialization` becomes `OneYaml.Compat.SharpYaml.Serialization`).
 
 For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
-[Migrating from SharpYaml](../migrate-sharpyaml.md). The adapter always runs with the library's default limits and has no
-mode for untrusted input ([Limits](../limits.md#what-the-limits-do-not-cover)).
+[Migrating from SharpYaml](../migrate-sharpyaml.md). The adapter reads with the library's default limits
+unless `YamlSerializerOptions.Limits` is set; that option is an addition, not in SharpYaml, and `YamlLimits.Untrusted` is the
+setting for input you do not control ([Limits](../limits.md#the-compatibility-adapters)).
 
-Classes: **Intended** (a deliberate choice, kept), **Fix** (the real library is wrong; this package is right),
+Classes: **Intended** (a deliberate choice, kept), **Fix** (SharpYaml 3.14.0 writes output that does not read back, or gives a result the YAML does not say; the package does not reproduce it),
 **Gap** (a behaviour the package does not reproduce yet).
 
 ## What is covered
@@ -36,8 +37,19 @@ A program that uses these fails to compile (so the gap is visible), except the o
 Fail at first use with `NotSupportedException` (naming the option): `Schema`/`UseSchema` other than Core,
 `DuplicateKeyHandling` other than the default error, `DictionaryKeyPolicy`, `PreferredObjectCreationHandling.Populate`,
 `DefaultIgnoreCondition` of `Always`/`WhenWriting`/`WhenReading`, `UnsafeAllowDeserializeFromTagTypeName`, and a custom `TypeInfoResolver`.
+The writer has one layout, so the layout options are refused the same way unless they ask for that layout:
+`BlockSequenceMappingStyle` other than `Default` or `Compact`, `BlockSequenceSequenceStyle` other than `Default` or `Expanded`,
+and `ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set. `ReferenceHandling` other than
+`None` is refused when writing, because the writer writes a shared object in full each time and writes no anchors; reading
+follows aliases with any value.
 
-## Fixes (the real library is wrong)
+## Added, not in SharpYaml
+
+- `YamlSerializerOptions.Limits` (`OneYaml.YamlLimits?`): the limits every read through the options keeps to. `null`, the
+  default, means `YamlLimits.Default`; set `YamlLimits.Untrusted` for input you do not control. `MaxDepth` can lower the
+  depth further, never raise it. Code that sets it does not compile against SharpYaml.
+
+## Fixes
 
 | Difference | Repro |
 |---|---|
@@ -71,7 +83,7 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 | Error marks are a point (`Start == End`), normally at the real library's line and column but not always | `Deserialize<object>("a: [")` |
 | Syntax errors are `SyntaxErrorException`; every other category is `YamlException` (the real `SemanticErrorException` is never raised) | `Deserialize<object>("a: [")` is a syntax error; `Deserialize<int>("x")` is a `YamlException` |
 | `Stream` input is read to the end, with UTF-8, UTF-16 and UTF-32 detected, and left open | `Deserialize<Plain>(stream)` |
-| `BlockSequenceMappingStyle`, `BlockSequenceSequenceStyle`, `ScalarStylePreferences` are accepted and change nothing | |
+| `BlockSequenceMappingStyle`, `BlockSequenceSequenceStyle` and `ScalarStylePreferences` are accepted at their default values and refused at any value that asks for another layout | `Serialize(x, new() { BlockSequenceMappingStyle = YamlSequenceItemStyle.Expanded })` throws `NotSupportedException` |
 | `GetTypeInfo` returns a nullable `YamlTypeInfo` | |
 | Only the first document is read, as in the real library; the rest of the stream is not parsed unless the first fails | `Deserialize<Plain>("a: 1\n---\n[")` |
 
@@ -79,5 +91,5 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 
 - `DuplicateKeyHandling.LastWins` and `FirstWins` (the engine has no option for them).
 - Source-generated contexts (see "What is left out").
-- `ReferenceHandling.Preserve` on write: shared objects are written out in full, and a cycle is a `YamlException`.
+- `ReferenceHandling.Preserve` on write: refused with `NotSupportedException` (see "Fail at first use"), as the writer writes no anchors.
 - Error text differs from the real library's wording; marks follow the rule above.

@@ -5,6 +5,17 @@ SharpYaml 3 and OneYaml share the System.Text.Json shape, so most code moves wit
 1. **Swap to the adapter.** `OneYaml.Compat.SharpYaml` provides SharpYaml's `YamlSerializer`, `YamlSerializerOptions`, attributes and exceptions under a new namespace. For the API listed below, changing the package and the `using` lines keeps your call sites.
 2. **Move to the `OneYaml` API.** It adds what the adapter leaves out (converters, polymorphism, extension data, generated contexts) and a `YamlDocument` that edits a file without losing its comments. This is the route for new code.
 
+## Before you swap
+
+A build that passes after the swap is not yet a finished migration. Check these four things, in this order:
+
+| Check | What to look for |
+|---|---|
+| **Compile gaps** | Custom converters (`YamlConverter<T>`, `YamlReader`, `YamlWriter`), the `IYamlOn*` hooks, polymorphism, extension data, generated contexts (`Ctx.Default` does not exist), and the `Model` and `Syntax` namespaces are not provided, so code that uses them fails to build. The [full list](compat/sharpyaml.md#what-is-left-out). |
+| **Runtime rejections** | Some options compile but throw `NotSupportedException` at first use: a schema other than Core, `DuplicateKeyHandling` other than the default, `DictionaryKeyPolicy`, `Populate`, some `DefaultIgnoreCondition` values, `UnsafeAllowDeserializeFromTagTypeName` and a custom `TypeInfoResolver`. The layout options the writer cannot follow are refused too: `BlockSequenceMappingStyle` other than `Default` or `Compact`, `BlockSequenceSequenceStyle` other than `Default` or `Expanded`, and `ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set. `ReferenceHandling` other than `None` is refused when writing; reading follows aliases with any value. |
+| **Semantic changes** | Output can differ (whole floats, quoting of YAML 1.1 look-alikes), overflowing numbers are an error, and encodings without a byte order mark are detected. See [Check after the swap](#check-after-the-swap) and the [list of differences](compat/sharpyaml.md). |
+| **Safety limits** | `MaxDepth` defaults to 64, as in SharpYaml, and is never raised above the library limit. For input you do not control, set `Limits = YamlLimits.Untrusted` ([Input you do not control](#input-you-do-not-control)). `Limits` is an addition: SharpYaml has no such option. |
+
 ## Swap to the adapter
 
 ```sh
@@ -56,7 +67,7 @@ record Service(string Name, int Replicas);
 - The attributes `YamlPropertyName`, `YamlIgnore`, `YamlInclude`, `YamlRequired`, `YamlPropertyOrder`, `YamlConstructor` and `YamlBlockSequenceItemStyle`, with the System.Text.Json attributes as the fallback.
 - `YamlException`, `SyntaxErrorException`, `SemanticErrorException` and `Mark`.
 
-Not provided: custom converters (`YamlConverter<T>`, `YamlReader`, `YamlWriter`), the `IYamlOn*` hooks, polymorphism, extension data, generated contexts (`Ctx.Default` does not exist), and SharpYaml's `Model` and `Syntax` namespaces. Code that uses them does not compile. A few options compile but throw `NotSupportedException` at first use: a schema other than Core, `DuplicateKeyHandling` other than the default, `DictionaryKeyPolicy`, `Populate`, some `DefaultIgnoreCondition` values, `UnsafeAllowDeserializeFromTagTypeName` and a custom `TypeInfoResolver`. The [list of differences](compat/sharpyaml.md) has each one.
+What it does not provide, and the options it rejects, are in [Before you swap](#before-you-swap).
 
 ### Check after the swap
 
@@ -65,8 +76,36 @@ Read [the full list of differences](compat/sharpyaml.md), each with a repro. The
 - **Output.** Whole floats are written with a fraction (`100.0`), YAML 1.1 look-alikes are quoted (`'y'`, `'on'`), and output with `WriteIndented = false` is valid YAML.
 - **Numbers that overflow** their type are an error, where SharpYaml turns them into infinity.
 - **Streams in UTF-16 or UTF-32** without a byte order mark are detected, as YAML 1.2 says.
-- **Limits.** `MaxDepth` defaults to 64, as in SharpYaml, and is never raised above the library limit. The adapter always runs with the default limits and has no setting for untrusted input; read such input with the `OneYaml` API and `YamlLimits.Untrusted`.
 - **Exceptions.** Syntax errors are `SyntaxErrorException`; every other error is a `YamlException`.
+
+### Input you do not control
+
+`YamlSerializerOptions.Limits` is not in SharpYaml. It sets the [limits](limits.md) of the `OneYaml` library for every read through those options, and when it is `null`, the default, reading uses `YamlLimits.Default`. For uploads, request bodies and files from other systems, set it to `YamlLimits.Untrusted`, which also bounds the input size and the size of a scalar, and bounds alias expansion more tightly. `MaxDepth` can lower the depth further, never raise it. `YamlLimits` is in the `OneYaml` namespace.
+
+<!-- sample: SharpYamlLimits -->
+```csharp
+using OneYaml.Compat.SharpYaml;
+
+// 17 short lines whose aliases double at each level: a small text that stands for a very large value.
+string upload = "a0: &a0 [x, x]\n" + string.Concat(Enumerable.Range(1, 16).Select(i => $"a{i}: &a{i} [*a{i - 1}, *a{i - 1}]\n"));
+
+// Limits is not in SharpYaml. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
+var options = new YamlSerializerOptions { Limits = OneYaml.YamlLimits.Untrusted };
+try
+{
+    YamlSerializer.Deserialize<object>(upload, options);
+}
+catch (YamlException e)
+{
+    Console.WriteLine(e.Message);
+    // (Lin: 14, Col: 17, Chr: 293) - (Lin: 14, Col: 17, Chr: 293): Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor 2, AliasNodeFloor 100000, AliasByteFactor 2, AliasByteFloor 8388608). (line 15, column 18)
+}
+
+// The default limits allow the same text.
+Console.WriteLine(YamlSerializer.Deserialize<object>(upload) is not null); // True
+```
+
+Code that sets `Limits` no longer compiles against SharpYaml itself.
 
 ## Move to the OneYaml API
 

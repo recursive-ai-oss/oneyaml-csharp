@@ -7,6 +7,17 @@ There are two ways to move code written against YamlDotNet:
 
 You can do the first now and the second file by file: the two packages work side by side.
 
+## Before you swap
+
+A build that passes after the swap is not yet a finished migration. Check these four things, in this order:
+
+| Check | What to look for |
+|---|---|
+| **Compile gaps** | API the adapter does not provide fails to build: the scanner, `MergingParser`, type inspectors, node deserializers, event emitters, object-graph visitors, static contexts and comment events. The [full list](compat/yamldotnet.md#surface-not-provided-gap). |
+| **Runtime rejections** | `Deserialize(IParser)` with a parser that is not the adapter's own `Parser` throws `NotSupportedException`. A serializer built with `EnsureRoundtrip()` throws `NotSupportedException` when `Serialize` is called: the adapter cannot do what it asks, so it says so instead of ignoring it. |
+| **Semantic changes** | Serializer output can differ (more quoting, escapes), more valid YAML is read, the class of an exception can differ, and after you change a node `YamlStream.Save` writes without comments. See [Check after the swap](#check-after-the-swap) and the [list of differences](compat/yamldotnet.md). |
+| **Safety limits** | The depth limit and the alias budget always apply, and `WithMaximumRecursion` cannot raise the depth above the library limit. For input you do not control, pass `YamlLimits.Untrusted` to `WithLimits` ([Input you do not control](#input-you-do-not-control)). `WithLimits` is an addition: YamlDotNet has no such setting. |
+
 ## Swap to the adapter
 
 ```sh
@@ -112,9 +123,39 @@ The adapter reproduces YamlDotNet's documented behaviour, not its defects. Read 
 - **Output that reads back.** Strings that a reader would take for something else are quoted (`'true'`, `'yes'`, `'123'`), characters that YamlDotNet writes in a way that changes on reading are escaped, and long keys are written so that they read back. Snapshot tests of serializer output may need updating.
 - **Comments survive an unchanged round trip.** `YamlStream.Save` returns the loaded text when nothing changed; YamlDotNet writes it again without comments and with `...` after each document.
 - **More valid YAML is read.** Some inputs that YamlDotNet refuses or throws `ArgumentException` on are valid YAML 1.2 and are read.
-- **Limits stay on.** The alias budget and depth limit always apply, and `WithMaximumRecursion` cannot raise the depth above the library limit. A billion-laughs input fails with a `YamlException` instead of using memory without bound. There is no setting for untrusted input; read such input with the `OneYaml` API and `YamlLimits.Untrusted`.
+- **Limits stay on.** A billion-laughs input fails with a `YamlException` instead of using memory without bound ([Safety limits](#before-you-swap)).
 - **Exception classes.** `SyntaxErrorException`, `SemanticErrorException`, `MaximumRecursionLevelReachedException` and `AnchorNotFoundException` are raised, but which class a given error gets can differ from YamlDotNet. Catch `YamlException` if you can.
 - **Line breaks.** The serializer writes the platform line break, as YamlDotNet does.
+
+### Input you do not control
+
+The adapter adds three members that YamlDotNet does not have, so that reading can keep to the [limits](limits.md) of the `OneYaml` library: `DeserializerBuilder.WithLimits(YamlLimits)`, `YamlStream.Load(TextReader, YamlLimits)` and `new Parser(TextReader, YamlLimits)`. Without them the adapter reads with `YamlLimits.Default`. For uploads, request bodies and files from other systems, pass `YamlLimits.Untrusted`, which also bounds the input size, the size of a scalar and the number of documents. `YamlLimits` is in the `OneYaml` namespace.
+
+<!-- sample: YamlDotNetLimits -->
+```csharp
+using OneYaml.Compat.YamlDotNet.Core;
+using OneYaml.Compat.YamlDotNet.Serialization;
+
+string upload = new string('[', 129) + new string(']', 129); // nested 129 deep
+
+// WithLimits is not in YamlDotNet. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
+IDeserializer deserializer = new DeserializerBuilder()
+    .WithLimits(OneYaml.YamlLimits.Untrusted)
+    .Build();
+try
+{
+    deserializer.Deserialize<object>(upload);
+}
+catch (YamlException e)
+{
+    Console.WriteLine(e.Message); // The nesting depth is larger than the limit MaxDepth (128). (line 1, column 129)
+}
+
+// The default limits allow the same text.
+Console.WriteLine(new DeserializerBuilder().Build().Deserialize<object>(upload) is not null); // True
+```
+
+Code that uses these members no longer compiles against YamlDotNet itself.
 
 ## Move to the OneYaml API
 

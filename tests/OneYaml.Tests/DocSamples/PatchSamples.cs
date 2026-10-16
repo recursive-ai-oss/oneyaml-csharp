@@ -36,6 +36,24 @@ public class PatchSamples
     });
 
     [Fact]
+    public void PatchTestNumbers() => DocSample.Run(nameof(PatchTestNumbers), () =>
+    {
+        #region PatchTestNumbers
+        using var doc = YamlDocument.Parse("timeout: 1.0\n");
+        try
+        {
+            doc.ApplyPatch("""[{ "op": "test", "path": "/timeout", "value": 1 }]""");
+        }
+        catch (YamlException e) when (e.Category == YamlErrorCategory.PatchTest)
+        {
+            Console.WriteLine(e.Message); // The value at '/timeout' is not the value the test expects.
+        }
+
+        doc.ApplyPatch("""[{ "op": "test", "path": "/timeout", "value": 1.0 }]"""); // passes
+        #endregion
+    });
+
+    [Fact]
     public void PatchAtomic() => DocSample.Run(nameof(PatchAtomic), () =>
     {
         #region PatchAtomic
