@@ -1010,15 +1010,16 @@ internal ref partial struct YamlReader
 
     private void FetchValue(int column, bool afterJsonLike)
     {
+        // Only a quoted key or a flow collection may run straight into its value; after any other key, an explicit key or
+        // an empty key the ':' needs white space before a collection value ("{a:{}}", "{? a:{}}" and "{:{}}" are errors,
+        // "{a: {}}" and a quoted key before the colon are not).
+        if (_flowLevel > 0 && !afterJsonLike && At(_pos + 1) is (byte)'{' or (byte)'[')
+        {
+            throw Error("A ':' after a plain key must be followed by white space before a collection.", _pos + 1);
+        }
+
         if (_keyHead != _keyTail && _keys[_keyTail - 1].Level == _flowLevel && !_keys[_keyTail - 1].Dead)
         {
-            // Only a quoted key or a flow collection may run straight into its value; after any other key the ':' needs
-            // white space before a collection value ("{a:{}}" is an error, "{a: {}}" and a quoted key before the colon are not).
-            if (_flowLevel > 0 && !afterJsonLike && At(_pos + 1) is (byte)'{' or (byte)'[')
-            {
-                throw Error("A ':' after a plain key must be followed by white space before a collection.", _pos + 1);
-            }
-
             SimpleKey key = _keys[_keyTail - 1];
             PopKey();
 

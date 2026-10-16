@@ -77,6 +77,17 @@ internal sealed class NodeBinder
             int target = s.Node(node).Aux;
             if (c.Anchored.TryGetValue(target, out object? shared) && (shared is null ? !type.IsValueType : type.IsInstanceOfType(shared)))
             {
+                // The instance is shared, as YamlDotNet shares it, but the use still counts for what the target
+                // stands for, so a chain of aliases cannot hide an expansion from the limits.
+                try
+                {
+                    c.Budget.ChargeShared(s, node, target);
+                }
+                catch (Oy.YamlException ex)
+                {
+                    throw ErrorMap.Translate(ex, c.Source.Lines);
+                }
+
                 value = shared;
                 return true;
             }
@@ -225,8 +236,11 @@ internal sealed class NodeBinder
     // Reads the node at the parser's position (used by Deserialize(IParser)).
     public object? BindAtParser(Parser parser, Type type)
     {
-        // The parser already holds its own limits; the stricter of the two applies.
-        var c = new BindContext(parser.Source, Oy.YamlLimits.Stricter(_settings.Limits, parser.Source.Limits));
+        // The parser already holds its own limits; the stricter of the two applies. What the parser fixed while it parsed
+        // (input size, scalar size, document count) is checked here against the deserializer's limits when those are stricter.
+        Oy.YamlLimits effective = Oy.YamlLimits.Stricter(_settings.Limits, parser.Source.Limits);
+        CheckParsedAgainst(parser.Source, effective);
+        var c = new BindContext(parser.Source, effective);
         int at = parser.CurrentNode;
         if (at < 0)
         {
@@ -237,6 +251,45 @@ internal sealed class NodeBinder
         object? value = Bind(c, at, type);
         parser.SkipNode();
         return value;
+    }
+
+    private static void CheckParsedAgainst(Loaded source, Oy.YamlLimits limits)
+    {
+        Oy.YamlLimits parsedWith = source.Limits;
+        if (limits.MaxInputBytes >= parsedWith.MaxInputBytes && limits.MaxScalarBytes >= parsedWith.MaxScalarBytes && limits.MaxDocuments >= parsedWith.MaxDocuments)
+        {
+            return;
+        }
+
+        DocState s = source.State;
+        string? message = null;
+        int offset = 0;
+        if (limits.MaxInputBytes < parsedWith.MaxInputBytes && System.Text.Encoding.UTF8.GetByteCount(source.Text) > limits.MaxInputBytes)
+        {
+            message = $"The input is larger than the limit MaxInputBytes ({limits.MaxInputBytes}).";
+        }
+        else if (limits.MaxDocuments < parsedWith.MaxDocuments && source.Document.Documents.Count > limits.MaxDocuments)
+        {
+            message = $"The stream has more documents than the limit MaxDocuments ({limits.MaxDocuments}).";
+        }
+        else if (limits.MaxScalarBytes < parsedWith.MaxScalarBytes)
+        {
+            for (int i = 0; i < s.NodeCount; i++)
+            {
+                ref readonly CstNode n = ref s.Node(i);
+                if (n.Kind == NodeKind.Scalar && n.End - n.Start > limits.MaxScalarBytes)
+                {
+                    message = $"A scalar is larger than the limit MaxScalarBytes ({limits.MaxScalarBytes}).";
+                    offset = n.Start;
+                    break;
+                }
+            }
+        }
+
+        if (message is not null)
+        {
+            throw ErrorMap.Translate(Oy.YamlException.At(Oy.YamlErrorCategory.Limit, message, s.Text, offset), source.Lines);
+        }
     }
 
     private object? BindObject(BindContext c, int node, TagName tag)

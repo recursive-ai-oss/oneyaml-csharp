@@ -214,13 +214,35 @@ public static class YamlSerializer
 
     private static object? FirstOfString<T>(string yaml, Oy.YamlTypeInfo info, Oy.YamlException split, string? source) => FirstOf(yaml, (Oy.YamlTypeInfo<T>)info, split, source);
 
-    private static string Text(TextReader reader)
+    private static long MaxInput(YamlSerializerOptions? options) => (options?.Limits ?? Oy.YamlLimits.Default).MaxInputBytes;
+
+    // A reader is read only as far as the input limit allows: a character is at least one byte, so more characters than
+    // the limit is over it, and the read stops there instead of buffering an endless reader.
+    private static string Text(TextReader reader, YamlSerializerOptions? options)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        return reader.ReadToEnd();
+        long max = MaxInput(options);
+        if (max == long.MaxValue)
+        {
+            return reader.ReadToEnd();
+        }
+
+        var sb = new System.Text.StringBuilder();
+        char[] chunk = new char[4096];
+        int n;
+        while ((n = reader.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            sb.Append(chunk, 0, n);
+            if (sb.Length > max)
+            {
+                throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({max}).") { Category = Oy.YamlErrorCategory.Limit }, default, null);
+            }
+        }
+
+        return sb.ToString();
     }
 
-    private static string Text(Stream stream) => StreamText.Read(stream, null);
+    private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, null, MaxInput(options));
 
     private static string Write<T>(T value, Oy.YamlTypeInfo<T> info)
     {
@@ -277,11 +299,25 @@ public static class YamlSerializer
     }
 
     // A stream that cannot be decoded is a failure to read, not an exception, for the Try methods.
-    private static bool TryText(Stream stream, out string? text)
+    private static bool TryText(TextReader reader, YamlSerializerOptions? options, out string? text)
     {
         try
         {
-            text = Text(stream);
+            text = Text(reader, options);
+            return true;
+        }
+        catch (YamlException)
+        {
+            text = null;
+            return false;
+        }
+    }
+
+    private static bool TryText(Stream stream, YamlSerializerOptions? options, out string? text)
+    {
+        try
+        {
+            text = Text(stream, options);
             return true;
         }
         catch (YamlException)
@@ -733,7 +769,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static T? Deserialize<T>(TextReader reader, YamlSerializerOptions? options = null) => Read(Text(reader), InfoOf<T>(options), Source(options));
+    public static T? Deserialize<T>(TextReader reader, YamlSerializerOptions? options = null) => Read(Text(reader, options), InfoOf<T>(options), Source(options));
 
     /// <summary>Reads a value from a text reader, with the metadata of a context.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -743,7 +779,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static T? Deserialize<T>(TextReader reader, Serialization.YamlSerializerContext context) => Read(Text(reader), InfoOf<T>(context), Source(context.Options));
+    public static T? Deserialize<T>(TextReader reader, Serialization.YamlSerializerContext context) => Read(Text(reader, context.Options), InfoOf<T>(context), Source(context.Options));
 
     /// <summary>Reads a value from a text reader, with given metadata.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -754,7 +790,7 @@ public static class YamlSerializer
     public static T? Deserialize<T>(TextReader reader, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return Read(Text(reader), typeInfo.Engine, Source(typeInfo.Options));
+        return Read(Text(reader, typeInfo.Options), typeInfo.Engine, Source(typeInfo.Options));
     }
 
     /// <summary>Reads a value of a given type from a text reader.</summary>
@@ -765,7 +801,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static object? Deserialize(TextReader reader, Type returnType, YamlSerializerOptions? options = null) => ReadBoxed(Text(reader), InfoOf(returnType, options), Source(options));
+    public static object? Deserialize(TextReader reader, Type returnType, YamlSerializerOptions? options = null) => ReadBoxed(Text(reader, options), InfoOf(returnType, options), Source(options));
 
     /// <summary>Reads a value of a given type from a text reader, with the metadata of a context.</summary>
     /// <param name="reader">The reader.</param>
@@ -775,7 +811,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static object? Deserialize(TextReader reader, Type returnType, Serialization.YamlSerializerContext context) => ReadBoxed(Text(reader), InfoOf(returnType, context), Source(context.Options));
+    public static object? Deserialize(TextReader reader, Type returnType, Serialization.YamlSerializerContext context) => ReadBoxed(Text(reader, context.Options), InfoOf(returnType, context), Source(context.Options));
 
     /// <summary>Reads a value from a text reader, with given metadata.</summary>
     /// <param name="reader">The reader.</param>
@@ -787,7 +823,7 @@ public static class YamlSerializer
     public static object? Deserialize(TextReader reader, YamlTypeInfo typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return ReadBoxed(Text(reader), typeInfo.Engine, Source(typeInfo.Options));
+        return ReadBoxed(Text(reader, typeInfo.Options), typeInfo.Engine, Source(typeInfo.Options));
     }
 
     /// <summary>Reads a value from a stream of text, to its end. The stream is left open.</summary>
@@ -798,7 +834,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static T? Deserialize<T>(Stream stream, YamlSerializerOptions? options = null) => Read(Text(stream), InfoOf<T>(options), Source(options));
+    public static T? Deserialize<T>(Stream stream, YamlSerializerOptions? options = null) => Read(Text(stream, options), InfoOf<T>(options), Source(options));
 
     /// <summary>Reads a value from a stream, with the metadata of a context.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -808,7 +844,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static T? Deserialize<T>(Stream stream, Serialization.YamlSerializerContext context) => Read(Text(stream), InfoOf<T>(context), Source(context.Options));
+    public static T? Deserialize<T>(Stream stream, Serialization.YamlSerializerContext context) => Read(Text(stream, context.Options), InfoOf<T>(context), Source(context.Options));
 
     /// <summary>Reads a value from a stream, with given metadata.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -819,7 +855,7 @@ public static class YamlSerializer
     public static T? Deserialize<T>(Stream stream, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return Read(Text(stream), typeInfo.Engine, Source(typeInfo.Options));
+        return Read(Text(stream, typeInfo.Options), typeInfo.Engine, Source(typeInfo.Options));
     }
 
     /// <summary>Reads a value of a given type from a stream.</summary>
@@ -830,7 +866,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static object? Deserialize(Stream stream, Type returnType, YamlSerializerOptions? options = null) => ReadBoxed(Text(stream), InfoOf(returnType, options), Source(options));
+    public static object? Deserialize(Stream stream, Type returnType, YamlSerializerOptions? options = null) => ReadBoxed(Text(stream, options), InfoOf(returnType, options), Source(options));
 
     /// <summary>Reads a value of a given type from a stream, with the metadata of a context.</summary>
     /// <param name="stream">The stream.</param>
@@ -840,7 +876,7 @@ public static class YamlSerializer
     /// <exception cref="YamlException">The text is not valid YAML, or does not fit the type.</exception>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static object? Deserialize(Stream stream, Type returnType, Serialization.YamlSerializerContext context) => ReadBoxed(Text(stream), InfoOf(returnType, context), Source(context.Options));
+    public static object? Deserialize(Stream stream, Type returnType, Serialization.YamlSerializerContext context) => ReadBoxed(Text(stream, context.Options), InfoOf(returnType, context), Source(context.Options));
 
     /// <summary>Reads a value from a stream, with given metadata.</summary>
     /// <param name="stream">The stream.</param>
@@ -852,7 +888,7 @@ public static class YamlSerializer
     public static object? Deserialize(Stream stream, YamlTypeInfo typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return ReadBoxed(Text(stream), typeInfo.Engine, Source(typeInfo.Options));
+        return ReadBoxed(Text(stream, typeInfo.Options), typeInfo.Engine, Source(typeInfo.Options));
     }
 
     /// <summary>Reads a value from a text reader and tells whether it worked.</summary>
@@ -863,7 +899,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize<T>(TextReader reader, out T? value, YamlSerializerOptions? options = null) => TryDeserialize(Text(reader), out value, options);
+    public static bool TryDeserialize<T>(TextReader reader, out T? value, YamlSerializerOptions? options = null) => TryText(reader, options, out string? text) ? TryDeserialize(text!, out value, options) : Fail(out value);
 
     /// <summary>Reads a value from a text reader with the metadata of a context, and tells whether it worked.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -873,7 +909,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize<T>(TextReader reader, Serialization.YamlSerializerContext context, out T? value) => TryDeserialize(Text(reader), context, out value);
+    public static bool TryDeserialize<T>(TextReader reader, Serialization.YamlSerializerContext context, out T? value) => TryText(reader, context.Options, out string? text) ? TryDeserialize(text!, context, out value) : Fail(out value);
 
     /// <summary>Reads a value from a stream and tells whether it worked.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -883,7 +919,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize<T>(Stream stream, out T? value, YamlSerializerOptions? options = null) => TryText(stream, out string? text) ? TryDeserialize(text!, out value, options) : Fail(out value);
+    public static bool TryDeserialize<T>(Stream stream, out T? value, YamlSerializerOptions? options = null) => TryText(stream, options, out string? text) ? TryDeserialize(text!, out value, options) : Fail(out value);
 
     /// <summary>Reads a value from a stream with the metadata of a context, and tells whether it worked.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -893,7 +929,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize<T>(Stream stream, Serialization.YamlSerializerContext context, out T? value) => TryText(stream, out string? text) ? TryDeserialize(text!, context, out value) : Fail(out value);
+    public static bool TryDeserialize<T>(Stream stream, Serialization.YamlSerializerContext context, out T? value) => TryText(stream, context.Options, out string? text) ? TryDeserialize(text!, context, out value) : Fail(out value);
 
     /// <summary>Reads a value of a given type from a text reader and tells whether it worked.</summary>
     /// <param name="reader">The reader.</param>
@@ -903,7 +939,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize(TextReader reader, Type returnType, out object? value, YamlSerializerOptions? options = null) => TryDeserialize(Text(reader), returnType, out value, options);
+    public static bool TryDeserialize(TextReader reader, Type returnType, out object? value, YamlSerializerOptions? options = null) => TryText(reader, options, out string? text) ? TryDeserialize(text!, returnType, out value, options) : Fail(out value);
 
     /// <summary>Reads a value of a given type from a text reader with the metadata of a context, and tells whether it worked.</summary>
     /// <param name="reader">The reader.</param>
@@ -913,7 +949,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize(TextReader reader, Type returnType, Serialization.YamlSerializerContext context, out object? value) => TryDeserialize(Text(reader), returnType, context, out value);
+    public static bool TryDeserialize(TextReader reader, Type returnType, Serialization.YamlSerializerContext context, out object? value) => TryText(reader, context.Options, out string? text) ? TryDeserialize(text!, returnType, context, out value) : Fail(out value);
 
     /// <summary>Reads a value of a given type from a stream and tells whether it worked.</summary>
     /// <param name="stream">The stream.</param>
@@ -923,7 +959,7 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize(Stream stream, Type returnType, out object? value, YamlSerializerOptions? options = null) => TryText(stream, out string? text) ? TryDeserialize(text!, returnType, out value, options) : Fail(out value);
+    public static bool TryDeserialize(Stream stream, Type returnType, out object? value, YamlSerializerOptions? options = null) => TryText(stream, options, out string? text) ? TryDeserialize(text!, returnType, out value, options) : Fail(out value);
 
     /// <summary>Reads a value of a given type from a stream with the metadata of a context, and tells whether it worked.</summary>
     /// <param name="stream">The stream.</param>
@@ -933,5 +969,5 @@ public static class YamlSerializer
     /// <returns><see langword="true"/> when the text was read.</returns>
     [RequiresUnreferencedCode(Unreferenced)]
     [RequiresDynamicCode(Dynamic)]
-    public static bool TryDeserialize(Stream stream, Type returnType, Serialization.YamlSerializerContext context, out object? value) => TryText(stream, out string? text) ? TryDeserialize(text!, returnType, context, out value) : Fail(out value);
+    public static bool TryDeserialize(Stream stream, Type returnType, Serialization.YamlSerializerContext context, out object? value) => TryText(stream, context.Options, out string? text) ? TryDeserialize(text!, returnType, context, out value) : Fail(out value);
 }
