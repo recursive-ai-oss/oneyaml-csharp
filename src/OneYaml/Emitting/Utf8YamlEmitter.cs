@@ -83,6 +83,7 @@ public sealed partial class Utf8YamlEmitter
         _maxDepth = options.Limits.MaxDepth;
         Options = options;
         _depth = 0;
+        ClearProperties();
         _rootDone = false;
         _embedding = Embedding.None;
         _embeddedParentIndent = 0;
@@ -134,6 +135,7 @@ public sealed partial class Utf8YamlEmitter
         }
 
         emitter._depth = 0;
+        emitter.ClearProperties();
         emitter._w = default;
         emitter._output = null!;
         emitter.Options = null!;
@@ -146,6 +148,11 @@ public sealed partial class Utf8YamlEmitter
         if (_depth != 0)
         {
             throw Misuse("A collection was started and not ended.");
+        }
+
+        if (_propsLength != 0)
+        {
+            throw PendingProperties();
         }
 
         if (!_rootDone)
@@ -235,6 +242,11 @@ public sealed partial class Utf8YamlEmitter
             }
         }
 
+        if (_propsLength != 0)
+        {
+            WriteCollectionProperties(ref open);
+        }
+
         if (_depth >= _maxDepth || (_depth >= CycleCheckFrom && (_depth & (_depth - 1)) == 0))
         {
             CheckNesting(reference);
@@ -274,6 +286,11 @@ public sealed partial class Utf8YamlEmitter
 
     private void End(bool isMapping)
     {
+        if (_propsLength != 0)
+        {
+            throw PendingProperties();
+        }
+
         if (_depth == 0 || _frames[_depth - 1].IsMapping != isMapping)
         {
             throw Misuse(isMapping ? "There is no open mapping to end." : "There is no open sequence to end.");
@@ -404,6 +421,17 @@ public sealed partial class Utf8YamlEmitter
 
     // Like BeginScalar, but leaves writing the prefix to the caller.
     private Place BeginScalarLead(out int parentIndent, out Lead lead)
+    {
+        Place place = BeginScalarLeadCore(out parentIndent, out lead);
+        if (_propsLength != 0)
+        {
+            WriteScalarProperties(place, ref lead);
+        }
+
+        return place;
+    }
+
+    private Place BeginScalarLeadCore(out int parentIndent, out Lead lead)
     {
         if (_depth == 0)
         {

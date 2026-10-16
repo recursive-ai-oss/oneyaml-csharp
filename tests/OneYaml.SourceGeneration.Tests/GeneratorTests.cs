@@ -75,8 +75,77 @@ public class GeneratorTests
         Assert.DoesNotContain(run.CompilationDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
     }
 
+    private const string Attributes = Header + """
+        using System.Text.Json.Serialization;
+
+        namespace Attr;
+
+        public sealed class LevelConverter : YamlConverter<Level>
+        {
+            public override Level Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) => new(1);
+            public override void Write(Utf8YamlEmitter writer, Level value, YamlSerializerOptions options) { }
+        }
+
+        [YamlConverter(typeof(LevelConverter))]
+        public readonly record struct Level(int N);
+
+        public sealed class BoxConverter<T> : YamlConverter<Box<T>>
+        {
+            public override Box<T>? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) => null;
+            public override void Write(Utf8YamlEmitter writer, Box<T> value, YamlSerializerOptions options) { }
+        }
+
+        [YamlConverter(typeof(BoxConverter<>))]
+        public sealed class Box<T> { public T? Value { get; set; } }
+
+        public sealed class Settings
+        {
+            public string Name { get; set; } = "";
+            [YamlConverter(typeof(UpperConverter))] public string Title { get; set; } = "";
+            public Box<string> Content { get; set; } = new();
+            [YamlExtensionData] public Dictionary<string, object?> Extra { get; set; } = new();
+        }
+
+        public sealed class UpperConverter : YamlConverter<string>
+        {
+            public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options) => reader.GetString();
+            public override void Write(Utf8YamlEmitter writer, string value, YamlSerializerOptions options) { }
+        }
+
+        public sealed record Labelled(string Name) { [JsonExtensionData] public IDictionary<string, object>? Rest { get; set; } }
+
+        [YamlDerivedType(typeof(Cat), "cat")]
+        [YamlDerivedType(typeof(Dog), "dog")]
+        public abstract class Pet { public string Name { get; set; } = ""; }
+        public sealed class Cat : Pet { public int Lives { get; set; } }
+        public sealed class Dog : Pet { }
+
+        [YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+        [YamlDerivedType(typeof(Circle), "circle")]
+        public abstract record Figure;
+        public sealed record Circle(double Radius) : Figure;
+
+        [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
+        [JsonDerivedType(typeof(Car), "car")]
+        [JsonDerivedType(typeof(Truck), 7)]
+        public class Vehicle { public int Wheels { get; set; } }
+        public sealed class Car : Vehicle { }
+        public sealed class Truck : Vehicle { }
+
+        [YamlSerializable(typeof(Level))]
+        [YamlSerializable(typeof(Settings))]
+        [YamlSerializable(typeof(Labelled))]
+        [YamlSerializable(typeof(Pet))]
+        [YamlSerializable(typeof(Figure))]
+        [YamlSerializable(typeof(Vehicle))]
+        public partial class AttrContext : YamlSerializerContext
+        {
+        }
+        """;
+
     [Theory]
     [InlineData("Demo", Demo)]
+    [InlineData("Attributes", Attributes)]
     [InlineData("Immutable", Immutables)]
     [InlineData("Nested", Header + """
         public sealed class Item { public string Name { get; set; } = ""; public Item[] Parts { get; set; } = []; }
@@ -102,6 +171,25 @@ public class GeneratorTests
         // so the source location is not usable on a build server.
         string expected = Path.Combine(AppContext.BaseDirectory, "Snapshots", name + ".g.cs.txt");
         Assert.Equal(File.ReadAllText(expected).Replace("\r\n", "\n", StringComparison.Ordinal), actual);
+    }
+
+    [Fact]
+    public void Converter_extension_data_and_polymorphism_attributes_compile_cleanly_without_reflection()
+    {
+        GeneratorRun run = GeneratorHarness.Run(Attributes);
+        string source = Assert.Single(run.Sources).Source;
+
+        Assert.Empty(run.GeneratorDiagnostics);
+        Assert.DoesNotContain(run.CompilationDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
+        Assert.Contains("GetAttributeConverter<global::Attr.Level>(Options, new global::Attr.LevelConverter())", source, StringComparison.Ordinal);
+        // An open generic converter is closed over the type arguments of the type it converts.
+        Assert.Contains("new global::Attr.BoxConverter<string>()", source, StringComparison.Ordinal);
+        Assert.Contains("IsExtensionData = true,", source, StringComparison.Ordinal);
+        Assert.Contains("CreateDerivedTypeInfo<global::Attr.Pet, global::Attr.Cat>(\"cat\"", source, StringComparison.Ordinal);
+        Assert.Contains("YamlDiscriminatorKind.Tag", source, StringComparison.Ordinal);
+        Assert.Contains("\"kind\"", source, StringComparison.Ordinal);
+        Assert.Contains("CreateDerivedTypeInfo<global::Attr.Vehicle, global::Attr.Truck>(\"7\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.Reflection", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -276,6 +364,41 @@ public class GeneratorTests
             "OY0006", DiagnosticSeverity.Error, """
             public sealed class Loop : List<Loop> { }
             [YamlSerializable(typeof(Loop))]
+            public partial class Ctx : YamlSerializerContext { }
+            """
+        },
+        {
+            "OY0008", DiagnosticSeverity.Error, """
+            public sealed class Wrong { [YamlExtensionData] public Dictionary<string, int> Extra { get; set; } = new(); }
+            [YamlSerializable(typeof(Wrong))]
+            public partial class Ctx : YamlSerializerContext { }
+            """
+        },
+        {
+            "OY0009", DiagnosticSeverity.Error, """
+            public sealed class NotAConverter { }
+            [YamlConverter(typeof(NotAConverter))]
+            public sealed class Thing { public int A { get; set; } }
+            [YamlSerializable(typeof(Thing))]
+            public partial class Ctx : YamlSerializerContext { }
+            """
+        },
+        {
+            "OY0009", DiagnosticSeverity.Error, """
+            public sealed class Two<A, B> : YamlConverter<Thing> { public override Thing Read(ref Utf8YamlReader r, Type t, YamlSerializerOptions o) => new(); public override void Write(Utf8YamlEmitter w, Thing v, YamlSerializerOptions o) { } }
+            [YamlConverter(typeof(Two<,>))]
+            public sealed class Thing { public int A { get; set; } }
+            [YamlSerializable(typeof(Thing))]
+            public partial class Ctx : YamlSerializerContext { }
+            """
+        },
+        {
+            "OY0010", DiagnosticSeverity.Error, """
+            public class Base { }
+            public class Stranger { }
+            [YamlDerivedType(typeof(Stranger), "s")]
+            public class Root : Base { }
+            [YamlSerializable(typeof(Root))]
             public partial class Ctx : YamlSerializerContext { }
             """
         },

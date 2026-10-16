@@ -35,12 +35,12 @@ public ref partial struct Utf8YamlReader
                 return false;
             }
 
-            if (Tag == TagClass.Null)
+            if (TagKind == TagClass.Null)
             {
                 return CoreSchema.IsNull(_src.Slice(ContentStart, ContentEnd - ContentStart));
             }
 
-            if (Style != ScalarStyle.Plain || Tag is TagClass.Str or TagClass.Int or TagClass.Float or TagClass.Bool)
+            if (Style != ScalarStyle.Plain || TagKind is TagClass.Str or TagClass.Int or TagClass.Float or TagClass.Bool)
             {
                 return false;
             }
@@ -76,7 +76,7 @@ public ref partial struct Utf8YamlReader
 
     private readonly bool TryResolve(ReadOnlySpan<byte> text, out ScalarKind kind)
     {
-        switch (Tag)
+        switch (TagKind)
         {
             case TagClass.Str:
                 kind = ScalarKind.String;
@@ -607,7 +607,7 @@ public ref partial struct Utf8YamlReader
     // they skip the scratch buffer and the resolver.
     private readonly bool IsPlainlyText()
     {
-        if (Tag != TagClass.None)
+        if (TagKind != TagClass.None)
         {
             return false;
         }

@@ -206,6 +206,11 @@ public sealed partial class Utf8YamlEmitter
 
     private ref Frame KeyFrame()
     {
+        if (_propsLength != 0)
+        {
+            throw PendingProperties();
+        }
+
         if (_depth == 0 || !_frames[_depth - 1].IsMapping || _frames[_depth - 1].KeyPending)
         {
             throw Misuse("A property name is only allowed inside a mapping, before the value of the previous one.");
@@ -581,6 +586,12 @@ public sealed partial class Utf8YamlEmitter
     /// <exception cref="YamlException">A value is not allowed here, or a mapping expects a key.</exception>
     public void WriteBinaryValue(ReadOnlySpan<byte> value)
     {
+        if (_hasTag)
+        {
+            ClearProperties();
+            throw Misuse("Binary data carries the tag !!binary, so it cannot be given another.");
+        }
+
         Place place = BeginScalar(out _);
         if (place == Place.MapKey)
         {

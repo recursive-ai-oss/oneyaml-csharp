@@ -62,4 +62,28 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ExtensionDataMember = new(
+        "OY0008",
+        "An extension data member has the wrong type",
+        "The extension data member '{0}' must be a readable Dictionary<string, object> or IDictionary<string, object>",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ConverterAttribute = new(
+        "OY0009",
+        "The converter named by YamlConverter cannot be used",
+        "{0}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DerivedTypeListing = new(
+        "OY0010",
+        "A derived type is not listed correctly",
+        "{0}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

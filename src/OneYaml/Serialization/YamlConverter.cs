@@ -159,6 +159,23 @@ public abstract class YamlConverterFactory : YamlConverter
 }
 
 /// <summary>Names the YAML key of a member, overriding the naming policy.</summary>
+/// <remarks>
+/// <para>
+/// A model written for System.Text.Json binds without change: where a OneYaml attribute is absent, the System.Text.Json attribute
+/// of the same meaning is used. When a member has both, the OneYaml attribute wins.
+/// </para>
+/// <list type="table">
+/// <listheader><term>System.Text.Json attribute</term><description>Used as</description></listheader>
+/// <item><term><c>JsonPropertyName</c></term><description><see cref="YamlPropertyNameAttribute"/></description></item>
+/// <item><term><c>JsonIgnore</c></term><description><see cref="YamlIgnoreAttribute"/>, with its condition</description></item>
+/// <item><term><c>JsonRequired</c></term><description><see cref="YamlRequiredAttribute"/></description></item>
+/// <item><term><c>JsonPropertyOrder</c></term><description><see cref="YamlPropertyOrderAttribute"/></description></item>
+/// <item><term><c>JsonConstructor</c></term><description><see cref="YamlConstructorAttribute"/></description></item>
+/// <item><term><c>JsonExtensionData</c></term><description><see cref="YamlExtensionDataAttribute"/>, on a <c>Dictionary&lt;string, object&gt;</c> or <c>IDictionary&lt;string, object&gt;</c> only; on any other type the member is an ordinary one</description></item>
+/// <item><term><c>JsonPolymorphic</c>, <c>JsonDerivedType</c></term><description><see cref="YamlPolymorphicAttribute"/> and <see cref="YamlDerivedTypeAttribute"/>, always with a key discriminator; a derived type with no discriminator is not listed</description></item>
+/// <item><term><c>JsonConverter</c></term><description>Not used: its converters read and write JSON tokens. Use <see cref="YamlConverterAttribute"/>.</description></item>
+/// </list>
+/// </remarks>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false)]
 public sealed class YamlPropertyNameAttribute : Attribute
 {

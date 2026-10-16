@@ -69,6 +69,9 @@ public abstract class YamlPropertyInfo
 
     internal string? ExplicitName { get; }
 
+    // Whether the member collects the keys that no other member takes, instead of reading one key.
+    internal bool IsExtensionData { get; set; }
+
     // When the member is left out of the output; set from the metadata and settled against the options' default.
     internal YamlIgnoreCondition? IgnoreCondition { get; set; }
 
@@ -116,6 +119,16 @@ public abstract class YamlPropertyInfo<TDeclaring> : YamlPropertyInfo
 
     // Assigns a value read earlier.
     internal abstract void Assign(ref TDeclaring instance, object? value);
+
+    // For the extension member: reads the value of a key no member takes.
+    internal abstract object? ReadExtensionValue(ref Utf8YamlReader reader, YamlSerializerOptions options);
+
+    // For the extension member: adds one entry, creating the dictionary when the member holds none. In the slots of a
+    // type made through a constructor, or in the instance itself.
+    internal abstract void AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite);
+
+    // For the extension member: writes the entries as mapping entries.
+    internal abstract void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance);
 }
 
 /// <summary>Assigns a member of a value type.</summary>
@@ -159,6 +172,12 @@ public sealed class YamlPropertyInfoValues<TDeclaring, TProperty>
 
     /// <summary>The position among siblings when writing.</summary>
     public int Order { get; init; }
+
+    /// <summary>
+    /// Whether the member collects the keys that no other member takes (and writes them back). The member type must be
+    /// <c>Dictionary&lt;string, object?&gt;</c> or <c>IDictionary&lt;string, object?&gt;</c>, with a <see cref="Getter"/>.
+    /// </summary>
+    public bool IsExtensionData { get; init; }
 }
 
 /// <summary>The members of a type and how to make one.</summary>
@@ -185,12 +204,27 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     private YamlSerializerOptions? _options;
     private byte[]? _prepared;
     private YamlIgnoreCondition _ignore;
+    private YamlConverter<object>? _extensionConverter;
 
     public YamlPropertyInfoImpl(YamlPropertyInfoValues<TDeclaring, TProperty> values)
         : base(values.Name, values.SerializedName, values.IsRequired, values.Order)
     {
         _values = values;
         IgnoreCondition = values.IgnoreCondition;
+        if (values.IsExtensionData)
+        {
+            if (typeof(TProperty) != typeof(Dictionary<string, object?>) && typeof(TProperty) != typeof(IDictionary<string, object?>))
+            {
+                throw new NotSupportedException($"The extension data member '{values.Name}' must be a Dictionary<string, object> or an IDictionary<string, object>, not '{typeof(TProperty)}'.");
+            }
+
+            if (values.Getter is null)
+            {
+                throw new NotSupportedException($"The extension data member '{values.Name}' needs a getter.");
+            }
+
+            IsExtensionData = true;
+        }
     }
 
     internal override bool CanWrite => _values.Getter is not null;
@@ -228,6 +262,13 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     {
         ApplyName(options, index);
         _options = options;
+        if (IsExtensionData)
+        {
+            // The values are of any shape, so they are read and written the way an untyped value is.
+            _extensionConverter = YamlMetadataServices.GetBuiltInConverter<object>(options);
+            return;
+        }
+
         _ignore = IgnoreCondition ?? options.DefaultIgnoreCondition;
         _prepared = Utf8YamlEmitter.PrepareKey(NameUtf8);
         try
@@ -257,6 +298,51 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override void ReadBoxed(ref Utf8YamlReader reader, object?[] slots) =>
         slots[Slot] = _converter!.ReadSlot(ref reader, _options!);
+
+    internal override object? ReadExtensionValue(ref Utf8YamlReader reader, YamlSerializerOptions options) =>
+        _extensionConverter!.ReadValue(ref reader, options);
+
+    internal override void AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite)
+    {
+        IDictionary<string, object?>? target;
+        if (slots is not null)
+        {
+            target = slots[Slot] as IDictionary<string, object?>;
+            if (target is null)
+            {
+                target = new Dictionary<string, object?>(StringComparer.Ordinal);
+                slots[Slot] = target;
+            }
+        }
+        else
+        {
+            target = (IDictionary<string, object?>?)(object?)_values.Getter!(instance);
+            if (target is null)
+            {
+                target = new Dictionary<string, object?>(StringComparer.Ordinal);
+                Assign(ref instance, target);
+            }
+        }
+
+        if (overwrite || !target.ContainsKey(key))
+        {
+            target[key] = value;
+        }
+    }
+
+    internal override void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance)
+    {
+        if ((IDictionary<string, object?>?)(object?)_values.Getter!(instance) is not { } entries)
+        {
+            return;
+        }
+
+        foreach (KeyValuePair<string, object?> entry in entries)
+        {
+            writer.WritePropertyName(entry.Key);
+            _extensionConverter!.WriteValue(writer, entry.Value, _options!);
+        }
+    }
 
     internal override void Assign(ref TDeclaring instance, object? value)
     {
@@ -529,6 +615,72 @@ public static class YamlMetadataServices
 
             return collection;
         }));
+    }
+
+    /// <summary>
+    /// Describes a type that is polymorphic: a value is written with the discriminator of its derived type and read back as that type.
+    /// </summary>
+    /// <typeparam name="T">The base type.</typeparam>
+    /// <param name="options">The options the metadata belongs to.</param>
+    /// <param name="baseInfo">Metadata for the base type itself, read when no discriminator is present; <see langword="null"/> if it cannot be created.</param>
+    /// <param name="kind">Whether the discriminator is a key or a tag.</param>
+    /// <param name="discriminatorKey">The key of the discriminator, for <see cref="YamlDiscriminatorKind.Key"/>.</param>
+    /// <param name="derivedTypes">The derived types.</param>
+    /// <returns>The metadata.</returns>
+    public static YamlTypeInfo<T> CreatePolymorphicInfo<T>(
+        YamlSerializerOptions options,
+        YamlTypeInfo<T>? baseInfo,
+        YamlDiscriminatorKind kind,
+        string discriminatorKey,
+        params YamlDerivedTypeInfo<T>[] derivedTypes)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(discriminatorKey);
+        ArgumentNullException.ThrowIfNull(derivedTypes);
+        return new YamlTypeInfo<T>(options, new PolymorphicConverter<T>(baseInfo, kind, discriminatorKey, derivedTypes));
+    }
+
+    /// <summary>Describes one derived type of a polymorphic base.</summary>
+    /// <typeparam name="TBase">The base type.</typeparam>
+    /// <typeparam name="TDerived">The derived type.</typeparam>
+    /// <param name="discriminator">The discriminator that stands for the type.</param>
+    /// <param name="typeInfo">Gets the metadata of the derived type. It is called on first use, so types that refer to one another can be described.</param>
+    /// <returns>The description.</returns>
+    public static YamlDerivedTypeInfo<TBase> CreateDerivedTypeInfo<TBase, TDerived>(string discriminator, Func<YamlTypeInfo<TDerived>> typeInfo)
+        where TDerived : TBase
+    {
+        ArgumentNullException.ThrowIfNull(discriminator);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return new YamlDerivedTypeInfoImpl<TBase, TDerived>(discriminator, typeInfo);
+    }
+
+    /// <summary>
+    /// Gets the converter that a <see cref="YamlConverterAttribute"/> names, from an instance of the converter type: the converter
+    /// itself, or what a <see cref="YamlConverterFactory"/> makes for the type.
+    /// </summary>
+    /// <typeparam name="T">The type to convert.</typeparam>
+    /// <param name="options">The options the converter will be used with.</param>
+    /// <param name="converter">An instance of the converter type.</param>
+    /// <returns>The converter.</returns>
+    /// <exception cref="InvalidOperationException">The converter cannot convert the type.</exception>
+    public static YamlConverter<T> GetAttributeConverter<T>(YamlSerializerOptions options, YamlConverter converter)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(converter);
+        YamlConverter? chosen = converter;
+        if (!converter.CanConvert(typeof(T)))
+        {
+            throw new InvalidOperationException($"The converter {converter.GetType()} named by YamlConverter cannot convert '{typeof(T)}'.");
+        }
+
+        if (converter is YamlConverterFactory factory)
+        {
+            chosen = factory.CreateConverter(typeof(T), options)
+                ?? throw new InvalidOperationException($"The converter factory {converter.GetType()} named by YamlConverter made no converter for '{typeof(T)}'.");
+        }
+
+        return chosen as YamlConverter<T>
+            ?? throw new InvalidOperationException($"The converter {chosen.GetType()} named by YamlConverter cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
     }
 
     /// <summary>Finds a converter in <see cref="YamlSerializerOptions.Converters"/> that handles the type, which takes precedence over generated metadata.</summary>

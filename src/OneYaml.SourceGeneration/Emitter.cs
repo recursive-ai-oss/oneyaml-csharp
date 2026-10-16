@@ -204,6 +204,9 @@ internal sealed class Emitter
             case TypeShape.ImmutableDictionary:
                 Line($"return {Services}.CreateConvertedDictionaryInfo<{type.Name}, {type.Dependencies[0].Name}, {type.Dependencies[1].Name}>(Options, this.{type.Dependencies[0].Property}, this.{type.Dependencies[1].Property}, static l => {type.ImplementationName});");
                 break;
+            case TypeShape.Converter:
+                Line($"return {Services}.CreateValueInfo<{type.Name}>(Options, {Services}.GetAttributeConverter<{type.Name}>(Options, {type.ConverterText}));");
+                break;
             default:
                 EmitObject(type);
                 break;
@@ -216,6 +219,12 @@ internal sealed class Emitter
     {
         ObjectSpec obj = type.Object!;
         string n = type.Name;
+        if (obj.Creator == CreatorKind.None && obj.Polymorphism is not null)
+        {
+            EmitPolymorphic(type, obj.Polymorphism, null);
+            return;
+        }
+
         foreach (MemberSpec m in obj.Members)
         {
             // UnsafeAccessor cannot name a member of a generic type on every target, so these go through the library.
@@ -253,7 +262,34 @@ internal sealed class Emitter
 
         CloseWith("},");
         CloseWith("};");
+        if (obj.Polymorphism is not null)
+        {
+            EmitPolymorphic(type, obj.Polymorphism, $"{Services}.CreateObjectInfo<{n}>(Options, values)");
+            return;
+        }
+
         Line($"return {Services}.CreateObjectInfo<{n}>(Options, values);");
+    }
+
+    // The base of derived types: its own description serves when no discriminator is present, if it can be created.
+    private void EmitPolymorphic(TypeSpec type, PolymorphismSpec polymorphism, string? baseInfo)
+    {
+        string n = type.Name;
+        Line(baseInfo is null
+            ? $"{TypeInfo}<{n}> baseInfo = null;"
+            : $"{TypeInfo}<{n}> baseInfo = {baseInfo};");
+        string kind = polymorphism.Kind == 1 ? "Tag" : "Key";
+        Line($"return {Services}.CreatePolymorphicInfo<{n}>(");
+        _indent++;
+        Line($"Options, baseInfo, global::OneYaml.YamlDiscriminatorKind.{kind}, {Literal(polymorphism.Key)}{(polymorphism.Derived.Count > 0 ? "," : ");")}");
+        for (int i = 0; i < polymorphism.Derived.Count; i++)
+        {
+            (TypeSpec derived, string discriminator) = polymorphism.Derived[i];
+            string end = i == polymorphism.Derived.Count - 1 ? ");" : ",";
+            Line($"{Services}.CreateDerivedTypeInfo<{n}, {derived.Name}>({Literal(discriminator)}, () => this.{derived.Property}){end}");
+        }
+
+        _indent--;
     }
 
     private void EmitConstructorCreator(string n, ObjectSpec obj)
@@ -299,6 +335,16 @@ internal sealed class Emitter
         if (m.IsRequired)
         {
             Line("IsRequired = true,");
+        }
+
+        if (m.IsExtensionData)
+        {
+            Line("IsExtensionData = true,");
+        }
+
+        if (m.ConverterText is not null)
+        {
+            Line($"Converter = {Services}.GetAttributeConverter<{t}>(Options, {m.ConverterText}),");
         }
 
         if (m.Order != 0)

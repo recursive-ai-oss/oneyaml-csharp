@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 using OneYaml.Parsing;
@@ -64,6 +65,17 @@ internal struct TapeEvent
     // For an event that starts an anchored node on a tape made from a document: its anchor entry plus one,
     // so that zero means none.
     public int Anchor;
+
+    // The tag text of the node, as an index plus one into the book's tag records; zero means none or not recorded.
+    public int TagRef;
+}
+
+// The tag of a recorded node: where it was written, and its full form, so a node delivered again from the tape can still say it.
+internal readonly struct TagRecord(int start, int length, string resolved)
+{
+    public readonly int Start = start;
+    public readonly int Length = length;
+    public readonly string Resolved = resolved;
 }
 
 // An anchor definition. Names are offsets into the source, so nothing is allocated per anchor.
@@ -111,10 +123,12 @@ internal sealed class AnchorBook
     public int OpenCount;
     public ReplayFrame[] Frames = new ReplayFrame[4];
     public int FrameCount;
+    public List<TagRecord>? Tags;
 
     public void Reset()
     {
         Count = 0;
+        Tags?.Clear();
         Array.Clear(Buckets);
         if (Values is not null)
         {
@@ -255,7 +269,7 @@ public ref partial struct Utf8YamlReader
     // The current event.
     internal YamlTokenType Type;
     internal ScalarStyle Style;
-    internal TagClass Tag;
+    internal TagClass TagKind;
     internal bool Escaped;
     internal Chomping Chomping;
     internal int ContentStart;
@@ -271,6 +285,10 @@ public ref partial struct Utf8YamlReader
     // Set by callers that catch the error and carry on (a try-read): the exception then carries the category and
     // offset but no line, column or path, so building it costs the same wherever in the text it happens.
     internal bool QuietErrors;
+
+    // Whether the current event came from the tape; its tag is then read from the tape's tag records.
+    private bool _replayed;
+    private int _tagRef;
 
     internal Utf8YamlReader(ReadOnlySpan<byte> utf8, YamlSerializerOptions options, bool expandAliases)
     {
@@ -306,6 +324,70 @@ public ref partial struct Utf8YamlReader
 
     /// <summary>The byte offset of the current token in the UTF-8 text.</summary>
     public readonly int Offset => Start;
+
+    /// <summary>The tag of the current node resolved against the document's <c>%TAG</c> directives, or <see langword="null"/> when it has none.</summary>
+    /// <remarks>
+    /// <c>!!str</c> reads as <c>tag:yaml.org,2002:str</c>, a local tag such as <c>!Sub</c> as <c>!Sub</c>, and the bare <c>!</c> as <c>!</c>.
+    /// Reading it makes a string (the last one is kept, so a run of nodes with one tag shares it); use
+    /// <see cref="TryGetTag"/> to compare without allocating. A node that an alias brings in has the tag it was written with.
+    /// A node read from a <see cref="YamlDocument"/> reports no tag.
+    /// </remarks>
+    public string? Tag
+    {
+        get
+        {
+            if (!_replayed)
+            {
+                return _r.GetResolvedTag();
+            }
+
+            return _tagRef == 0 ? null : _book!.Tags![_tagRef - 1].Resolved;
+        }
+    }
+
+    /// <summary>Gets the tag of the current node exactly as written, such as <c>!Sub</c>, <c>!!str</c> or <c>!&lt;tag:example.com,2000:x&gt;</c>, without allocating.</summary>
+    /// <param name="rawTag">The tag's UTF-8 text in the input; empty when there is none.</param>
+    /// <returns><see langword="true"/> when the node has a tag.</returns>
+    public readonly bool TryGetTag(out ReadOnlySpan<byte> rawTag)
+    {
+        if (!_replayed)
+        {
+            if (_r.HasTag)
+            {
+                rawTag = _r.RawTag;
+                return true;
+            }
+        }
+        else if (_tagRef != 0)
+        {
+            TagRecord record = _book!.Tags![_tagRef - 1];
+            rawTag = _src.Slice(record.Start, record.Length);
+            return true;
+        }
+
+        rawTag = default;
+        return false;
+    }
+
+    /// <summary>The anchor name of the current node, without the <c>&amp;</c>, or <see langword="null"/> when the node is not anchored.</summary>
+    /// <remarks>An alias is followed for you, so the nodes it brings in carry no anchor of their own.</remarks>
+    public readonly string? Anchor => TryGetAnchor(out ReadOnlySpan<byte> name) ? Encoding.UTF8.GetString(name) : null;
+
+    /// <summary>Gets the anchor name of the current node without allocating.</summary>
+    /// <param name="name">The name's UTF-8 text in the input, without the <c>&amp;</c>; empty when there is none.</param>
+    /// <returns><see langword="true"/> when the node is anchored.</returns>
+    public readonly bool TryGetAnchor(out ReadOnlySpan<byte> name)
+    {
+        if (NodeEntry >= 0 && _book is { } book)
+        {
+            ref readonly AnchorEntry entry = ref book.Entries[NodeEntry];
+            name = _src.Slice(entry.NameStart, entry.NameLength);
+            return true;
+        }
+
+        name = default;
+        return false;
+    }
 
     internal readonly ReadOnlySpan<byte> Source => _src;
 
@@ -377,6 +459,7 @@ public ref partial struct Utf8YamlReader
     internal bool BeginDocument(bool synthesizeEmptyStream)
     {
         _book?.Reset();
+        _replayed = false;
         _depth = 0;
         _liveDepth = 0;
         _liveNodes = 0;
@@ -400,7 +483,7 @@ public ref partial struct Utf8YamlReader
                         _started = true;
                         Type = YamlTokenType.Scalar;
                         Style = ScalarStyle.Plain;
-                        Tag = TagClass.None;
+                        TagKind = TagClass.None;
                         Escaped = false;
                         ContentStart = ContentEnd = 0;
                         Start = End = 0;
@@ -482,6 +565,8 @@ public ref partial struct Utf8YamlReader
                 if (!_expand)
                 {
                     // The generic loader shares the value it built for the anchor, so the alias is delivered as it is.
+                    _replayed = true;
+                    _tagRef = 0;
                     Type = YamlTokenType.Alias;
                     AliasEntry = e.Alias;
                     Start = e.Start;
@@ -495,9 +580,11 @@ public ref partial struct Utf8YamlReader
                 continue;
             }
 
+            _replayed = true;
+            _tagRef = e.TagRef;
             Type = e.Type;
             Style = e.Style;
-            Tag = e.Tag;
+            TagKind = e.Tag;
             Escaped = e.Escaped;
             Chomping = e.Chomping;
             ContentStart = e.ContentStart;
@@ -586,6 +673,7 @@ public ref partial struct Utf8YamlReader
         Start = _r.Start;
         End = _r.End;
         NodeEntry = -1;
+        _replayed = false;
         bool anchored = _r.HasAnchor;
         bool record = _expand && (anchored || (_book is { OpenCount: > 0 }));
 
@@ -595,7 +683,7 @@ public ref partial struct Utf8YamlReader
                 Style = _r.ScalarStyle;
                 Escaped = _r.ValueIsEscapedOrFolded;
                 _r.GetScalarDetails(out ContentStart, out ContentEnd, out BlockIndent, out Chomping);
-                Tag = _r.GetTagClass();
+                TagKind = _r.GetTagClass();
                 _liveNodes++;
                 _expNodes = Sat(_expNodes + 1);
                 _expBytes = Sat(_expBytes + (ContentEnd - ContentStart) + 1);
@@ -617,7 +705,7 @@ public ref partial struct Utf8YamlReader
                 break;
             case YamlTokenType.MappingStart:
             case YamlTokenType.SequenceStart:
-                Tag = _r.GetTagClass();
+                TagKind = _r.GetTagClass();
                 Track(t);
                 _liveNodes++;
                 if (anchored)
@@ -761,7 +849,7 @@ public ref partial struct Utf8YamlReader
         {
             Type = Type,
             Style = Style,
-            Tag = Tag,
+            Tag = TagKind,
             Chomping = Chomping,
             Escaped = Escaped,
             Start = Start,
@@ -770,7 +858,15 @@ public ref partial struct Utf8YamlReader
             ContentEnd = ContentEnd,
             BlockIndent = BlockIndent,
             Alias = AliasEntry,
+            TagRef = Type != YamlTokenType.Alias && !_replayed && _r.HasTag ? AddTag(book) : 0,
         };
+    }
+
+    private int AddTag(AnchorBook book)
+    {
+        List<TagRecord> tags = book.Tags ??= [];
+        tags.Add(new TagRecord(_r.TagStart, _r.RawTag.Length, _r.GetResolvedTag()!));
+        return tags.Count;
     }
 
     private static long Sat(long v) => v > Cap ? Cap : v;
