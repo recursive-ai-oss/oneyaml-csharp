@@ -664,7 +664,9 @@ internal sealed class PatchTarget : FuzzTarget
                     for (int i = 0; i < m.Kids.Count; i += 2)
                     {
                         Model key = m.Kids[i];
-                        if (key.Kind != "scalar" || key.Type != "str" || !keys.Add(key.Raw) || !TryJson(m.Kids[i + 1], out string? item))
+                        // A tagged key is left out: a core tag that does not fit its text (!!int abc) makes a key that equals
+                        // no value, and the model reads that as a string.
+                        if (key.Kind != "scalar" || key.Type != "str" || key.Tag is not null || !keys.Add(key.Raw) || !TryJson(m.Kids[i + 1], out string? item))
                         {
                             return false;
                         }
