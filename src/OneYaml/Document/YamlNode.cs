@@ -517,6 +517,19 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <exception cref="YamlException">Setting: the write goes through an alias (<see cref="YamlErrorCategory.RefusedAlias"/>). The document is unchanged.</exception>
     /// <exception cref="InvalidOperationException">The node is not a mapping, was removed, or is detached.</exception>
     /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("spec:\n  replicas: 2  # scaled by CI\n");
+    /// YamlNode spec = doc.Root["spec"];
+    /// Console.WriteLine(spec["replicas"].GetValue&lt;int&gt;()); // 2
+    /// spec["replicas"] = 3;
+    /// spec["paused"] = false;
+    /// Console.Write(doc);
+    /// // spec:
+    /// //   replicas: 3  # scaled by CI
+    /// //   paused: false
+    /// </code>
+    /// </example>
     [AllowNull]
     public YamlNode this[string key]
     {
@@ -562,6 +575,16 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <exception cref="ArgumentOutOfRangeException">The index is outside the sequence (for setting, more than the count).</exception>
     /// <exception cref="YamlException">Setting: the write goes through an alias (<see cref="YamlErrorCategory.RefusedAlias"/>). The document is unchanged.</exception>
     /// <exception cref="InvalidOperationException">The node is not a sequence, was removed, or is detached.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("ports: [80, 443]\n");
+    /// YamlNode ports = doc.Root["ports"];
+    /// ports[0] = 8080;
+    /// ports[ports.Count] = 8443; // the count appends
+    /// Console.Write(doc);
+    /// // ports: [8080, 443, 8443]
+    /// </code>
+    /// </example>
     [AllowNull]
     public YamlNode this[int index]
     {

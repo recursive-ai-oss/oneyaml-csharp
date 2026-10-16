@@ -124,6 +124,15 @@ public sealed class YamlDocument : IDisposable
     /// <returns>The document.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="text"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">The text is not valid YAML, or exceeds a limit.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("name: web   # the public site\nreplicas: 2\n");
+    /// doc.Root["replicas"] = 3;
+    /// Console.Write(doc);
+    /// // name: web   # the public site
+    /// // replicas: 3
+    /// </code>
+    /// </example>
     public static YamlDocument Parse(string text, YamlDocumentOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -434,6 +443,19 @@ public sealed class YamlDocument : IDisposable
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     /// <exception cref="YamlException">The pointer names nothing (<see cref="YamlErrorCategory.PatchPath"/>), matches two keys, or goes through an alias. The document is unchanged.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("spec:\n  image: web:1.4   # pinned\n");
+    /// doc.Set("/spec/image", "web:1.5");
+    /// doc.Set("/spec/ports", new[] { 80, 443 });
+    /// Console.Write(doc);
+    /// // spec:
+    /// //   image: web:1.5   # pinned
+    /// //   ports:
+    /// //     - 80
+    /// //     - 443
+    /// </code>
+    /// </example>
     public void Set(string path, object? value, int document = 0)
     {
         Write(path, value, document, PointerOps.Mode.Set);
@@ -539,6 +561,15 @@ public sealed class YamlDocument : IDisposable
     /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">The patch is malformed (<see cref="YamlErrorCategory.PatchInvalid"/>) or an operation failed; <see cref="YamlException.OperationIndex"/> names it.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("name: web  # site\nreplicas: 2\n");
+    /// doc.ApplyPatch("""[{ "op": "replace", "path": "/replicas", "value": 3 }]""");
+    /// Console.Write(doc);
+    /// // name: web  # site
+    /// // replicas: 3
+    /// </code>
+    /// </example>
     public void ApplyPatch(string patch, int document = 0)
     {
         ArgumentNullException.ThrowIfNull(patch);
@@ -586,6 +617,17 @@ public sealed class YamlDocument : IDisposable
     /// <param name="document">The index of the document in the stream. An index outside the stream is a <see cref="YamlErrorCategory.PatchPath"/> error, as for any other path the patch cannot reach.</param>
     /// <exception cref="ArgumentNullException"><paramref name="patch"/> is <see langword="null"/>.</exception>
     /// <exception cref="YamlException">The patch is not valid JSON, or it cannot be applied. The document is unchanged.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("name: web\nlabels:\n  tier: frontend\n  legacy: true\n");
+    /// doc.ApplyMergePatch("""{ "labels": { "legacy": null }, "replicas": 3 }""");
+    /// Console.Write(doc);
+    /// // name: web
+    /// // labels:
+    /// //   tier: frontend
+    /// // replicas: 3
+    /// </code>
+    /// </example>
     public void ApplyMergePatch(string patch, int document = 0)
     {
         ArgumentNullException.ThrowIfNull(patch);
@@ -661,6 +703,14 @@ public sealed class YamlDocument : IDisposable
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The pointer names nothing, or the scalar is not of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// using var doc = YamlDocument.Parse("spec:\n  replicas: 2\n  ports: [80, 443]\n");
+    /// int replicas = doc.Get&lt;int&gt;("/spec/replicas");
+    /// int https = doc.Get&lt;int&gt;("/spec/ports/1");
+    /// Console.WriteLine($"{replicas} {https}"); // 2 443
+    /// </code>
+    /// </example>
     public T Get<T>(string path, int document = 0) => GetNode(path, document).GetValue<T>();
 
     /// <summary>Reads the value a pointer names as a type using generated metadata. It reads whatever <see cref="Set{T}(string, T, YamlTypeInfo{T}, int)"/> can write.</summary>

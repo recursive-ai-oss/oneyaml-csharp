@@ -5,6 +5,10 @@ Every difference below is checked against the real library by a differential tes
 Switching is a package swap and a `using` change: `using SharpYaml;` becomes `using OneYaml.Compat.SharpYaml;`
 (and `SharpYaml.Serialization` becomes `OneYaml.Compat.SharpYaml.Serialization`).
 
+For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
+[Migrating from SharpYaml](../migrate-sharpyaml.md). The adapter always runs with the library's default limits and has no
+mode for untrusted input ([Limits](../limits.md#what-the-limits-do-not-cover)).
+
 Classes: **Intended** (a deliberate choice, kept), **Fix** (the real library is wrong; this package is right),
 **Gap** (a behaviour the package does not reproduce yet).
 

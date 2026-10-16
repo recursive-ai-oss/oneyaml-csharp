@@ -17,7 +17,7 @@
 
   <PropertyGroup Label="Package">
     <PackageId>OneYaml</PackageId>
-    <Description>A YAML 1.2 library for .NET: a fast serializer and lossless, minimal-diff document editing.</Description>
+    <Description>Pure C# YAML 1.2 that edits a file and keeps its comments, with a System.Text.Json-style serializer.</Description>
     <Authors>Recursive AI, LLC</Authors>
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
@@ -44,7 +44,8 @@
   </Target>
 
   <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+    <!-- The package page on NuGet shows this short readme: the repository README has relative links and generated charts that NuGet does not render. -->
+    <None Include="README.md" Pack="true" PackagePath="/" />
     <None Include="buildTransitive/OneYaml.targets" Pack="true" PackagePath="buildTransitive/" />
     <EmbeddedResource Include="ILLink.Substitutions.xml" LogicalName="ILLink.Substitutions.xml" />
     <InternalsVisibleTo Include="OneYaml.Tests" />

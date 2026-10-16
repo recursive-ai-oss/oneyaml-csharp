@@ -1,0 +1,35 @@
+name: Bug report
+description: The library gave a wrong result, threw the wrong exception, or changed more of a file than it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A stack overflow, a hang, an exception other than the documented ones, or memory use out of proportion to the input is a bug, and so is an edit that changes anything but the value you set. If you think the problem is a security vulnerability, report it privately instead (see SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The package and its version (or the commit), and the .NET version (`dotnet --version`).
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      description: The smallest YAML (and patch, if any) that shows the problem.
+      render: yaml
+    validations:
+      required: true
+  - type: textarea
+    id: code
+    attributes:
+      label: Code
+      description: The calls you made, as a small runnable program if you can.
+      render: csharp
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true

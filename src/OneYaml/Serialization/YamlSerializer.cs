@@ -46,6 +46,14 @@ public static partial class YamlSerializer
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The text is not valid YAML, does not fit the type, or exceeds a limit.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="yaml"/> is <see langword="null"/>.</exception>
+    /// <example>
+    /// <code language="csharp">
+    /// var server = YamlSerializer.Deserialize&lt;Server&gt;("host: example.com\nport: 8080\n")!;
+    /// Console.WriteLine(server); // Server { Host = example.com, Port = 8080 }
+    ///
+    /// record Server(string Host, int Port);
+    /// </code>
+    /// </example>
     [RequiresUnreferencedCode(UnreferencedMessage)]
     [RequiresDynamicCode(DynamicMessage)]
     public static T? Deserialize<T>(string yaml, YamlSerializerOptions? options = null)

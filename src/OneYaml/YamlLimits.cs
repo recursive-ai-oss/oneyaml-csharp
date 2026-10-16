@@ -11,6 +11,19 @@ public sealed record YamlLimits
     public static YamlLimits Default { get; } = new();
 
     /// <summary>Tighter limits for input from an untrusted source.</summary>
+    /// <example>
+    /// <code language="csharp">
+    /// var options = new YamlSerializerOptions { Limits = YamlLimits.Untrusted };
+    /// try
+    /// {
+    ///     YamlSerializer.Deserialize&lt;object&gt;(new string('[', 200) + new string(']', 200), options);
+    /// }
+    /// catch (YamlException e) when (e.Category == YamlErrorCategory.Limit)
+    /// {
+    ///     Console.WriteLine("refused: too deep"); // refused: too deep
+    /// }
+    /// </code>
+    /// </example>
     public static YamlLimits Untrusted { get; } = new()
     {
         MaxDepth = 128,

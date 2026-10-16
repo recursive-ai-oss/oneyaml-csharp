@@ -41,12 +41,18 @@ public readonly record struct YamlPatchOperation(YamlPatchOperationKind Kind, st
 /// any number of documents.
 /// </summary>
 /// <example>
-/// <code>
+/// <code language="csharp">
 /// var patch = new YamlPatch()
 ///     .Test("/name", "web")
 ///     .Replace("/replicas", 3)
 ///     .Add("/labels/tier", "frontend");
-/// document.ApplyPatch(patch);
+///
+/// using var doc = YamlDocument.Parse("name: web\nreplicas: 2\nlabels: {}\n");
+/// doc.ApplyPatch(patch);
+/// Console.Write(doc);
+/// // name: web
+/// // replicas: 3
+/// // labels: {tier: frontend}
 /// </code>
 /// </example>
 public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>

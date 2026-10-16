@@ -5,6 +5,10 @@ representation model, never its defects. Every difference below is checked again
 in `tests/OneYaml.Compat.Tests`. Switching is a package swap and a `using` change: `using YamlDotNet.Serialization;` becomes
 `using OneYaml.Compat.YamlDotNet.Serialization;` (and likewise for `RepresentationModel` and `Core`).
 
+For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
+[Migrating from YamlDotNet](../migrate-yamldotnet.md). The adapter always runs with the library's default limits and has no
+mode for untrusted input ([Limits](../limits.md#what-the-limits-do-not-cover)).
+
 Each class has a minimal repro. Label: **intended (spec)** = the YAML 1.2 text or a safer behaviour is kept on purpose;
 **intended (bug not reproduced)** = YamlDotNet misbehaves and the package does not copy it; **gap** = documented API or
 behaviour the package does not provide.
