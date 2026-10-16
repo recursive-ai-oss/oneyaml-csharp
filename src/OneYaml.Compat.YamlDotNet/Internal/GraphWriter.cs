@@ -20,6 +20,15 @@ internal sealed class GraphWriter
     private readonly TypeModels _models;
     private EventBuffer _buffer = null!;
     private Dictionary<object, int>? _seen;
+
+    // Without aliases a shared object is written out in full each time it is reached, so a graph that shares its parts
+    // can grow far beyond its own size. The events written while a repeated object is expanded are counted and held to the
+    // alias budget of the limits, as the expansion of aliases is when reading.
+    private HashSet<object>? _visited;
+    private bool _repeatPending;
+    private int _repeatDepth;
+    private int _repeatStart;
+    private long _expanded;
     private int _depth;
     private BufferEmitter? _emitter;
 
@@ -33,6 +42,10 @@ internal sealed class GraphWriter
     {
         _buffer = new EventBuffer();
         _seen = _settings.DisableAliases ? null : new Dictionary<object, int>(ReferenceEqualityComparer.Instance);
+        _visited = _settings.DisableAliases ? new HashSet<object>(ReferenceEqualityComparer.Instance) : null;
+        _repeatPending = false;
+        _repeatDepth = 0;
+        _expanded = 0;
         _depth = 0;
         _emitter = new BufferEmitter(_buffer);
         WriteValue(graph, type, ScalarStyle.Any, isKey: false);
@@ -46,6 +59,11 @@ internal sealed class GraphWriter
         if (++_depth > _settings.EffectiveMaxRecursion || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             throw new MaximumRecursionLevelReachedException("Too much recursion when traversing the object graph.");
+        }
+
+        if (_repeatDepth > 0)
+        {
+            CheckExpansion();
         }
 
         WriteCore(value, declared, memberStyle, isKey);
@@ -107,6 +125,10 @@ internal sealed class GraphWriter
 
             _seen[value] = start;
         }
+        else if (_visited is not null)
+        {
+            _repeatPending = !_visited.Add(value);
+        }
 
         return false;
     }
@@ -119,6 +141,13 @@ internal sealed class GraphWriter
         }
 
         object graph = value!;
+        bool repeated = _repeatPending;
+        _repeatPending = false;
+        if (repeated)
+        {
+            EnterRepeat();
+        }
+
         switch (model!.Kind)
         {
             case TypeKind.Array:
@@ -130,13 +159,47 @@ internal sealed class GraphWriter
                 }
 
                 AddEnd(EvKind.SequenceEnd);
-                return;
+                break;
             case TypeKind.Dictionary:
                 WriteDictionary(graph, model, tag);
-                return;
+                break;
             default:
                 WritePoco(graph, model, tag);
-                return;
+                break;
+        }
+
+        if (repeated)
+        {
+            LeaveRepeat();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EnterRepeat()
+    {
+        if (_repeatDepth++ == 0)
+        {
+            _repeatStart = _buffer.Count;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void LeaveRepeat()
+    {
+        if (--_repeatDepth == 0)
+        {
+            _expanded += _buffer.Count - _repeatStart;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void CheckExpansion()
+    {
+        long expanded = _expanded + (_buffer.Count - _repeatStart);
+        long own = _buffer.Count - expanded;
+        if (expanded > _settings.Limits.AliasNodeBudget(Math.Max(own, 0)))
+        {
+            throw new MaximumRecursionLevelReachedException("The object graph shares its parts so much that writing it without aliases exceeds the configured limit.");
         }
     }
 
