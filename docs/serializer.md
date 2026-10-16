@@ -323,7 +323,7 @@ foreach (var (key, value) in root)
 
 - A key is its source text, so `80: http` has the key `"80"`. Two keys with the same text are a duplicate-key error. A key that is a mapping or a sequence cannot be a dictionary key; the error points you to `YamlDocument`, which can read it.
 - Tags are dropped wherever the target is `object`: `!Sub x` reads as the string `x`. Timestamps stay strings. To see tags, use a converter (`Utf8YamlReader.Tag`) or a `YamlDocument`, which keeps them.
-- An alias gives the same instance as its anchor, and every alias counts against the alias budget of the limits.
+- An alias gives the same instance as its anchor, and every alias counts against the alias budget of the limits. An alias inside the node its own anchor names (`&a [*a]`) is a cycle and a `Syntax` error.
 
 ## Several documents
 

@@ -408,10 +408,12 @@ public class StackHeadroomTests
         OnMegabyteStack(() => Assert.Contains("c:", YamlSerializer.Serialize(root)));
     }
 
-    // Frames are larger on some platforms than on Linux, so the depth limit is checked there on 1 MB with little to spare. Linux
-    // has to manage it on 768 KB: that is the room these paths are held to, which keeps them from growing back unnoticed.
+    // Frames are larger on some platforms than on Linux, so the depth limit is checked there on 1 MB with little to spare.
+    // Linux has to write extension data on 768 KB, which keeps that path from growing back unnoticed. Reading a key that
+    // comes late is checked at the same size, but its frames cost the same on Linux whichever way the code is laid out;
+    // the room on other platforms is covered by the 1 MB tests above.
     [Fact]
-    public void Writing_through_extension_data_and_reading_a_late_key_fit_a_smaller_stack()
+    public void Writing_through_extension_data_fits_a_smaller_stack_and_a_late_key_still_reads_to_the_depth_limit()
     {
         SkipWhenUnoptimised();
         Assert.SkipUnless(OperatingSystem.IsLinux(), "The room is measured on Linux; the 1 MB tests above cover the other platforms.");

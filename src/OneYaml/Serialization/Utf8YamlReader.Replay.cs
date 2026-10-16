@@ -15,10 +15,10 @@ public ref partial struct Utf8YamlReader
     // segments after them when an alias event names one. The reader owns the book's tape afterwards
     // and returns it to the pool in Dispose. Positions and error messages refer to source, the text the
     // events were recorded from.
-    internal Utf8YamlReader(ReadOnlySpan<byte> source, YamlSerializerOptions options, AnchorBook book, int rootCount, bool expandAliases = true)
+    internal Utf8YamlReader(ReadOnlySpan<byte> source, YamlSerializerOptions options, AnchorBook book, int rootCount, bool expandAliases = true, YamlLimits? limits = null)
     {
         _options = options;
-        _limits = options.Limits;
+        _limits = limits is null ? options.Limits : YamlLimits.Stricter(limits, options.Limits);
         _src = source;
         _expand = expandAliases;
         _r = new YamlReader(default, new YamlReaderOptions { Limits = _limits });

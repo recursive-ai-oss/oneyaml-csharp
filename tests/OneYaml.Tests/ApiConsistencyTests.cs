@@ -40,6 +40,10 @@ internal sealed class ListDoc : ManifestDoc
 internal abstract class WideShape
 {
     public string? Label { get; set; }
+
+    public WideShape? Inner { get; set; }
+
+    public object? Fill { get; set; }
 }
 
 internal sealed class WideCircle : WideShape
@@ -119,6 +123,8 @@ internal sealed class NeedsNameParent
 [YamlSerializable(typeof(RolloutPlan))]
 [YamlSerializable(typeof(PullMode))]
 [YamlSerializable(typeof(List<int>))]
+[YamlSerializable(typeof(List<object>))]
+[YamlSerializable(typeof(object))]
 [YamlSerializable(typeof(NeedsNameParent))]
 [YamlSerializable(typeof(NeedsName))]
 internal sealed partial class ApiConsistencyContext : YamlSerializerContext
@@ -316,6 +322,21 @@ public class ApiConsistencyTests
         var tighter = new YamlSerializerOptions { Limits = YamlLimits.Untrusted with { MaxDepth = 2 } };
         Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root.Deserialize<object>(tighter)).Category);
         Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root.Deserialize<object>(tighter)).Category);
+    }
+
+    [Fact]
+    public void Generated_metadata_given_to_a_node_cannot_loosen_the_limits_of_its_document()
+    {
+        // The metadata comes from a context whose own limits are the defaults, far above what this document allows.
+        var context = new ApiConsistencyContext(new YamlSerializerOptions { Limits = YamlLimits.None });
+        var objectInfo = (YamlTypeInfo<object>)context.GetTypeInfo(typeof(object))!;
+        var listInfo = (YamlTypeInfo<List<object>>)context.GetTypeInfo(typeof(List<object>))!;
+        using YamlDocument doc = YamlDocument.Parse(AliasFan(), new YamlDocumentOptions { Limits = s_tiny });
+
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root.Deserialize(objectInfo)).Category);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root["e"].Deserialize(listInfo)).Category);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root["e"].GetValue(listInfo)).Category);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Get("/e", listInfo)).Category);
     }
 
     [Fact]
@@ -585,6 +606,54 @@ public class ApiConsistencyTests
         string expected = NumberJson;
         Assert.Equal(expected, back.Settings.GetRawText());
         Assert.Equal(expected, back.Node!.ToJsonString());
+    }
+
+    [Fact]
+    public void A_JSON_node_member_that_is_a_scalar_is_built_without_a_detour_through_JSON_text()
+    {
+        // Each item used to be written out as JSON text and parsed again, about 760 bytes for a small scalar.
+        const int items = 4000;
+        string yaml = string.Join("\n", Enumerable.Range(0, items).Select(i => (i % 5) switch
+        {
+            0 => $"- {i}",
+            1 => $"- name{i}",
+            2 => "- true",
+            3 => "- null",
+            _ => $"- {i}.5",
+        })) + "\n";
+
+        List<JsonNode?>? warm = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
+        Assert.Equal(items, warm!.Count);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        List<JsonNode?>? nodes = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
+        long perItem = (GC.GetAllocatedBytesForCurrentThread() - before) / items;
+
+        Assert.Equal(items, nodes!.Count);
+        Assert.Equal(3, nodes[0]!.GetValue<int>() + 3);
+        Assert.Equal("name1", nodes[1]!.GetValue<string>());
+        Assert.Equal("4.5", nodes[4]!.ToJsonString());
+        Assert.True(perItem < 400, $"A scalar member took {perItem} bytes.");
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void A_JSON_element_with_a_repeated_property_name_is_refused_when_written(int path)
+    {
+        // JsonDocument keeps both entries. YAML needs unique keys, and the text written must read back.
+        foreach (string json in new[] { "{\"a\":1,\"a\":2}", "{\"x\":[{\"k\":1,\"b\":2,\"k\":3}]}" })
+        {
+            using JsonDocument source = JsonDocument.Parse(json);
+            var holder = new JsonHolder { Name = "x", Settings = source.RootElement.Clone() };
+
+            YamlException ex = Assert.Throws<YamlException>(() => Write(path, holder));
+            Assert.Equal(YamlErrorCategory.Binding, ex.Category);
+            Assert.Contains(json.Contains("\"k\":3") ? "'k'" : "'a'", ex.Message, StringComparison.Ordinal);
+        }
+
+        // The same names in different objects are fine.
+        using JsonDocument fine = JsonDocument.Parse("{\"a\":{\"a\":1},\"b\":[{\"a\":2},{\"a\":3}]}");
+        string yaml = Write(path, new JsonHolder { Name = "x", Settings = fine.RootElement.Clone() });
+        Assert.Equal("{\"a\":{\"a\":1},\"b\":[{\"a\":2},{\"a\":3}]}", Read<JsonHolder>(path, yaml)!.Settings.GetRawText());
     }
 
     [Theory, MemberData(nameof(Paths))]

@@ -148,6 +148,8 @@ There is no API to read, add or move comments; they are kept, not modelled.
 
 Reading follows aliases: `Get`, the indexers and `Deserialize` see the anchored value. Writing through an alias is refused, because it would change every place that shares the anchor. Replacing the alias itself, or the anchored original, is fine.
 
+An alias means the most recent definition of its name that is written before it and already complete. An alias inside the node its own anchor names (`&a [*a]`) would be a cycle, so opening such a document is a `Syntax` error rather than a silent use of an older `&a`.
+
 <!-- sample: EditAliases -->
 ```csharp
 using var doc = YamlDocument.Parse("""

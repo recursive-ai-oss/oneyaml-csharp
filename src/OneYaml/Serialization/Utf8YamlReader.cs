@@ -103,6 +103,9 @@ internal struct AnchorEntry
     // Whether the anchored node is a single scalar. The tape range alone cannot say: when aliases are not
     // expanded, only scalars are kept on it, so a collection holding one anchored scalar looks the same.
     public bool IsScalar;
+
+    // Set while the anchored node is still being read. An alias to it is an alias inside its own node.
+    public bool IsOpen;
 }
 
 internal struct ReplayFrame
@@ -801,6 +804,8 @@ public ref partial struct Utf8YamlReader
                     NodeEntry = entry;
                     AnchorBook book = _book!;
                     book.Entries[entry].TapeStart = book.TapeCount;
+                    book.Entries[entry].IsOpen = true;
+                    book.Publish(_src, entry);
                     if (book.OpenCount == book.Open.Length)
                     {
                         Array.Resize(ref book.Open, book.Open.Length * 2);
@@ -851,6 +856,11 @@ public ref partial struct Utf8YamlReader
 
         AnchorBook book = _book!;
         ref AnchorEntry e = ref book.Entries[entry];
+        if (e.IsOpen)
+        {
+            throw Error(YamlErrorCategory.Syntax, "The alias refers to the node that contains it, a cycle that cannot be read.");
+        }
+
         _chargedNodes = Sat(_chargedNodes + e.Nodes);
         _chargedBytes = Sat(_chargedBytes + e.Bytes);
         if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes) || _chargedBytes > _limits.AliasByteBudget(_src.Length))
@@ -910,11 +920,13 @@ public ref partial struct Utf8YamlReader
         return idx;
     }
 
-    // An anchor takes effect when its node is complete, so a node cannot refer to itself.
+    // A name means the definition written last before the alias that is already complete. While a collection is
+    // open it holds its name (so an alias inside it is refused as a cycle), and the entry closes when the node does.
     private void FinishEntry(int entry, long nodes, long bytes)
     {
         AnchorBook book = _book!;
         ref AnchorEntry e = ref book.Entries[entry];
+        e.IsOpen = false;
         e.TapeEnd = book.TapeCount;
         e.Nodes = Math.Min(nodes, Cap);
         e.Bytes = Math.Min(bytes, Cap);

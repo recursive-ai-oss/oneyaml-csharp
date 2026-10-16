@@ -338,15 +338,17 @@ public ref partial struct Utf8YamlReader
     // One event further while looking ahead. Each step is charged to the same budget as an alias expansion, so a
     // mapping that is looked into again and again by nested derived types cannot cost more than the limits allow.
     // Not charged: the end of a collection, which costs nothing the start did not, and a node out of an alias
-    // expansion, which the alias already paid for.
+    // expansion on its first, live pass, which the alias already paid for. An event handed out again from the log
+    // is charged every time, alias or not, so nested look-aheads over one expansion stay within the budget.
     private bool StepAhead()
     {
+        bool fromLog = _look is { } log && log.Pos < log.Count;
         if (!Read())
         {
             return false;
         }
 
-        if (Type is not (YamlTokenType.MappingEnd or YamlTokenType.SequenceEnd) && !_curFromAlias)
+        if (Type is not (YamlTokenType.MappingEnd or YamlTokenType.SequenceEnd) && (fromLog || !_curFromAlias))
         {
             _chargedNodes = Sat(_chargedNodes + 1);
             if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes))
