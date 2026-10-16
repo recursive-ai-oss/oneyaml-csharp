@@ -8,12 +8,19 @@
     <!-- No package references, so there is nothing to lock. -->
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <RestoreLockedMode>false</RestoreLockedMode>
+    <!-- A model with delegate members is left out of generated metadata, and says so. -->
+    <NoWarn>$(NoWarn);OY0004</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The mutator and the invariant checks are shared with the unit tests. -->
+    <!-- The mutator, the reader checks, the attribute models and the document model are shared with the unit tests. -->
     <Compile Include="../OneYaml.Tests/Fuzzing/*.cs" LinkBase="Fuzzing" />
+    <Compile Include="../OneYaml.Tests/Attributes/AttributeModels.cs" LinkBase="Shared" />
+    <Compile Include="../OneYaml.Tests/Document/DocModel.cs" LinkBase="Shared" />
+    <Compile Include="../OneYaml.Tests/Document/PatchOracle.cs" LinkBase="Shared" />
     <ProjectReference Include="../../src/OneYaml/OneYaml.csproj" />
+    <!-- The generator runs on this project's models, so the generated path is fuzzed beside reflection. -->
+    <ProjectReference Include="../../src/OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>
