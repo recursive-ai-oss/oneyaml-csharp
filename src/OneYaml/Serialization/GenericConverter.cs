@@ -196,7 +196,8 @@ internal static class GenericLoader
     // second one, so a mapping of up to 7 entries gets a dictionary that is full, not one that was grown to fit.
     private const int StagedLimit = 7;
 
-    public static object? Load(ref Utf8YamlReader reader)
+    // With numberText, numbers come back as JsonNumber (the text of a JSON number), for the System.Text.Json members.
+    public static object? Load(ref Utf8YamlReader reader, bool numberText = false)
     {
         InlineFrames inline = default;
         var stack = new FrameStack(inline);
@@ -232,13 +233,13 @@ internal static class GenericLoader
 
                             if (entry >= 0 && !reader.ExpandsAliases)
                             {
-                                reader.SetAnchorValue(entry, reader.ReadGenericScalar());
+                                reader.SetAnchorValue(entry, reader.ReadGenericScalar(numberText));
                             }
 
                             goto Next;
                         }
 
-                        value = reader.ReadGenericScalar();
+                        value = reader.ReadGenericScalar(numberText);
                         break;
                     case YamlTokenType.Alias:
                         if (expectKey)

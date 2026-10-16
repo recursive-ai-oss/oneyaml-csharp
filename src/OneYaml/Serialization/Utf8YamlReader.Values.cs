@@ -625,7 +625,9 @@ public ref partial struct Utf8YamlReader
     private static readonly object s_false = false;
 
     // The scalar as the generic model has it: null, bool, long (else BigInteger), double or string.
-    internal object? ReadGenericScalar()
+    // With numberText, a number comes back as the text of a JSON number (a JsonNumber) instead of a long, a BigInteger or a
+    // double, so that 1.0, 1e3, -0 and a long decimal keep the digits they were written with.
+    internal object? ReadGenericScalar(bool numberText = false)
     {
         if (IsPlainlyText())
         {
@@ -649,6 +651,11 @@ public ref partial struct Utf8YamlReader
                 case ScalarKind.Bool:
                     return CoreSchema.TryParseBool(t, out bool b) && b ? s_true : s_false;
                 case ScalarKind.Int:
+                    if (numberText)
+                    {
+                        return new JsonNumber(JsonIntegerText(t));
+                    }
+
                     if (CoreSchema.TryParseInt64(t, out long l))
                     {
                         return l;
@@ -657,6 +664,11 @@ public ref partial struct Utf8YamlReader
                     CheckIntegerLength(t);
                     return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? big : throw CreateException("The integer is not valid.");
                 case ScalarKind.Float:
+                    if (numberText)
+                    {
+                        return new JsonNumber(JsonFloatText(t));
+                    }
+
                     if (!CoreSchema.TryParseDouble(t, out double d))
                     {
                         throw CreateException("The number is not valid.");
@@ -675,6 +687,89 @@ public ref partial struct Utf8YamlReader
                 ArrayPool<byte>.Shared.Return(rented);
             }
         }
+    }
+
+    // The JSON number text of a YAML integer: the digits as written, without a plus sign or leading zeros; 0x and 0o forms in decimal.
+    private readonly string JsonIntegerText(ReadOnlySpan<byte> t)
+    {
+        CheckIntegerLength(t);
+        int i = 0;
+        bool negative = false;
+        if (t.Length > 0 && t[0] is (byte)'-' or (byte)'+')
+        {
+            negative = t[0] == (byte)'-';
+            i = 1;
+        }
+
+        if (t.Length - i > 1 && t[i] == (byte)'0' && t[i + 1] is (byte)'x' or (byte)'o')
+        {
+            return CoreSchema.TryParseBigInteger(t, out BigInteger big) ? big.ToString(CultureInfo.InvariantCulture) : throw CreateException("The integer is not valid.");
+        }
+
+        while (i < t.Length - 1 && t[i] == (byte)'0')
+        {
+            i++;
+        }
+
+        string digits = Encoding.ASCII.GetString(t[i..]);
+        return negative ? "-" + digits : digits;
+    }
+
+    // The JSON number text of a YAML float, which may be written as .5, 1., +1.5 or with an exponent: the digits are kept
+    // as written and only the parts JSON does not allow are repaired. .inf and .nan have no JSON form.
+    private readonly string JsonFloatText(ReadOnlySpan<byte> t)
+    {
+        int i = 0;
+        bool negative = false;
+        if (t.Length > 0 && t[0] is (byte)'-' or (byte)'+')
+        {
+            negative = t[0] == (byte)'-';
+            i = 1;
+        }
+
+        if (t.Length - i < 1 || (t[i] != (byte)'.' && !char.IsAsciiDigit((char)t[i])) || (t.Length - i > 1 && t[i] == (byte)'.' && !char.IsAsciiDigit((char)t[i + 1])))
+        {
+            throw CreateException("A JSON number cannot be infinite or not a number.");
+        }
+
+        var sb = new StringBuilder(t.Length + 3);
+        if (negative)
+        {
+            sb.Append('-');
+        }
+
+        int intStart = i;
+        while (i < t.Length && char.IsAsciiDigit((char)t[i]))
+        {
+            i++;
+        }
+
+        ReadOnlySpan<byte> integer = t[intStart..i];
+        int skip = 0;
+        while (skip < integer.Length - 1 && integer[skip] == (byte)'0')
+        {
+            skip++;
+        }
+
+        sb.Append(integer.IsEmpty ? "0" : Encoding.ASCII.GetString(integer[skip..]));
+        if (i < t.Length && t[i] == (byte)'.')
+        {
+            int fracStart = ++i;
+            while (i < t.Length && char.IsAsciiDigit((char)t[i]))
+            {
+                i++;
+            }
+
+            sb.Append('.');
+            sb.Append(i == fracStart ? "0" : Encoding.ASCII.GetString(t[fracStart..i]));
+        }
+
+        if (i < t.Length)
+        {
+            sb.Append(Encoding.ASCII.GetString(t[i..]));
+        }
+
+        return sb.ToString();
     }
 
     // For a mapping key that resolves to something other than a string: a text that is the same for

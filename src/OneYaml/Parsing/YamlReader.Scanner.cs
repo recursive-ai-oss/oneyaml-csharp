@@ -1119,6 +1119,12 @@ internal ref partial struct YamlReader
                 throw Error("A verbatim tag cannot be empty.", p);
             }
 
+            // A verbatim tag is taken as it stands, so the bare '!' it would name is not a tag.
+            if (p == start + 3 && s[start + 2] == (byte)'!')
+            {
+                throw Error("A verbatim tag cannot be just '!'.", start + 2);
+            }
+
             CheckTagText(start + 2, p);
             CheckChars(start + 2, p);
             t.Flags = 1;

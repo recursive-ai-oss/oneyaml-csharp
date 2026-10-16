@@ -567,6 +567,27 @@ public sealed partial class Utf8YamlEmitter
         EndValue(place);
     }
 
+    // Writes the text of a JSON number as a plain scalar. JSON numbers are Core schema integers and floats as they stand, so
+    // the text is not changed. It may be long, so it is not limited to the size of a stack buffer.
+    internal void WriteJsonNumber(string text)
+    {
+        byte[]? rented = null;
+        try
+        {
+            Span<byte> bytes = text.Length <= 128 ? stackalloc byte[128] : (rented = ArrayPool<byte>.Shared.Rent(text.Length));
+            Utf8YamlWriter w = ValueWriter(out Place place);
+            w.WriteRaw(bytes.Slice(0, Encoding.ASCII.GetBytes(text, bytes)));
+            EndValue(place);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
     // Writes text that is already a valid plain number, such as the digits of an enum value outside the declared names.
     internal void WritePlainNumberText(ReadOnlySpan<char> ascii)
     {
