@@ -17,7 +17,7 @@
 
   <PropertyGroup Label="Package">
     <PackageId>OneYaml</PackageId>
-    <Description>Pure C# YAML 1.2 that edits a file and keeps its comments, with a System.Text.Json-style serializer.</Description>
+    <Description>Lossless, comment-preserving editing and a System.Text.Json-style serializer for YAML 1.2, in one .NET package.</Description>
     <Authors>Recursive AI, LLC</Authors>
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>

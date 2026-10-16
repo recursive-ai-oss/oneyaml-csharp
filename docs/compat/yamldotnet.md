@@ -9,6 +9,8 @@ For the steps of a migration, what to check after the swap, and the move to the 
 [Migrating from YamlDotNet](../migrate-yamldotnet.md). The adapter reads with the library's default limits
 unless you pass limits to `DeserializerBuilder.WithLimits`, `YamlStream.Load` or `new Parser`; those members are additions,
 not in YamlDotNet, and `YamlLimits.Untrusted` is the setting for input you do not control ([Limits](../limits.md#the-compatibility-adapters)).
+Import the type with `using YamlLimits = OneYaml.YamlLimits;`, not `using OneYaml;`: that namespace has its own `YamlException`,
+`YamlDocument`, `YamlNode` and `YamlIgnoreAttribute`, so importing it beside the adapter's namespaces makes those names ambiguous (error CS0104).
 
 Each class has a minimal repro. Label: **intended (spec)** = the YAML 1.2 text or a safer behaviour is kept on purpose;
 **intended (bug not reproduced)** = YamlDotNet misbehaves and the package does not copy it; **gap** = documented API or

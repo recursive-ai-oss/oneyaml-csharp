@@ -129,18 +129,19 @@ The adapter reproduces YamlDotNet's documented behaviour, not its defects. Read 
 
 ### Input you do not control
 
-The adapter adds three members that YamlDotNet does not have, so that reading can keep to the [limits](limits.md) of the `OneYaml` library: `DeserializerBuilder.WithLimits(YamlLimits)`, `YamlStream.Load(TextReader, YamlLimits)` and `new Parser(TextReader, YamlLimits)`. Without them the adapter reads with `YamlLimits.Default`. For uploads, request bodies and files from other systems, pass `YamlLimits.Untrusted`, which also bounds the input size, the size of a scalar and the number of documents. `YamlLimits` is in the `OneYaml` namespace.
+The adapter adds three members that YamlDotNet does not have, so that reading can keep to the [limits](limits.md) of the `OneYaml` library: `DeserializerBuilder.WithLimits(YamlLimits)`, `YamlStream.Load(TextReader, YamlLimits)` and `new Parser(TextReader, YamlLimits)`. Without them the adapter reads with `YamlLimits.Default`. For uploads, request bodies and files from other systems, pass `YamlLimits.Untrusted`, which also bounds the input size, the size of a scalar and the number of documents. `YamlLimits` is in the `OneYaml` namespace; import it with `using YamlLimits = OneYaml.YamlLimits;`, not `using OneYaml;`, because that namespace has its own `YamlException`, `YamlDocument`, `YamlNode` and `YamlIgnoreAttribute`, and importing it beside the adapter's namespaces makes those names ambiguous (error CS0104).
 
 <!-- sample: YamlDotNetLimits -->
 ```csharp
 using OneYaml.Compat.YamlDotNet.Core;
 using OneYaml.Compat.YamlDotNet.Serialization;
+using YamlLimits = OneYaml.YamlLimits;
 
 string upload = new string('[', 129) + new string(']', 129); // nested 129 deep
 
 // WithLimits is not in YamlDotNet. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
 IDeserializer deserializer = new DeserializerBuilder()
-    .WithLimits(OneYaml.YamlLimits.Untrusted)
+    .WithLimits(YamlLimits.Untrusted)
     .Build();
 try
 {

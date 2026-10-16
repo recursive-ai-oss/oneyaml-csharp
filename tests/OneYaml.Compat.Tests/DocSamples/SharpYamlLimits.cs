@@ -1,5 +1,6 @@
 #region SharpYamlLimits
 using OneYaml.Compat.SharpYaml;
+using YamlLimits = OneYaml.YamlLimits;
 #endregion
 using Xunit;
 
@@ -16,7 +17,7 @@ public class SharpYamlLimitsSamples
         string upload = "a0: &a0 [x, x]\n" + string.Concat(Enumerable.Range(1, 16).Select(i => $"a{i}: &a{i} [*a{i - 1}, *a{i - 1}]\n"));
 
         // Limits is not in SharpYaml. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
-        var options = new YamlSerializerOptions { Limits = OneYaml.YamlLimits.Untrusted };
+        var options = new YamlSerializerOptions { Limits = YamlLimits.Untrusted };
         try
         {
             YamlSerializer.Deserialize<object>(upload, options);
