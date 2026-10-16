@@ -4,7 +4,7 @@
 
 ## Checks
 
-- [ ] `tools/gate` passes
+- [ ] `tools/gate` passes (it runs the same checks as CI: build, tests, format, public text, secret scan)
 - [ ] A test fails without this change (or the change is documentation only)
 - [ ] New or changed public members have XML doc comments, and new C# blocks in the documentation are doc samples
 - [ ] `CHANGELOG.md` has a line under Unreleased for anything a user can see (breaking changes marked)

@@ -26,7 +26,7 @@ A stack overflow, an unhandled exception other than the documented ones, a hang,
 These are known limits, not bugs. Read [Limits](docs/limits.md) before you handle input from outside.
 
 - Code you write in a `YamlConverter<T>` runs outside the library's limits.
-- The compatibility adapters (`OneYaml.Compat.YamlDotNet`, `OneYaml.Compat.SharpYaml`) always run with the default limits and have no `Untrusted` mode. For outside input, read with the `OneYaml` API.
+- The compatibility adapters (`OneYaml.Compat.YamlDotNet`, `OneYaml.Compat.SharpYaml`) read with the default limits unless you pass `YamlLimits.Untrusted` to them: `WithLimits` and the limits overloads of `YamlStream.Load` and `Parser` in the YamlDotNet adapter, `YamlSerializerOptions.Limits` in the SharpYaml adapter ([Limits](docs/limits.md#the-compatibility-adapters)).
 - Without `Untrusted`, there is no cap on input size, scalar size or documents per stream, and memory grows with the input. A `YamlDocument` keeps the text and an index of it.
 - `YamlLimits.None` removes every bound, alias expansion included. Never use it on input you do not trust.
 - Reflection-based binding creates the types you ask for and the types their members declare. Bind untrusted input to types meant for it.

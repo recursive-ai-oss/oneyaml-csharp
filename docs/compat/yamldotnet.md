@@ -6,8 +6,9 @@ in `tests/OneYaml.Compat.Tests`. Switching is a package swap and a `using` chang
 `using OneYaml.Compat.YamlDotNet.Serialization;` (and likewise for `RepresentationModel` and `Core`).
 
 For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
-[Migrating from YamlDotNet](../migrate-yamldotnet.md). The adapter always runs with the library's default limits and has no
-mode for untrusted input ([Limits](../limits.md#what-the-limits-do-not-cover)).
+[Migrating from YamlDotNet](../migrate-yamldotnet.md). The adapter reads with the library's default limits
+unless you pass limits to `DeserializerBuilder.WithLimits`, `YamlStream.Load` or `new Parser`; those members are additions,
+not in YamlDotNet, and `YamlLimits.Untrusted` is the setting for input you do not control ([Limits](../limits.md#the-compatibility-adapters)).
 
 Each class has a minimal repro. Label: **intended (spec)** = the YAML 1.2 text or a safer behaviour is kept on purpose;
 **intended (bug not reproduced)** = YamlDotNet misbehaves and the package does not copy it; **gap** = documented API or
@@ -43,7 +44,7 @@ behaviour the package does not provide.
 | I8 | Empty member name | naming convention applied to `""` crashes YamlDotNet (`IndexOutOfRange`); package returns `""` | intended (bug not reproduced) |
 | I9 | More collection targets | `Deserialize<ISet<string>>("[a]")`, `IReadOnlyDictionary<string,int>` → YamlDotNet throws, package reads | intended (more than the target) |
 | I10 | Exception types | `SemanticErrorException` vs `SyntaxErrorException` cannot be told apart by the engine; syntax/encoding errors map to `SyntaxErrorException`, unresolved tags to `SemanticErrorException`, limits to `MaximumRecursionLevelReachedException`, undefined aliases to `AnchorNotFoundException` (by message text) | gap (the class of an error can differ) |
-| I11 | Limits stay on | The deserializer enforces the alias budget and depth (`WithMaximumRecursion`, default 130 read / 50 write, never above the library's depth limit); a billion-laughs input fails with a `YamlException`. Representation-model walks (`ToString`, `Equals`, visitors) are bounded by the same node and text budgets. | intended (safety; compat never loosens limits) |
+| I11 | Limits stay on | The deserializer enforces the alias budget and depth (`WithMaximumRecursion`, default 130 read / 50 write, never above the library's depth limit); a billion-laughs input fails with a `YamlException`. `WithLimits`, `YamlStream.Load(TextReader, YamlLimits)` and `new Parser(TextReader, YamlLimits)`, which YamlDotNet does not have, set stricter limits, such as `YamlLimits.Untrusted`; a deserializer reading from such a parser keeps its limits. Representation-model walks (`ToString`, `Equals`, visitors) are bounded by the same node and text budgets. | intended (safety; compat never loosens limits) |
 | I12 | Positions | node `Start`/`End` and exception marks use characters (UTF-16 units); collection `End` equals its `Start` as in YamlDotNet | matched |
 
 ## Bugs not reproduced
@@ -61,7 +62,7 @@ behaviour the package does not provide.
 `Core` `Scanner`, `MergingParser`, most `Parser` internals; `IObjectFactory`, node deserializers, type inspectors, event
 emitters, object-graph visitors; `WithTypeDiscriminatingNodeDeserializer`, `WithEnforceNullability`/`WithEnforceRequiredMembers`;
 static contexts (`StaticSerializerBuilder`); `WithYamlFormatter`; registration-location overloads; `YamlMappingNode.FromObject`;
-comment events; `WithTypeResolver`. `EmitDefaults` is an error in YamlDotNet and absent here. `EnsureRoundtrip` is accepted and has no effect.
+comment events; `WithTypeResolver`. `EmitDefaults` is an error in YamlDotNet and absent here. `EnsureRoundtrip()` builds, but `Serialize` then throws `NotSupportedException`, since the adapter cannot do what it asks.
 `ParserExtensions` has `Consume`/`Accept`/`TryConsume`-style members used by converters only; `Peek`/`Allow`/`Expect`/`TryFindMappingEntry` are missing.
 `Deserialize(IParser)` accepts only the package's own `Parser`.
 

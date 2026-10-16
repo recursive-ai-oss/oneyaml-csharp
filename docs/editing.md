@@ -33,6 +33,16 @@ Console.WriteLine(doc);
 //   paused: false
 ```
 
+### What an edit keeps, and what it does not
+
+- **Untouched text is kept byte for byte:** comments, blank lines, indentation, key order, the quoting of other values, line endings (`\n` or `\r\n`). A comment on the same line as a replaced scalar stays after the new value.
+- **Removing an entry** removes its line, with the comment on that line and the comment lines just above it.
+- **Replacing a mapping or a sequence** replaces its whole text, and the comments inside it go with it. Change the leaves instead when the comments matter.
+- **Comments do not move with values.** A value moved by a patch `move` is written in the style of its new place, without the comments of its old one.
+- **There is no comment API.** Comments are kept, not modelled: you cannot read, add or move them.
+- **Encoding.** `ToString()` gives text. `ToBytes()` and `WriteTo(...)` give the encoding and byte order mark the input had; use them to write the file back ([Input, output and lifetime](#input-output-and-lifetime)).
+- **Plain or quoted** is judged by the YAML 1.2 Core schema, so a new string `yes` is written plain. If a YAML 1.1 reader also reads the file, set `QuoteYaml11Lookalikes` ([How a new value is written](#how-a-new-value-is-written)).
+
 - **Values you can assign.** `string`, `bool`, the integer types, `double`, `decimal` and `null` convert to a `YamlNode` implicitly. For anything else, `YamlNode.Create(value)` or `node.Set(value)` takes a dictionary, a sequence, another node, or any value the serializer can write.
 - **A view follows its node.** A `YamlNode` stays valid across edits made through it or anywhere else in the document, as a `JsonNode` does. A view of a node that was removed, or that was inside a value that was replaced, throws `InvalidOperationException`. Any use after the document is disposed throws `ObjectDisposedException`.
 - **Misses.** Reading a key that is not there throws `KeyNotFoundException`; use `TryGetValue` or `ContainsKey` to look without throwing. A sequence index outside the items throws `ArgumentOutOfRangeException`, and using a key on a scalar or a sequence throws `InvalidOperationException`.
@@ -138,12 +148,6 @@ both.Set("/enabled", "yes");      // quoted, so a YAML 1.1 reader also sees a st
 Console.WriteLine(both.Root["enabled"].Style); // SingleQuoted
 ```
 
-## Comments and layout
-
-Everything an edit does not touch is kept as it was: comments, blank lines, indentation, key order, the quoting of other values, line endings (`\n` or `\r\n`), the encoding and the byte order mark. A comment on the same line as a replaced scalar stays after the new value. Removing an entry removes its line, with the comment on that line and the comment lines just above it. Replacing a mapping or a sequence replaces its whole text, comments inside it included.
-
-There is no API to read, add or move comments; they are kept, not modelled.
-
 ## Anchors and aliases
 
 Reading follows aliases: `Get`, the indexers and `Deserialize` see the anchored value. Writing through an alias is refused, because it would change every place that shares the anchor. Replacing the alias itself, or the anchored original, is fine.
@@ -244,6 +248,81 @@ Console.WriteLine(doc);
 ```
 
 A stream with no document (empty, or only comments) has `Documents.Count == 0`; `Root` then reads as null, and the first write creates the document.
+
+## Recipe: update a Kubernetes manifest
+
+A deploy job changes a manifest that people also maintain by hand. The file holds a Service and a Deployment; the job raises the replica count, moves to a new image, turns off coloured logs and drops an environment variable nobody uses any more. The input stands for a file that came from outside the program, so it is read with `YamlLimits.Untrusted` ([Limits](limits.md)). Kubernetes tools read manifests with a YAML 1.1 parser, where a plain `no` is the boolean false, so `QuoteYaml11Lookalikes` is on. The file is written back with `WriteTo`, which keeps its encoding.
+
+<!-- sample: EditManifest -->
+```csharp
+byte[] input = """
+    # Service for the web tier
+    apiVersion: v1
+    kind: Service
+    metadata:
+      name: web
+    ---
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web
+    spec:
+      replicas: 2              # scaled by the release job
+      template:
+        spec:
+          containers:
+            - name: web
+              image: web:1.4
+              env:
+                # left over from the old proxy
+                - name: PROXY_URL
+                  value: http://proxy:3128
+                - name: LOG_COLOR
+                  value: auto
+    """u8.ToArray(); // in a real job: File.ReadAllBytes(path)
+
+var options = new YamlDocumentOptions
+{
+    Limits = YamlLimits.Untrusted, // also bounds input size, scalar size and document count
+    QuoteYaml11Lookalikes = true,  // so a YAML 1.1 reader sees 'no' as a string
+};
+using var doc = YamlDocument.Parse(input, options);
+
+// Find the Deployment by its kind, not by its place in the file.
+int deploy = Enumerable.Range(0, doc.Documents.Count).First(i => doc.Get<string>("/kind", i) == "Deployment");
+const string Web = "/spec/template/spec/containers/0";
+doc.Set("/spec/replicas", 3, deploy);
+doc.Set($"{Web}/image", "web:1.5", deploy);
+doc.Set($"{Web}/env/1/value", "no", deploy);
+doc.Remove($"{Web}/env/0", deploy); // the comment line above it goes too
+
+using var file = new MemoryStream(); // in a real job: File.Create(path)
+doc.WriteTo(file);                   // in the encoding the input had
+file.Position = 0;
+Console.Write(new StreamReader(file).ReadToEnd());
+// # Service for the web tier
+// apiVersion: v1
+// kind: Service
+// metadata:
+//   name: web
+// ---
+// apiVersion: apps/v1
+// kind: Deployment
+// metadata:
+//   name: web
+// spec:
+//   replicas: 3              # scaled by the release job
+//   template:
+//     spec:
+//       containers:
+//         - name: web
+//           image: web:1.5
+//           env:
+//             - name: LOG_COLOR
+//               value: 'no'
+```
+
+The diff of the file holds only the job's changes: the replica count and the image, each in place with its comment kept, the quoted `'no'`, and the removed variable with the comment line that described it. The Service is untouched. Without `QuoteYaml11Lookalikes` the value would be written as a plain `no`, which is a string under YAML 1.2 but false for a YAML 1.1 reader. To change many files, catch `YamlException` for each one: a file over the limits, or one where the Deployment has no such path, then fails on its own and nothing is written for it.
 
 ## Errors
 

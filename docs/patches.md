@@ -1,6 +1,6 @@
 # Patches
 
-`YamlDocument` applies a JSON Patch (RFC 6902) or a JSON Merge Patch (RFC 7396) to a YAML file and keeps its layout: every value the patch does not touch keeps its text, comments included, and every value it writes is placed and styled as an [edit](editing.md#how-a-new-value-is-written) would be. Paths are RFC 6901 pointers, read as in [Pointers](editing.md#pointers).
+`YamlDocument` applies JSON Patch operations ([RFC 6902](https://www.rfc-editor.org/rfc/rfc6902)) with YAML value equality for `test`, and JSON Merge Patch ([RFC 7396](https://www.rfc-editor.org/rfc/rfc7396)), to a YAML file and keeps its layout: every value the patch does not touch keeps its text, comments included, and every value it writes is placed and styled as an [edit](editing.md#how-a-new-value-is-written) would be. Paths are RFC 6901 pointers, read as in [Pointers](editing.md#pointers). One rule differs from RFC 6902 on purpose: `test` compares YAML values, so `1` and `1.0` are different ([Differences from RFC 6902](#differences-from-rfc-6902)).
 
 The samples on this page are complete programs that assume implicit usings (the default for new projects); the first shows the `using OneYaml;` line the others leave out.
 
@@ -33,6 +33,23 @@ Console.WriteLine(doc);
 ```
 
 `ApplyPatch` takes the patch as JSON text, UTF-8 bytes, a `JsonNode`, or a `YamlPatch` built in code. All six operations are supported: `add`, `remove`, `replace`, `move`, `copy` and `test`. A value that is moved or copied is written in the style of its new place, so a comment on the line of a moved value does not move with it.
+
+> **`test` compares YAML values, not JSON values.** An integer and a float are different values in YAML 1.2, so a `test` for `1` fails on `1.0` in the file, where RFC 6902 would pass it. This is on purpose: the patch checks the value a YAML reader sees. A patch made for a JSON form of the data may need its `test` values changed; see [Differences from RFC 6902](#differences-from-rfc-6902).
+
+<!-- sample: PatchTestNumbers -->
+```csharp
+using var doc = YamlDocument.Parse("timeout: 1.0\n");
+try
+{
+    doc.ApplyPatch("""[{ "op": "test", "path": "/timeout", "value": 1 }]""");
+}
+catch (YamlException e) when (e.Category == YamlErrorCategory.PatchTest)
+{
+    Console.WriteLine(e.Message); // The value at '/timeout' is not the value the test expects.
+}
+
+doc.ApplyPatch("""[{ "op": "test", "path": "/timeout", "value": 1.0 }]"""); // passes
+```
 
 ## A patch is atomic
 
@@ -68,9 +85,20 @@ Console.WriteLine(doc.ToString() == Src); // True
 | `RefusedAmbiguous` | A pointer matches more than one key (with `AllowDuplicateKeys`) |
 | `Limit` | The patch or the values it reads exceed the document's [limits](limits.md) |
 
-## The test operation
+## Differences from RFC 6902
 
-`test` compares the value in the document with the patch's value by the YAML data model under the Core schema, not as JSON text. A plain `yes` in the file equals the JSON string `"yes"`; a quoted `'1'` is a string and does not equal the number `1`; and the integer `1` does not equal the float `1.0`, because YAML 1.2 keeps integers and floats apart.
+The six operations and the order they run in follow RFC 6902, and paths follow RFC 6901. `test` compares the value in the document with the patch's value by the YAML data model under the Core schema, after following aliases, not as JSON values:
+
+| | RFC 6902 | `ApplyPatch` |
+|---|---|---|
+| `test` on numbers | numbers are equal when they are numerically equal: `1` equals `1.0` | an integer and a float are different values: `1` does not equal `1.0`. Values of one type compare by value: `0x1F` equals `31`, and `1e2` equals `100.0` |
+| `test` on mapping keys | object member names are strings | keys compare as YAML values: a plain key `80` is an integer and does not match the member `"80"` of a test value; a quoted key `"80"` does |
+| `test` on strings | JSON strings | the scalar as the Core schema reads it: plain `yes` equals `"yes"`, and quoted `'1'` is a string, so it does not equal `1` |
+| What the patch applies to | one JSON document | one document of a YAML stream, the first unless you pass `document: n` ([Several documents](#several-documents)) |
+
+Pointers are not affected: a token names a key by its text, so `/80` reaches the integer key `80` as it would reach the member `"80"` of a JSON object.
+
+**A patch made for a JSON form of the same data**, for example by a tool that converted the file to JSON and diffed it, applies the same way except for its `test` operations on floats and on mappings with keys that are not strings. Check those first: a JSON writer may write a whole float as `1`, and that `test` then fails on the `1.0` in the file. The values such a patch writes are read as the JSON shows them, so a float written as `1` goes into the file as the integer `1`.
 
 ## Building a patch in code
 
