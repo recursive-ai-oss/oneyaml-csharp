@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Text;
 using OneYaml.Documents;
+using OneYaml.Parsing;
 using OneYaml.Schema;
 
 namespace OneYaml;
@@ -252,8 +253,25 @@ public sealed class YamlNode : IEquatable<YamlNode>
         }
     }
 
-    /// <summary>The tag as written, such as <c>!!str</c> or <c>!local</c>, or <see langword="null"/>.</summary>
+    /// <summary>The tag resolved against the document's <c>%TAG</c> directives, or <see langword="null"/> when the node has none.</summary>
+    /// <remarks>
+    /// <c>!!str</c> reads as <c>tag:yaml.org,2002:str</c> and a local tag such as <c>!Sub</c> as <c>!Sub</c>. This is the form
+    /// <see cref="Utf8YamlReader.Tag"/> returns and <see cref="Utf8YamlEmitter.WriteTag(string)"/> takes. Use
+    /// <see cref="RawTag"/> for the text as it appears in the source.
+    /// </remarks>
     public string? Tag
+    {
+        get
+        {
+            DocState s = State();
+            return s.TryTagParts(_index, out _, out _, out int ps, out int pl, out int ss, out int sl)
+                ? YamlReader.BuildTag(s.Text, ps, pl, ss, sl)
+                : null;
+        }
+    }
+
+    /// <summary>The tag exactly as written in the source, such as <c>!!str</c>, <c>!e!widget</c> or <c>!&lt;tag:example.com,2000:x&gt;</c>, or <see langword="null"/>.</summary>
+    public string? RawTag
     {
         get
         {
@@ -325,6 +343,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public T GetValue<T>()
     {
         DocState s = State();
+        if (!NodeValues.IsLeafType(typeof(T)))
+        {
+            return BindAny<T>();
+        }
+
         int t = Followed(s, out bool via);
         ChargeText(s, t, via, s.Node(t).End - s.Node(t).Start);
         if (NodeValues.TryGet(s, t, _doc!.BindOptions, out T value, out YamlException? error))
@@ -332,7 +355,29 @@ public sealed class YamlNode : IEquatable<YamlNode>
             return value;
         }
 
+        _ = YamlException.Tag(error!, _doc.SourceName);
         throw error!;
+    }
+
+    /// <summary>Reads the node as a type using generated metadata. This is the form for trimmed and ahead-of-time programs; it reads whatever <see cref="Set{T}(T, YamlTypeInfo{T})"/> can write.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
+    /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
+    /// <returns>The value.</returns>
+    /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
+    public T GetValue<T>(YamlTypeInfo<T> typeInfo) => Deserialize(typeInfo)!;
+
+    // A type that is not a plain scalar (an enum, a class, a collection) is read by the binder, as Set<T> writes it.
+    // This needs reflection unless the caller passes a YamlTypeInfo, so it is open only while the switch is on.
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Reflection-based reads happen only while YamlSerializer.IsReflectionEnabledByDefault is true. That switch is false when trimming or compiling ahead of time, the trimmer folds the check, and this method then throws NotSupportedException naming the overload that takes a YamlTypeInfo.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Same switch as above: with it off, this method throws before any reflection runs.")]
+    private T BindAny<T>()
+    {
+        if (!YamlSerializer.IsReflectionEnabledByDefault)
+        {
+            throw new NotSupportedException($"{typeof(T).Name} is not a plain scalar type, and reflection is turned off in this application. Use the overload that takes a YamlTypeInfo, or turn the OneYaml.YamlSerializer.IsReflectionEnabledByDefault switch on.");
+        }
+
+        return Deserialize<T>(_doc!.BindOptions)!;
     }
 
     /// <summary>Reads a scalar as a CLR value, if it has that type.</summary>
@@ -342,6 +387,20 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public bool TryGetValue<T>(out T value)
     {
         DocState s = State();
+        if (!NodeValues.IsLeafType(typeof(T)))
+        {
+            try
+            {
+                value = BindAny<T>();
+                return true;
+            }
+            catch (YamlException e) when (e.Category == YamlErrorCategory.Binding)
+            {
+                value = default!;
+                return false;
+            }
+        }
+
         int t = Followed(s, out bool via);
         ChargeText(s, t, via, s.Node(t).End - s.Node(t).Start);
         return NodeValues.TryGet(s, t, _doc!.BindOptions, out value, out _, wantError: false);
@@ -349,13 +408,24 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     /// <summary>Binds the node to a type with the reflection binder, as <see cref="YamlSerializer"/> would bind the same text.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
-    /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <param name="options">Options; <see langword="null"/> means the document's own limits and <see cref="YamlDocumentOptions.SourceName"/> with the defaults of <see cref="YamlSerializerOptions.Default"/>.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
     /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
     [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
     [RequiresDynamicCode("Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
-    public T? Deserialize<T>(YamlSerializerOptions? options = null) => NodeReplay.Bind(State(), _index, (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo<T>());
+    public T? Deserialize<T>(YamlSerializerOptions? options = null)
+    {
+        DocState s = State();
+        try
+        {
+            return NodeReplay.Bind(s, _index, (options ?? _doc!.BindOptions).GetReflectiveTypeInfo<T>());
+        }
+        catch (YamlException e) when (YamlException.Tag(e, _doc!.SourceName))
+        {
+            throw;
+        }
+    }
 
     /// <summary>Binds the node to a type using generated metadata.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
@@ -366,7 +436,15 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public T? Deserialize<T>(YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return NodeReplay.Bind(State(), _index, typeInfo);
+        DocState s = State();
+        try
+        {
+            return NodeReplay.Bind(s, _index, typeInfo);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, _doc!.SourceName))
+        {
+            throw;
+        }
     }
 
     // ---- Children ----
@@ -436,8 +514,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <summary>Gets or sets the value of a mapping key. Setting an existing key replaces its value; a new key is added at the end.</summary>
     /// <param name="key">The key's text.</param>
     /// <exception cref="KeyNotFoundException">Getting: the node is a mapping with no such key. Use <see cref="TryGetValue(string, out YamlNode)"/> to look without throwing.</exception>
-    /// <exception cref="YamlException">Getting: the node is not a mapping (<see cref="YamlErrorCategory.PatchPath"/>). Setting: that, or the write goes through an alias. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="YamlException">Setting: the write goes through an alias (<see cref="YamlErrorCategory.RefusedAlias"/>). The document is unchanged.</exception>
+    /// <exception cref="InvalidOperationException">The node is not a mapping, was removed, or is detached.</exception>
     /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
     [AllowNull]
     public YamlNode this[string key]
@@ -455,7 +533,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
             if (n.Kind != NodeKind.Mapping)
             {
                 string kind = n.Kind == NodeKind.Sequence ? "a sequence" : "a scalar";
-                throw YamlException.At(YamlErrorCategory.PatchPath, $"Cannot read the key '{key}': the node at line {at.Line}, column {at.Column} is {kind}, not a mapping.", s.Text, s.Node(_index).Start);
+                throw new InvalidOperationException($"Cannot read the key '{key}': the node at line {at.Line}, column {at.Column} is {kind}, not a mapping.");
             }
 
             throw new KeyNotFoundException($"The mapping at line {at.Line}, column {at.Column} has no key '{key}'.");
@@ -481,8 +559,9 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     /// <summary>Gets or sets an item of a sequence. Setting an index equal to the count appends.</summary>
     /// <param name="index">The item's position.</param>
-    /// <exception cref="YamlException">The node is not a sequence or the index is outside it (<see cref="YamlErrorCategory.PatchPath"/>), or the write goes through an alias. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The index is outside the sequence (for setting, more than the count).</exception>
+    /// <exception cref="YamlException">Setting: the write goes through an alias (<see cref="YamlErrorCategory.RefusedAlias"/>). The document is unchanged.</exception>
+    /// <exception cref="InvalidOperationException">The node is not a sequence, was removed, or is detached.</exception>
     [AllowNull]
     public YamlNode this[int index]
     {
@@ -491,13 +570,16 @@ public sealed class YamlNode : IEquatable<YamlNode>
             DocState s = State();
             int t = Followed(s, out bool via);
             ref readonly CstNode n = ref s.Node(t);
-            if (n.Kind != NodeKind.Sequence || (uint)index >= (uint)n.Count)
+            if (n.Kind != NodeKind.Sequence)
             {
                 YamlPosition at = s.PositionOf(s.Node(_index).Start);
-                string what = n.Kind == NodeKind.Sequence
-                    ? $"the sequence at line {at.Line}, column {at.Column} has {n.Count} {(n.Count == 1 ? "item" : "items")}"
-                    : $"the node at line {at.Line}, column {at.Column} is {(n.Kind == NodeKind.Mapping ? "a mapping" : "a scalar")}, not a sequence";
-                throw YamlException.At(YamlErrorCategory.PatchPath, $"Cannot read item {index}: {what}.", s.Text, s.Node(_index).Start);
+                throw new InvalidOperationException($"Cannot read item {index}: the node at line {at.Line}, column {at.Column} is {(n.Kind == NodeKind.Mapping ? "a mapping" : "a scalar")}, not a sequence.");
+            }
+
+            if ((uint)index >= (uint)n.Count)
+            {
+                YamlPosition at = s.PositionOf(s.Node(_index).Start);
+                throw new ArgumentOutOfRangeException(nameof(index), index, $"Cannot read item {index}: the sequence at line {at.Line}, column {at.Column} has {n.Count} {(n.Count == 1 ? "item" : "items")}.");
             }
 
             return new YamlNode(_doc!, s.ChildAt(t, index), _epoch!, via);
@@ -515,9 +597,10 @@ public sealed class YamlNode : IEquatable<YamlNode>
             }
 
             int container = WriteContainer(s, NodeKind.Sequence);
-            if (index < 0)
+            if (index < 0 || index > s.Node(container).Count)
             {
-                throw YamlException.At(YamlErrorCategory.PatchPath, "The index is outside the sequence.", s.Text, s.Node(_index).Start);
+                YamlPosition at = s.PositionOf(s.Node(_index).Start);
+                throw new ArgumentOutOfRangeException(nameof(index), index, $"Cannot write item {index}: the sequence at line {at.Line}, column {at.Column} has {s.Node(container).Count} {(s.Node(container).Count == 1 ? "item" : "items")}, so only an index up to the count is allowed.");
             }
 
             _doc!.Swap(PointerOps.WriteIn(s, _doc.Limits, container, Encoding.ASCII.GetBytes(index.ToString(System.Globalization.CultureInfo.InvariantCulture)), v, PointerOps.Mode.Set));
@@ -537,7 +620,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
         if (s.Node(_index).Kind != expected)
         {
-            throw YamlException.At(YamlErrorCategory.PatchPath, expected == NodeKind.Mapping ? "The node is not a mapping." : "The node is not a sequence.", s.Text, s.Node(_index).Start);
+            YamlPosition at = s.PositionOf(s.Node(_index).Start);
+            throw new InvalidOperationException($"The node at line {at.Line}, column {at.Column} is not {(expected == NodeKind.Mapping ? "a mapping" : "a sequence")}.");
         }
 
         return _index;
@@ -647,12 +731,17 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         if (_doc is null)
         {
-            if (_value is ValueTree t)
+            // A detached node has no source text, so show the YAML its value would be written as.
+            YamlLimits limits = YamlLimits.Default;
+            ValueTree tree = _value as ValueTree ?? ValueTree.FromObject(_value, limits.MaxDepth, limits);
+            if (tree[0].Kind == VKind.Scalar)
             {
-                return t[0].Kind == VKind.Scalar ? Encoding.UTF8.GetString(t[0].Text ?? []) : t[0].Kind.ToString();
+                return Encoding.UTF8.GetString(tree[0].Text ?? []);
             }
 
-            return Convert.ToString(_value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+            using var buffer = new ByteBuffer(256);
+            ValueWriter.WriteBlock(buffer, tree, 0, 0, false, new Layout("\n", 2, 2));
+            return Encoding.UTF8.GetString(buffer.WrittenSpan).TrimEnd('\n');
         }
 
         DocState s = State();

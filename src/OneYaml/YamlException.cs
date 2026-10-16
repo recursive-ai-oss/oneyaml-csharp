@@ -30,16 +30,9 @@ public class YamlException : Exception
     {
     }
 
-    /// <summary>Creates an exception with a category and a position.</summary>
-    /// <param name="message">The message, meant for people; its text is not a stable contract.</param>
-    /// <param name="category">The kind of error.</param>
-    /// <param name="line">The 1-based line, or 0 when unknown.</param>
-    /// <param name="column">The 1-based column in characters, or 0 when unknown.</param>
-    /// <param name="offset">The byte offset in the UTF-8 text, or -1 when unknown.</param>
-    /// <param name="operationIndex">For a patch, the index of the failing operation.</param>
-    /// <param name="innerException">The exception that caused this one, if any.</param>
-    /// <param name="path">A JSON Pointer to the failing node, or <see langword="null"/> when there is none.</param>
-    public YamlException(
+    // Every field at once. It stays internal so a new field never forces a new public overload; callers outside
+    // the library set the init properties instead.
+    internal YamlException(
         string message,
         YamlErrorCategory category,
         int line,
@@ -59,22 +52,22 @@ public class YamlException : Exception
     }
 
     /// <summary>The kind of error.</summary>
-    public YamlErrorCategory Category { get; }
+    public YamlErrorCategory Category { get; init; }
 
     /// <summary>
     /// The 1-based line of the error, counting LF, CRLF and a lone CR as one break each, or 0 when
     /// the error has no position.
     /// </summary>
-    public int Line { get; }
+    public int Line { get; init; }
 
     /// <summary>The 1-based column of the error in decoded characters (a byte order mark is not counted), or 0.</summary>
-    public int Column { get; }
+    public int Column { get; init; }
 
     /// <summary>
     /// The byte offset of the error, or -1 when unknown. For text errors it counts bytes of the UTF-8
     /// text the parser read; for a malformed UTF-16 or UTF-32 input it counts bytes of the original input.
     /// </summary>
-    public long Offset { get; }
+    public long Offset { get; init; }
 
     /// <summary>
     /// A JSON Pointer (RFC 6901) to the node the error is about, such as <c>/endpoints/1/weight</c>; the
@@ -82,23 +75,25 @@ public class YamlException : Exception
     /// syntax error or an unreadable encoding, or when the node is under a mapping key that is a collection
     /// or an alias, which has no name to write.
     /// </summary>
-    public string? Path { get; }
+    public string? Path { get; init; }
 
     /// <summary>
-    /// The name of the input given in <see cref="YamlSerializerOptions.SourceName"/>, or <see langword="null"/>.
-    /// It prefixes <see cref="Message"/>.
+    /// The name of the input given in <see cref="YamlSerializerOptions.SourceName"/> or <see cref="YamlDocumentOptions.SourceName"/>,
+    /// or <see langword="null"/>. It prefixes <see cref="Message"/>.
     /// </summary>
-    public string? SourceName { get; internal set; }
+    public string? SourceName { get => _sourceName; init => _sourceName = value; }
+
+    private string? _sourceName;
 
     /// <summary>
     /// A message that stands on its own: the source name when one is set, what went wrong, and the
     /// line, column and path when they are known. Text taken from the input (values, keys, paths) is cut
     /// to a short excerpt with control characters escaped; <see cref="Path"/> holds the full pointer.
     /// </summary>
-    public override string Message => SourceName is null ? base.Message : SourceName + ": " + base.Message;
+    public override string Message => _sourceName is null ? base.Message : _sourceName + ": " + base.Message;
 
     /// <summary>For a patch, the zero-based index of the operation that failed; otherwise <see langword="null"/>.</summary>
-    public int? OperationIndex { get; }
+    public int? OperationIndex { get; init; }
 
     // The position is worked out here, when the error is built, so reading never tracks columns.
     internal static YamlException At(YamlErrorCategory category, string message, ReadOnlySpan<byte> utf8, int offset, string? path = null) =>
@@ -228,9 +223,9 @@ public class YamlException : Exception
     // Marks an exception with the input's name while it passes; used in an exception filter, so it never catches.
     internal static bool Tag(YamlException e, string? sourceName)
     {
-        if (sourceName is not null && e.SourceName is null)
+        if (sourceName is not null && e._sourceName is null)
         {
-            e.SourceName = sourceName;
+            e._sourceName = sourceName;
         }
 
         return false;

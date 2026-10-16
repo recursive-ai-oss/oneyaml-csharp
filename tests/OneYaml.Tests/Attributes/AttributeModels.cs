@@ -141,7 +141,7 @@ internal sealed class Home
     public List<Pet> Others { get; set; } = [];
 }
 
-[YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+[YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
 [YamlDerivedType(typeof(Circle), "circle")]
 [YamlDerivedType(typeof(Square), "!square")]
 [YamlDerivedType(typeof(Label), "label")]
@@ -241,7 +241,7 @@ internal sealed class TagReader : YamlConverter<string>
 {
     public override string? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
-        string raw = reader.TryGetTag(out ReadOnlySpan<byte> tag) ? System.Text.Encoding.UTF8.GetString(tag) : "";
+        string raw = reader.TryGetRawTag(out ReadOnlySpan<byte> tag) ? System.Text.Encoding.UTF8.GetString(tag) : "";
         return reader.Tag + "|" + reader.Anchor + "|" + raw;
     }
 

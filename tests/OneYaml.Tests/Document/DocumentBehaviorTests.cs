@@ -391,7 +391,8 @@ public class DocumentBehaviorTests
         YamlNode a = doc.Root["a"];
         Assert.Equal(YamlNodeKind.Scalar, a.Kind);
         Assert.Equal(YamlNodeStyle.SingleQuoted, a.Style);
-        Assert.Equal("!!str", a.Tag);
+        Assert.Equal("tag:yaml.org,2002:str", a.Tag);
+        Assert.Equal("!!str", a.RawTag);
         Assert.Equal("x", a.Anchor);
         Assert.Equal(new YamlPosition(1, 13, 12), a.Position);
         Assert.Equal(YamlNodeStyle.Flow, doc.Root["b"].Style);
@@ -449,7 +450,7 @@ public class DocumentBehaviorTests
         Assert.True(doc.Contains("/alias/b"));
         Assert.False(doc.Contains("/alias/zz"));
         Assert.False(doc.Contains("/s/3"));
-        Assert.Equal(YamlErrorCategory.PatchPath, Assert.Throws<YamlException>(() => doc.Root["s"][3]).Category);
+        Assert.Throws<ArgumentOutOfRangeException>(() => doc.Root["s"][3]);
         Assert.Contains("'zz'", Assert.Throws<KeyNotFoundException>(() => doc.Root["zz"]).Message);
         Assert.False(doc.Root.TryGetValue("zz", out _));
         Assert.True(doc.Root["s"].TryGetValue(1, out YamlNode? second));

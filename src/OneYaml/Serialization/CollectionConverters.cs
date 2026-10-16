@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using OneYaml.Parsing;
@@ -7,6 +8,30 @@ namespace OneYaml;
 
 internal static class ConverterGuards
 {
+    // Whether the scalar the reader is on, read as text, is this key.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static bool KeyEquals(ref Utf8YamlReader reader, byte[] name)
+    {
+        if (!reader.Escaped)
+        {
+            return reader.Source.Slice(reader.ContentStart, reader.ContentEnd - reader.ContentStart).SequenceEqual(name);
+        }
+
+        byte[]? rented = null;
+        try
+        {
+            Span<byte> scratch = stackalloc byte[128];
+            return reader.Text(scratch, ref rented).SequenceEqual(name);
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
     // The binder recurses once per level of nesting of the target type. The reader limits the depth,
     // and this stops a runtime whose stack is smaller than that depth needs from overflowing.
     public static void EnsureStack(in Utf8YamlReader reader)

@@ -120,7 +120,7 @@ public class GeneratorTests
         public sealed class Cat : Pet { public int Lives { get; set; } }
         public sealed class Dog : Pet { }
 
-        [YamlPolymorphic(Discriminator = YamlDiscriminatorKind.Tag)]
+        [YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
         [YamlDerivedType(typeof(Circle), "circle")]
         public abstract record Figure;
         public sealed record Circle(double Radius) : Figure;

@@ -113,9 +113,11 @@ internal struct AliasBudget
 {
     private long _nodes;
     private long _bytes;
+    private readonly YamlLimits _limits;
 
     public AliasBudget(DocState state, YamlLimits limits)
     {
+        _limits = limits;
         _nodes = limits.AliasNodeBudget(state.NodeCount);
         _bytes = limits.AliasByteBudget(state.Length);
     }
@@ -137,7 +139,7 @@ internal struct AliasBudget
         {
             throw YamlException.At(
                 YamlErrorCategory.Limit,
-                viaAlias ? "Following aliases expands to more than the configured limit." : "The patch copies more than the configured limit.",
+                (viaAlias ? "Following aliases expands to more than the configured limit." : "The patch copies more than the configured limit.") + Named(),
                 state.Text,
                 state.Node(node).Start);
         }
@@ -159,9 +161,13 @@ internal struct AliasBudget
         _bytes -= bytes;
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit.", state.Text, state.Node(node).Start);
+            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(node).Start);
         }
     }
+
+    // Says which settings the budget comes from, the way the serializer's own limit errors do.
+    private readonly string Named() =>
+        $" YamlLimits: AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}.";
 
     /// <summary>Charges for following an alias to <paramref name="target"/>.</summary>
     /// <param name="state">The document.</param>
@@ -174,7 +180,7 @@ internal struct AliasBudget
         _bytes -= Math.Max(t.End - t.Start, 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit.", state.Text, state.Node(alias).Start);
+            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(alias).Start);
         }
     }
 }

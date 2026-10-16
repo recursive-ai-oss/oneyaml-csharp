@@ -303,7 +303,7 @@ internal static class ReflectionTypeInfoFactory
         var derived = new List<(Type, string)>();
         foreach (YamlDerivedTypeAttribute a in type.GetCustomAttributes<YamlDerivedTypeAttribute>(false))
         {
-            derived.Add((a.DerivedType, a.Discriminator));
+            derived.Add((a.DerivedType, a.TypeDiscriminator));
         }
 
         if (derived.Count == 0)
@@ -326,7 +326,7 @@ internal static class ReflectionTypeInfoFactory
         // The name System.Text.Json gives the key applies only when no YAML polymorphism attribute is present.
         bool yamlPresent = yaml is not null || type.IsDefined(typeof(YamlDerivedTypeAttribute), false);
         string key = yamlPresent ? yaml?.TypeDiscriminatorPropertyName ?? "$type" : json?.TypeDiscriminatorPropertyName ?? "$type";
-        return new Polymorphism(yaml?.Discriminator ?? YamlDiscriminatorKind.Key, key, derived);
+        return new Polymorphism(yaml?.DiscriminatorKind ?? YamlDiscriminatorKind.Key, key, derived);
     }
 
     private static YamlTypeInfo<T> MakePolymorphic<T>(YamlSerializerOptions options, object setup)

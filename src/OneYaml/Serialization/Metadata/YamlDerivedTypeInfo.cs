@@ -10,14 +10,14 @@ public abstract class YamlDerivedTypeInfo<TBase>
     internal YamlDerivedTypeInfo(Type derivedType, string discriminator)
     {
         DerivedType = derivedType;
-        Discriminator = discriminator;
+        TypeDiscriminator = discriminator;
     }
 
     /// <summary>The derived type.</summary>
     public Type DerivedType { get; }
 
     /// <summary>The discriminator that stands for the type, as given.</summary>
-    public string Discriminator { get; }
+    public string TypeDiscriminator { get; }
 
     // The discriminator as it is compared with a key's value, or with the tag.
     internal byte[] DiscriminatorUtf8 { get; set; } = [];
@@ -32,6 +32,8 @@ public abstract class YamlDerivedTypeInfo<TBase>
     internal abstract void WriteTagged(Utf8YamlEmitter writer, TBase value, YamlSerializerOptions options);
 
     internal abstract TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key);
+
+    internal abstract TBase? ReadKeyAhead(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key);
 
     internal abstract TBase? ReadWhole(ref Utf8YamlReader reader, YamlSerializerOptions options);
 }
@@ -58,7 +60,7 @@ internal sealed class YamlDerivedTypeInfoImpl<TBase, TDerived> : YamlDerivedType
     }
 
     internal override void WriteKeyed(Utf8YamlEmitter writer, TBase value, string key) =>
-        _resolved!.ObjectBinder!.WriteDiscriminated(writer, (TDerived)(object)value!, key, Discriminator);
+        _resolved!.ObjectBinder!.WriteDiscriminated(writer, (TDerived)(object)value!, key, TypeDiscriminator);
 
     internal override void WriteTagged(Utf8YamlEmitter writer, TBase value, YamlSerializerOptions options)
     {
@@ -69,6 +71,10 @@ internal sealed class YamlDerivedTypeInfoImpl<TBase, TDerived> : YamlDerivedType
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override TBase? ReadAfterKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key) =>
         _resolved!.ObjectBinder!.ReadAfterDiscriminator(ref reader, options, start, key);
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    internal override TBase? ReadKeyAhead(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] key) =>
+        _resolved!.ObjectBinder!.ReadWithDiscriminatorAhead(ref reader, options, start, key);
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override TBase? ReadWhole(ref Utf8YamlReader reader, YamlSerializerOptions options) =>

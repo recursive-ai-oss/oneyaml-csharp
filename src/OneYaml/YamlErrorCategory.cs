@@ -25,7 +25,7 @@ public enum YamlErrorCategory
     /// <summary>A value cannot be bound to the requested .NET type.</summary>
     Binding,
 
-    /// <summary>A patch operation addresses a path that does not exist or cannot be used.</summary>
+    /// <summary>A pointer or path names nothing or cannot be used: a patch operation, <see cref="YamlDocument.Get{T}(string, int)"/>, <see cref="YamlDocument.GetNode(string, int)"/> and every other pointer method share this category.</summary>
     PatchPath,
 
     /// <summary>A patch <c>test</c> operation found a different value.</summary>

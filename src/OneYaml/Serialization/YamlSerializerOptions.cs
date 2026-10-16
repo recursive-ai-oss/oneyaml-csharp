@@ -66,6 +66,29 @@ public sealed class YamlSerializerOptions
     {
     }
 
+    /// <summary>Creates options with the same settings, converters and resolver as another instance.</summary>
+    /// <param name="options">The options to copy. They may already be in use; the copy is new and can be changed with its init accessors until it is used itself.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <remarks>Cached type metadata is not copied: the copy builds its own.</remarks>
+    public YamlSerializerOptions(YamlSerializerOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        _namingPolicy = options._namingPolicy;
+        _resolver = options.TypeInfoResolver;
+        _limits = options._limits;
+        _indentSize = options._indentSize;
+        _defaultIgnore = options._defaultIgnore;
+        EnumNamingPolicy = options.EnumNamingPolicy;
+        SourceName = options.SourceName;
+        PropertyNameCaseInsensitive = options.PropertyNameCaseInsensitive;
+        UnmappedMemberHandling = options.UnmappedMemberHandling;
+        MergeKeys = options.MergeKeys;
+        foreach (YamlConverter converter in options._converters)
+        {
+            _converters.Add(converter);
+        }
+    }
+
     /// <summary>Options with all defaults. They cannot be changed.</summary>
     public static YamlSerializerOptions Default => s_default;
 

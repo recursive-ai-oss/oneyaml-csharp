@@ -99,6 +99,10 @@ internal static class NodeReplay
             reader.EndReplay();
             return value;
         }
+        catch (YamlException e) when (YamlException.Tag(e, options.SourceName))
+        {
+            throw;
+        }
         finally
         {
             reader.Dispose();

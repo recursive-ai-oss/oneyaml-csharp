@@ -63,7 +63,8 @@ public enum YamlDiscriminatorKind
 {
     /// <summary>
     /// A key of the mapping, <c>$type</c> unless <see cref="YamlPolymorphicAttribute.TypeDiscriminatorPropertyName"/> says otherwise.
-    /// It must be the first key of the mapping, and the derived types must bind as mappings.
+    /// It may be anywhere in the mapping, and the derived types must bind as mappings. When it is not the first key, the reader
+    /// looks ahead for it, and the look-ahead counts against the alias budget of <see cref="YamlLimits"/>.
     /// </summary>
     Key = 0,
 
@@ -85,7 +86,7 @@ public enum YamlDiscriminatorKind
 /// <see cref="YamlDerivedTypeAttribute"/> alone, without this attribute, makes the type polymorphic with the key <c>$type</c>.
 /// System.Text.Json's <c>JsonPolymorphicAttribute</c> and <c>JsonDerivedTypeAttribute</c> do the same where these are absent
 /// (always with a key). The key those name with <c>TypeDiscriminatorPropertyName</c> is used only when no YAML attribute is
-/// present; when one is, the key is the one set here, <c>$type</c> by default. The key must be the first of the mapping, and
+/// present; when one is, the key is the one set here, <c>$type</c> by default. The key may be anywhere in the mapping, and
 /// a repeat of it is a <see cref="YamlErrorCategory.DuplicateKey"/> error. See <see cref="YamlPropertyNameAttribute"/> for the
 /// System.Text.Json attributes that are honoured.
 /// </para>
@@ -94,7 +95,7 @@ public enum YamlDiscriminatorKind
 public sealed class YamlPolymorphicAttribute : Attribute
 {
     /// <summary>Whether the discriminator is a key or a tag. The default is <see cref="YamlDiscriminatorKind.Key"/>.</summary>
-    public YamlDiscriminatorKind Discriminator { get; set; }
+    public YamlDiscriminatorKind DiscriminatorKind { get; set; }
 
     /// <summary>The key that holds the discriminator, for <see cref="YamlDiscriminatorKind.Key"/>. The default is <c>$type</c>.</summary>
     public string TypeDiscriminatorPropertyName { get; set; } = "$type";
@@ -116,14 +117,14 @@ public sealed class YamlDerivedTypeAttribute : Attribute
         ArgumentNullException.ThrowIfNull(derivedType);
         ArgumentNullException.ThrowIfNull(discriminator);
         DerivedType = derivedType;
-        Discriminator = discriminator;
+        TypeDiscriminator = discriminator;
     }
 
     /// <summary>The derived type.</summary>
     public Type DerivedType { get; }
 
-    /// <summary>The discriminator that stands for the type.</summary>
-    public string Discriminator { get; }
+    /// <summary>The discriminator that stands for the type: the text under the key, or the tag.</summary>
+    public string TypeDiscriminator { get; }
 }
 
 // Reads and writes a base type by the discriminator of its derived types.
@@ -156,13 +157,13 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
                 throw new NotSupportedException($"The derived type '{d.DerivedType}' is listed twice for '{typeof(TBase)}'.");
             }
 
-            if (!seenText.Add(d.Discriminator))
+            if (!seenText.Add(d.TypeDiscriminator))
             {
-                throw new NotSupportedException($"The discriminator '{d.Discriminator}' is used by two derived types of '{typeof(TBase)}'.");
+                throw new NotSupportedException($"The discriminator '{d.TypeDiscriminator}' is used by two derived types of '{typeof(TBase)}'.");
             }
 
-            d.DiscriminatorUtf8 = Encoding.UTF8.GetBytes(d.Discriminator);
-            d.Tag = d.Discriminator.StartsWith('!') ? d.Discriminator : "!" + d.Discriminator;
+            d.DiscriminatorUtf8 = Encoding.UTF8.GetBytes(d.TypeDiscriminator);
+            d.Tag = d.TypeDiscriminator.StartsWith('!') ? d.TypeDiscriminator : "!" + d.TypeDiscriminator;
             if (kind == YamlDiscriminatorKind.Tag && !_byTag.TryAdd(d.Tag, d))
             {
                 throw new NotSupportedException($"The tag '{d.Tag}' is used by two derived types of '{typeof(TBase)}'.");
@@ -281,18 +282,48 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
             throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
         }
 
-        if (reader.Type == YamlTokenType.Scalar && KeyIs(ref reader, _keyUtf8))
+        if (reader.Type == YamlTokenType.Scalar && ConverterGuards.KeyEquals(ref reader, _keyUtf8))
         {
             return ReadDerived(ref reader, options, start);
         }
 
-        // Not the discriminator: the base is read as itself, from the key already reached.
-        if (_baseInfo?.ObjectBinder is { } baseObject)
+        return ReadKeyElsewhere(ref reader, options, start);
+    }
+
+    // The discriminator is not the first key. Looking ahead costs nothing for the common case, where it is first.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private TBase? ReadKeyElsewhere(ref Utf8YamlReader reader, YamlSerializerOptions options, int start)
+    {
+        bool looked = reader.Type == YamlTokenType.Scalar;
+        if (looked && reader.LookForKey(_keyUtf8))
         {
-            return baseObject.ReadFromFirstKey(ref reader, options, start, _keyUtf8);
+            if (reader.Type != YamlTokenType.Scalar)
+            {
+                throw NeedsText(in reader);
+            }
+
+            int index = Match(ref reader);
+            if (index < 0)
+            {
+                throw UnknownValue(in reader);
+            }
+
+            reader.RewindLook();
+            return _derived[index].ReadKeyAhead(ref reader, options, start, _keyUtf8);
         }
 
-        throw MustStartWithKey(in reader);
+        if (looked)
+        {
+            reader.RewindLook();
+        }
+
+        // No key that names a derived type: the base is read as itself, from the key already reached.
+        if (_baseInfo?.ObjectBinder is { } baseObject)
+        {
+            return baseObject.ReadFromFirstKey(ref reader, options, start);
+        }
+
+        throw MustHaveKey(in reader);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -354,31 +385,8 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
         reader.CreateException($"{reader.DescribeValue()} is not a known value of '{_keyName}' for {ConverterGuards.DescribeType(typeof(TBase))}.");
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private YamlException MustStartWithKey(in Utf8YamlReader reader) =>
-        reader.CreateException($"The mapping of {ConverterGuards.DescribeType(typeof(TBase))} must start with the key '{_keyName}', which names the derived type.");
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static bool KeyIs(ref Utf8YamlReader reader, byte[] name)
-    {
-        if (!reader.Escaped)
-        {
-            return reader.Source.Slice(reader.ContentStart, reader.ContentEnd - reader.ContentStart).SequenceEqual(name);
-        }
-
-        byte[]? rented = null;
-        try
-        {
-            Span<byte> scratch = stackalloc byte[128];
-            return reader.Text(scratch, ref rented).SequenceEqual(name);
-        }
-        finally
-        {
-            if (rented is not null)
-            {
-                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
-            }
-        }
-    }
+    private YamlException MustHaveKey(in Utf8YamlReader reader) =>
+        reader.CreateException($"The mapping of {ConverterGuards.DescribeType(typeof(TBase))} has no key '{_keyName}', which names the derived type.");
 
     private TBase? ReadBase(ref Utf8YamlReader reader, YamlSerializerOptions options, string why)
     {

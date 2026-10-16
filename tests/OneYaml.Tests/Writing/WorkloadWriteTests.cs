@@ -152,7 +152,7 @@ public class WorkloadWriteTests
         }
 
         string text = File.ReadAllText(file);
-        List<object?> documents = YamlSerializer.DeserializeAll<object>(text)!;
+        IReadOnlyList<object?> documents = YamlSerializer.DeserializeAll<object>(text)!;
 
         foreach (object? document in documents)
         {

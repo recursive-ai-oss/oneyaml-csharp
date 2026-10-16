@@ -104,10 +104,10 @@ public class DocumentApiTests
         Assert.False(doc.Root["list"].TryGetValue(1, out _));
         Assert.False(doc.Root["spec"].TryGetValue(0, out _));
 
-        YamlException notMapping = Assert.Throws<YamlException>(() => doc.Root["list"]["x"]);
+        InvalidOperationException notMapping = Assert.Throws<InvalidOperationException>(() => doc.Root["list"]["x"]);
         Assert.Contains("'x'", notMapping.Message);
         Assert.Contains("sequence", notMapping.Message);
-        YamlException outside = Assert.Throws<YamlException>(() => doc.Root["list"][4]);
+        ArgumentOutOfRangeException outside = Assert.Throws<ArgumentOutOfRangeException>(() => doc.Root["list"][4]);
         Assert.Contains("4", outside.Message);
         Assert.Contains("1 item", outside.Message);
     }
