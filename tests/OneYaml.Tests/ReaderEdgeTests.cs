@@ -387,4 +387,54 @@ public class ReaderEdgeTests
             ["+STR", "+DOC", "+MAP", "=VAL :a", "+SEQ", "+MAP", "=VAL :b", "+SEQ", "=VAL :x", "-SEQ", "-MAP", "-SEQ", "-MAP", "-DOC", "-STR"],
             Events("a:\n- b:\n  - x\n"));
     }
+
+    // ---- A plain key needs white space between its colon and a collection value ----
+
+    [Theory]
+    [InlineData("{a:{}}\n", 4)]
+    [InlineData("{a:[]}\n", 4)]
+    [InlineData("[a:{}]\n", 4)]
+    [InlineData("[a:[]]\n", 4)]
+    [InlineData("{x: 1, b:{c: d}}\n", 10)]
+    public void A_colon_after_a_plain_key_cannot_run_into_a_collection(string yaml, int column)
+    {
+        YamlException ex = Fails(yaml);
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Equal(1, ex.Line);
+        Assert.Equal(column, ex.Column);
+    }
+
+    [Theory]
+    [InlineData("{\"a\":{}}\n")]
+    [InlineData("{'a':[]}\n")]
+    [InlineData("{[a]:{}}\n")]
+    [InlineData("{{a: b}:[c]}\n")]
+    [InlineData("[\"a\":{}]\n")]
+    [InlineData("{a: {}}\n")]
+    [InlineData("{a:\n{}}\n")]
+    [InlineData("{a:}\n")]
+    [InlineData("{a:, b: 1}\n")]
+    [InlineData("[a: []]\n")]
+    public void A_collection_value_after_a_quoted_key_or_with_white_space_is_still_read(string yaml)
+    {
+        Events(yaml);
+    }
+
+    [Theory]
+    [InlineData("- !<!> foo\n", 6)]
+    [InlineData("!<!> foo\n", 4)]
+    [InlineData("a: !<!>\n", 7)]
+    public void A_verbatim_tag_of_a_lone_bang_is_reported_at_the_closing_bracket(string yaml, int column)
+    {
+        YamlException ex = Fails(yaml);
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Equal(1, ex.Line);
+        Assert.Equal(column, ex.Column);
+    }
+
+    [Fact]
+    public void A_verbatim_tag_that_starts_with_a_bang_and_goes_on_is_valid()
+    {
+        Events("- !<!x> foo\n");
+    }
 }

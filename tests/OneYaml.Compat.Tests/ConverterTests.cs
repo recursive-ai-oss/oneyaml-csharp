@@ -278,8 +278,6 @@ public class ConverterTests
         var (rR, cR) = Both.Serializers(r => r.WithMaximumRecursion(3), c => c.WithMaximumRecursion(3));
         Check("ser recursion", () => rR.Serialize(new List<List<List<List<int>>>>()), () => cR.Serialize(new List<List<List<List<int>>>>()));
         Check("ser recursion deep", () => rR.Serialize(new List<List<List<List<int>>>> { new() { new() { new() { 1 } } } }), () => cR.Serialize(new List<List<List<List<int>>>> { new() { new() { new() { 1 } } } }));
-        var (rJ, cJ) = Both.Serializers(r => r.EnsureRoundtrip(), c => c.EnsureRoundtrip());
-        Check("ensure roundtrip", () => rJ.Serialize(new Person { Name = "z" }), () => cJ.Serialize(new Person { Name = "z" }));
         var (rN, cN) = Both.Serializers(r => r.WithNewLine("\r\n"), c => c.WithNewLine("\r\n"));
         Check("newline", () => rN.Serialize(new Person { Name = "z" }), () => cN.Serialize(new Person { Name = "z" }));
         var (rDe, cDe) = Both.Deserializers();

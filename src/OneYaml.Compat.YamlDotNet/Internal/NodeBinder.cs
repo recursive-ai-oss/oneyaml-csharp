@@ -14,16 +14,19 @@ namespace OneYaml.Compat.YamlDotNet.Internal;
 // State of one Deserialize call.
 internal sealed class BindContext
 {
-    public BindContext(Loaded source)
+    public BindContext(Loaded source, Oy.YamlLimits limits)
     {
         Source = source;
         S = source.State;
-        Budget = new AliasBudget(S, Oy.YamlLimits.Default);
+        Limits = limits;
+        Budget = new AliasBudget(S, limits);
     }
 
     public Loaded Source { get; }
 
     public DocState S { get; }
+
+    public Oy.YamlLimits Limits { get; }
 
     public AliasBudget Budget;
 
@@ -49,7 +52,7 @@ internal sealed class NodeBinder
 
     public object? Bind(BindContext c, int node, Type type)
     {
-        if (++c.Depth > _settings.EffectiveMaxRecursion || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
+        if (++c.Depth > Math.Min(_settings.EffectiveMaxRecursion, c.Limits.MaxDepth) || !System.Runtime.CompilerServices.RuntimeHelpers.TryEnsureSufficientExecutionStack())
         {
             Mark at = c.Source.MarkAt(c.S.Node(node).Start);
             throw new MaximumRecursionLevelReachedException(at, at, "Maximum level of recursion reached");
@@ -222,7 +225,8 @@ internal sealed class NodeBinder
     // Reads the node at the parser's position (used by Deserialize(IParser)).
     public object? BindAtParser(Parser parser, Type type)
     {
-        var c = new BindContext(parser.Source);
+        // The parser already holds its own limits; the stricter of the two applies.
+        var c = new BindContext(parser.Source, Oy.YamlLimits.Stricter(_settings.Limits, parser.Source.Limits));
         int at = parser.CurrentNode;
         if (at < 0)
         {
@@ -261,7 +265,7 @@ internal sealed class NodeBinder
             {
                 try
                 {
-                    return ScalarRules.FromCoreTag(tag.Value, text);
+                    return ScalarRules.FromCoreTag(tag.Value, text, c.Limits.MaxIntegerDigits);
                 }
                 catch (Exception ex) when (ex is FormatException or OverflowException)
                 {
@@ -273,7 +277,7 @@ internal sealed class NodeBinder
         }
 
         bool plain = (Oy.Parsing.ScalarStyle)s.Node(node).Style == Oy.Parsing.ScalarStyle.Plain;
-        return plain && _settings.UnquotedStringTypeDeserialization ? ScalarRules.Detect(text) : text;
+        return plain && _settings.UnquotedStringTypeDeserialization ? ScalarRules.Detect(text, c.Limits.MaxIntegerDigits) : text;
     }
 
     private static void RequireCollectionTag(BindContext c, int node, TagName tag, string expected)
@@ -304,7 +308,7 @@ internal sealed class NodeBinder
 
         try
         {
-            return ScalarRules.Convert(text, type);
+            return ScalarRules.Convert(text, type, c.Limits.MaxIntegerDigits);
         }
         catch (Exception ex) when (ex is FormatException or OverflowException or InvalidCastException or ArgumentException)
         {

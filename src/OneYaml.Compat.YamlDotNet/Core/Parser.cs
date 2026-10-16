@@ -58,6 +58,16 @@ public class Parser : IParser, IDisposable
         _ownsSource = true;
     }
 
+    /// <summary>Creates a parser over text, keeping to the given limits. Not in YamlDotNet.</summary>
+    /// <param name="input">The reader to take the text from.</param>
+    /// <param name="limits">The limits; <see cref="global::OneYaml.YamlLimits.Untrusted"/> suits input you do not control.</param>
+    public Parser(TextReader input, global::OneYaml.YamlLimits limits)
+    {
+        ArgumentNullException.ThrowIfNull(limits);
+        _source = Loaded.Parse(input, limits);
+        _ownsSource = true;
+    }
+
     // A parser over one node of a parsed text: no stream or document events, only the node.
     internal Parser(Loaded source, int root)
     {

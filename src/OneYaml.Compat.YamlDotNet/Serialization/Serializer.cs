@@ -33,7 +33,16 @@ public sealed class Serializer : ISerializer
 
     [RequiresUnreferencedCode(Messages.Reflection)]
     [RequiresDynamicCode(Messages.Reflection)]
-    private TypeModels GetModels() => _models ?? Interlocked.CompareExchange(ref _models, new TypeModels(_settings), null) ?? _models!;
+    private TypeModels GetModels()
+    {
+        // Refused here, at first use, rather than accepted and ignored: the output would differ from what the builder asked for.
+        if (_settings.EnsureRoundtrip)
+        {
+            throw new NotSupportedException("EnsureRoundtrip is not supported by OneYaml.Compat.YamlDotNet. Remove the call and give the target type when reading the output back. See docs/compat/yamldotnet.md for what is and what is not covered.");
+        }
+
+        return _models ?? Interlocked.CompareExchange(ref _models, new TypeModels(_settings), null) ?? _models!;
+    }
 
     /// <inheritdoc/>
     [RequiresUnreferencedCode(Messages.Reflection)]
