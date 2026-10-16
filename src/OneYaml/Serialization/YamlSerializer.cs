@@ -416,7 +416,7 @@ public static partial class YamlSerializer
 
     private static T? ReadStream<T>(Stream stream, YamlTypeInfo<T> info)
     {
-        (byte[] buffer, int length) = ReadAllBytes(stream, info.Options.Limits.MaxInputBytes);
+        (byte[] buffer, int length) = ReadAllBytes(stream, info.Options.Limits.MaxInputBytes, info.Options.SourceName);
         try
         {
             return ReadBytes(buffer.AsSpan(0, length), info);
@@ -429,7 +429,7 @@ public static partial class YamlSerializer
 
     private static async ValueTask<T?> ReadStreamAsync<T>(Stream stream, YamlTypeInfo<T> info, CancellationToken cancellationToken)
     {
-        (byte[] buffer, int length) = await ReadAllBytesAsync(stream, info.Options.Limits.MaxInputBytes, cancellationToken).ConfigureAwait(false);
+        (byte[] buffer, int length) = await ReadAllBytesAsync(stream, info.Options.Limits.MaxInputBytes, info.Options.SourceName, cancellationToken).ConfigureAwait(false);
         try
         {
             return ReadBytes(buffer.AsSpan(0, length), info);
@@ -441,12 +441,12 @@ public static partial class YamlSerializer
     }
 
     // Reads a stream to its end into a pooled buffer, stopping early once it passes the input limit.
-    private static (byte[] Buffer, int Length) ReadAllBytes(Stream stream, long max)
+    private static (byte[] Buffer, int Length) ReadAllBytes(Stream stream, long max, string? sourceName)
     {
         // A stream that says how long it is can be refused before any buffer is taken for it.
         if (stream.CanSeek)
         {
-            CheckSize(stream.Length - stream.Position, max);
+            CheckSize(stream.Length - stream.Position, max, sourceName);
         }
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
@@ -457,7 +457,7 @@ public static partial class YamlSerializer
             {
                 if (length == buffer.Length)
                 {
-                    buffer = Grow(buffer, length, max);
+                    buffer = Grow(buffer, length, max, sourceName);
                 }
 
                 int n = stream.Read(buffer, length, buffer.Length - length);
@@ -467,7 +467,7 @@ public static partial class YamlSerializer
                 }
 
                 length += n;
-                CheckSize(length, max);
+                CheckSize(length, max, sourceName);
             }
         }
         catch
@@ -477,12 +477,12 @@ public static partial class YamlSerializer
         }
     }
 
-    private static async ValueTask<(byte[] Buffer, int Length)> ReadAllBytesAsync(Stream stream, long max, CancellationToken cancellationToken)
+    private static async ValueTask<(byte[] Buffer, int Length)> ReadAllBytesAsync(Stream stream, long max, string? sourceName, CancellationToken cancellationToken)
     {
         // A stream that says how long it is can be refused before any buffer is taken for it.
         if (stream.CanSeek)
         {
-            CheckSize(stream.Length - stream.Position, max);
+            CheckSize(stream.Length - stream.Position, max, sourceName);
         }
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
@@ -493,7 +493,7 @@ public static partial class YamlSerializer
             {
                 if (length == buffer.Length)
                 {
-                    buffer = Grow(buffer, length, max);
+                    buffer = Grow(buffer, length, max, sourceName);
                 }
 
                 int n = await stream.ReadAsync(buffer.AsMemory(length), cancellationToken).ConfigureAwait(false);
@@ -503,7 +503,7 @@ public static partial class YamlSerializer
                 }
 
                 length += n;
-                CheckSize(length, max);
+                CheckSize(length, max, sourceName);
             }
         }
         catch
@@ -513,19 +513,19 @@ public static partial class YamlSerializer
         }
     }
 
-    private static void CheckSize(long length, long max)
+    private static void CheckSize(long length, long max, string? sourceName)
     {
         if (length > max)
         {
-            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
     }
 
-    private static byte[] Grow(byte[] buffer, int length, long max)
+    private static byte[] Grow(byte[] buffer, int length, long max, string? sourceName)
     {
         if (buffer.Length >= int.MaxValue / 2 || buffer.Length > max)
         {
-            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
 
         byte[] bigger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);

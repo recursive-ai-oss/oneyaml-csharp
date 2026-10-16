@@ -268,6 +268,10 @@ public ref partial struct Utf8YamlReader
     // The anchor entry defined on the current node, or -1.
     internal int NodeEntry;
 
+    // Set by callers that catch the error and carry on (a try-read): the exception then carries the category and
+    // offset but no line, column or path, so building it costs the same wherever in the text it happens.
+    internal bool QuietErrors;
+
     internal Utf8YamlReader(ReadOnlySpan<byte> utf8, YamlSerializerOptions options, bool expandAliases)
     {
         _options = options;
@@ -323,10 +327,10 @@ public ref partial struct Utf8YamlReader
     // the text, because an error is the only time it is needed. A limit error carries none: it can be about
     // a nesting too deep to write out.
     internal readonly YamlException ErrorAt(YamlErrorCategory category, string message, int offset, bool atCollection = false) =>
-        YamlException.Located(category, message, _src, offset, category == YamlErrorCategory.Limit ? null : ErrorPath.Find(_src, offset, atCollection));
+        QuietErrors ? new YamlException(message, category, 0, 0, offset) : YamlException.Located(category, message, _src, offset, category == YamlErrorCategory.Limit ? null : ErrorPath.Find(_src, offset, atCollection));
 
     internal readonly YamlException ErrorAtKey(YamlErrorCategory category, string template, int offset) =>
-        YamlException.AtKey(category, template, _src, offset);
+        QuietErrors ? new YamlException(template.Replace("{0}", string.Empty, StringComparison.Ordinal), category, 0, 0, offset) : YamlException.AtKey(category, template, _src, offset);
 
     // The current scalar as quoted text for a message, cut short so a huge value cannot flood a log.
     internal readonly string DescribeValue()
@@ -356,7 +360,7 @@ public ref partial struct Utf8YamlReader
             raw = raw[..n];
         }
 
-        string text = Encoding.UTF8.GetString(raw).ReplaceLineEndings(" ");
+        string text = YamlException.Excerpt(Encoding.UTF8.GetString(raw), int.MaxValue);
         return cut ? "'" + text + "...'" : "'" + text + "'";
     }
 

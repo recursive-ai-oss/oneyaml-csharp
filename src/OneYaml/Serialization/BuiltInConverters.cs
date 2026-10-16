@@ -870,6 +870,6 @@ internal sealed class EnumConverter<[DynamicallyAccessedMembers(DynamicallyAcces
             return v;
         }
 
-        throw reader.CreateException($"'{text}' is not a value of {typeof(TEnum).Name}.");
+        throw reader.CreateException($"'{YamlException.Excerpt(text, YamlException.MessageExcerpt)}' is not a value of {typeof(TEnum).Name}.");
     }
 }

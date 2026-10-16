@@ -32,27 +32,25 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
             return default;
         }
 
-        try
-        {
-            return _inner.Read(ref reader, typeToConvert, options);
-        }
-        catch (Oy.YamlException) when (_parse is not null && reader.TokenType == Oy.YamlTokenKind.Scalar)
+        // The text is tried first: refusing it in the engine builds an exception, and that costs more the further
+        // into the document the value is. A scalar the shape check and the parser both accept has the value the
+        // engine would give it; anything else goes to the engine, which reads it or reports the error.
+        if (_parse is not null && reader.TokenType == Oy.YamlTokenKind.Scalar)
         {
             string text = reader.GetString();
             if (LooksLikeNumberOrBool(text) && _parse(text, out T value) && IsFinite(value))
             {
                 return value;
             }
-
-            throw;
         }
+
+        return _inner.Read(ref reader, typeToConvert, options);
     }
 
     public override void Write(Oy.Utf8YamlEmitter writer, T value, Oy.YamlSerializerOptions options) => _inner.Write(writer, value, options);
 
     // A finite literal that overflows the type (1e400, or 1e39 as a float) parses to infinity; that would change the
-    // value, so it stays an error. This also keeps the fallback to quoted scalars in practice: a plain scalar the engine
-    // refused while the text has the shape of a number is one that overflows, and an overflowing integer fails to parse.
+    // value, so it stays an error: the engine is asked, and it refuses.
     private static bool IsFinite(T value) => value switch
     {
         double d => double.IsFinite(d),
