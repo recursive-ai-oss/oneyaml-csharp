@@ -127,7 +127,7 @@ internal ref struct YamlInput
     {
         if (bytes.Length > limits.MaxInputBytes)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({limits.MaxInputBytes}).", YamlErrorCategory.Limit, 0, 0, 0);
         }
 
         YamlEncoding encoding = Detect(bytes, out int mark);
@@ -162,7 +162,13 @@ internal ref struct YamlInput
         long size = CountUtf8(text);
         if (size > limits.MaxInputBytes)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({limits.MaxInputBytes}).", YamlErrorCategory.Limit, 0, 0, 0);
+        }
+
+        // No limit setting can make an array larger than the runtime allows.
+        if (size > Array.MaxLength)
+        {
+            throw TooLarge(limits);
         }
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent((int)Math.Max(size, 1));
@@ -171,7 +177,7 @@ internal ref struct YamlInput
             OperationStatus status = Utf8.FromUtf16(text, buffer, out int read, out int written, replaceInvalidSequences: false, isFinalBlock: true);
             if (status != OperationStatus.Done)
             {
-                throw YamlException.At(YamlErrorCategory.Encoding, "The text contains an unpaired surrogate.", text, read);
+                throw YamlException.Located(YamlErrorCategory.Encoding, "The text contains an unpaired surrogate.", text, read);
             }
 
             ReadOnlySpan<byte> utf8 = buffer.AsSpan(0, written);
@@ -254,13 +260,19 @@ internal ref struct YamlInput
                 // Without a mark the width is told from the null bytes of an ASCII first character, so a
                 // stream may not begin with anything else (YAML 1.2.2, 5.2). Writing such a stream back would
                 // also lose the way it was recognised.
-                throw YamlException.At(YamlErrorCategory.Encoding, "A UTF-16 or UTF-32 input without a byte order mark must begin with an ASCII character.", body, 0);
+                throw YamlException.Located(YamlErrorCategory.Encoding, "A UTF-16 or UTF-32 input without a byte order mark must begin with an ASCII character.", body, 0);
             }
 
             long size = CountUtf8(chars.AsSpan(0, charCount));
             if (size > limits.MaxInputBytes)
             {
-                throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+                throw new YamlException($"The input is larger than the limit MaxInputBytes ({limits.MaxInputBytes}).", YamlErrorCategory.Limit, 0, 0, 0);
+            }
+
+            // No limit setting can make an array larger than the runtime allows.
+            if (size > Array.MaxLength)
+            {
+                throw TooLarge(limits);
             }
 
             utf8 = ArrayPool<byte>.Shared.Rent((int)Math.Max(size, 1));
@@ -296,7 +308,7 @@ internal ref struct YamlInput
         int good = Math.Clamp(index, 0, body.Length) / unit * unit;
         Encoding lenient = wide ? new UTF32Encoding(bigEndian, false, false) : new UnicodeEncoding(bigEndian, false, false);
         string prefix = lenient.GetString(body[..good]);
-        YamlException at = YamlException.At(YamlErrorCategory.Encoding, wide ? "Malformed UTF-32 input." : "Malformed UTF-16 input.", prefix, prefix.Length);
+        YamlException at = YamlException.Located(YamlErrorCategory.Encoding, wide ? "Malformed UTF-32 input." : "Malformed UTF-16 input.", prefix, prefix.Length);
         return new YamlException(at.Message, YamlErrorCategory.Encoding, at.Line, at.Column, mark + index);
     }
 
@@ -305,7 +317,7 @@ internal ref struct YamlInput
         if (!Utf8.IsValid(text))
         {
             int bad = FindInvalidUtf8(text);
-            throw YamlException.At(YamlErrorCategory.Encoding, "The input is not valid UTF-8.", text, bad);
+            throw YamlException.Located(YamlErrorCategory.Encoding, "The input is not valid UTF-8.", text, bad);
         }
 
         CheckControls(text);
@@ -333,7 +345,10 @@ internal ref struct YamlInput
         int i = text.IndexOfAny(s_control);
         if (i >= 0)
         {
-            throw YamlException.At(YamlErrorCategory.Syntax, "The input contains a control character YAML does not allow.", text, i);
+            throw YamlException.Located(YamlErrorCategory.Syntax, "The input contains a control character YAML does not allow.", text, i);
         }
     }
+
+    private static YamlException TooLarge(YamlLimits limits)
+        => new($"The input is larger than the largest buffer the runtime can hold (limit MaxInputBytes is {limits.MaxInputBytes}).", YamlErrorCategory.Limit, 0, 0, 0);
 }

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using OneYaml.Serialization.Metadata;
 
 namespace OneYaml;
 
@@ -54,6 +56,11 @@ internal static class ReflectionTypeInfoFactory
         try
         {
             return CreateCore(type, options);
+        }
+        catch (Exception ex) when (ex is ArgumentException or TypeLoadException or MemberAccessException or InvalidProgramException)
+        {
+            // A raw reflection failure names an internal method, which tells a user nothing; say which type could not be described.
+            throw new NotSupportedException($"Type '{type}' cannot be bound by reflection: it is not a class or struct with a public constructor, a supported collection or dictionary, or an enum. Give it a converter or a constructor.", ex);
         }
         finally
         {
@@ -144,6 +151,11 @@ internal static class ReflectionTypeInfoFactory
             return Call(nameof(MakeHashSet), args, options);
         }
 
+        if (def.Namespace == "System.Collections.Immutable" && TryCreateImmutable(def, args, options) is { } immutable)
+        {
+            return immutable;
+        }
+
         if (def == typeof(IList<>) || def == typeof(ICollection<>) || def == typeof(IEnumerable<>)
             || def == typeof(IReadOnlyList<>) || def == typeof(IReadOnlyCollection<>))
         {
@@ -162,6 +174,26 @@ internal static class ReflectionTypeInfoFactory
 
         return null;
     }
+
+    // The immutable collections are built from a list (or a dictionary) read the usual way. An interface
+    // such as IImmutableList<T> is read as the usual implementation, as System.Text.Json does.
+    private static YamlTypeInfo? TryCreateImmutable(Type def, Type[] args, YamlSerializerOptions options) => def.Name switch
+    {
+        "ImmutableArray`1" => Call(nameof(MakeImmutableArray), args, options),
+        "ImmutableList`1" => Call(nameof(MakeImmutableList), args, options),
+        "IImmutableList`1" => Call(nameof(MakeImmutableIList), args, options),
+        "ImmutableHashSet`1" => Call(nameof(MakeImmutableHashSet), args, options),
+        "IImmutableSet`1" => Call(nameof(MakeImmutableISet), args, options),
+        "ImmutableSortedSet`1" => Call(nameof(MakeImmutableSortedSet), args, options),
+        "ImmutableQueue`1" => Call(nameof(MakeImmutableQueue), args, options),
+        "IImmutableQueue`1" => Call(nameof(MakeImmutableIQueue), args, options),
+        "ImmutableStack`1" => Call(nameof(MakeImmutableStack), args, options),
+        "IImmutableStack`1" => Call(nameof(MakeImmutableIStack), args, options),
+        "ImmutableDictionary`2" => Call(nameof(MakeImmutableDictionary), args, options),
+        "IImmutableDictionary`2" => Call(nameof(MakeImmutableIDictionary), args, options),
+        "ImmutableSortedDictionary`2" => Call(nameof(MakeImmutableSortedDictionary), args, options),
+        _ => null,
+    };
 
     // Other concrete collection and dictionary types with a public parameterless constructor.
     private static YamlTypeInfo? TryCreateOther(Type type, YamlSerializerOptions options)
@@ -222,7 +254,7 @@ internal static class ReflectionTypeInfoFactory
         where T : struct =>
         new YamlTypeInfo<T?>(options, new NullableConverter<T>(options.GetTypeInfo<T>().Converter));
 
-    private static YamlTypeInfo<TEnum> MakeEnum<TEnum>(YamlSerializerOptions options)
+    private static YamlTypeInfo<TEnum> MakeEnum<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] TEnum>(YamlSerializerOptions options)
         where TEnum : struct, Enum =>
         new YamlTypeInfo<TEnum>(options, new EnumConverter<TEnum>(options));
 
@@ -238,6 +270,55 @@ internal static class ReflectionTypeInfoFactory
     private static YamlTypeInfo<Dictionary<TKey, TValue>> MakeDictionary<TKey, TValue>(YamlSerializerOptions options)
         where TKey : notnull =>
         new YamlTypeInfo<Dictionary<TKey, TValue>>(options, new DictionaryConverter<TKey, TValue>(options.GetTypeInfo<TKey>(), options.GetTypeInfo<TValue>()));
+
+    private static YamlTypeInfo<ImmutableArray<T>> MakeImmutableArray<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableArray<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableArray.CreateRange(l), static v => v.IsDefault);
+
+    private static YamlTypeInfo<ImmutableList<T>> MakeImmutableList<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableList<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableList.CreateRange(l));
+
+    private static YamlTypeInfo<IImmutableList<T>> MakeImmutableIList<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<IImmutableList<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableList.CreateRange(l));
+
+    private static YamlTypeInfo<ImmutableHashSet<T>> MakeImmutableHashSet<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableHashSet<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableHashSet.CreateRange(l));
+
+    private static YamlTypeInfo<IImmutableSet<T>> MakeImmutableISet<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<IImmutableSet<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableHashSet.CreateRange(l));
+
+    private static YamlTypeInfo<ImmutableSortedSet<T>> MakeImmutableSortedSet<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableSortedSet<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableSortedSet.CreateRange(l));
+
+    private static YamlTypeInfo<ImmutableQueue<T>> MakeImmutableQueue<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableQueue<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableQueue.CreateRange(l));
+
+    private static YamlTypeInfo<IImmutableQueue<T>> MakeImmutableIQueue<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<IImmutableQueue<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableQueue.CreateRange(l));
+
+    // A stack enumerates from the top, so the list is reversed to read back what was written.
+    private static YamlTypeInfo<ImmutableStack<T>> MakeImmutableStack<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<ImmutableStack<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableStack.CreateRange(Reversed(l)));
+
+    private static YamlTypeInfo<IImmutableStack<T>> MakeImmutableIStack<T>(YamlSerializerOptions options) =>
+        YamlMetadataServices.CreateConvertedCollectionInfo<IImmutableStack<T>, T>(options, options.GetTypeInfo<T>(), static l => ImmutableStack.CreateRange(Reversed(l)));
+
+    private static List<T> Reversed<T>(List<T> list)
+    {
+        list.Reverse();
+        return list;
+    }
+
+    private static YamlTypeInfo<ImmutableDictionary<TKey, TValue>> MakeImmutableDictionary<TKey, TValue>(YamlSerializerOptions options)
+        where TKey : notnull =>
+        YamlMetadataServices.CreateConvertedDictionaryInfo<ImmutableDictionary<TKey, TValue>, TKey, TValue>(options, options.GetTypeInfo<TKey>(), options.GetTypeInfo<TValue>(), static d => ImmutableDictionary.CreateRange(d));
+
+    private static YamlTypeInfo<IImmutableDictionary<TKey, TValue>> MakeImmutableIDictionary<TKey, TValue>(YamlSerializerOptions options)
+        where TKey : notnull =>
+        YamlMetadataServices.CreateConvertedDictionaryInfo<IImmutableDictionary<TKey, TValue>, TKey, TValue>(options, options.GetTypeInfo<TKey>(), options.GetTypeInfo<TValue>(), static d => ImmutableDictionary.CreateRange(d));
+
+    private static YamlTypeInfo<ImmutableSortedDictionary<TKey, TValue>> MakeImmutableSortedDictionary<TKey, TValue>(YamlSerializerOptions options)
+        where TKey : notnull =>
+        YamlMetadataServices.CreateConvertedDictionaryInfo<ImmutableSortedDictionary<TKey, TValue>, TKey, TValue>(options, options.GetTypeInfo<TKey>(), options.GetTypeInfo<TValue>(), static d => ImmutableSortedDictionary.CreateRange(d));
 
     private static YamlTypeInfo<TTarget> MakeAdapted<TTarget, TImpl>(YamlSerializerOptions options)
         where TTarget : class
@@ -480,6 +561,12 @@ internal static class ReflectionTypeInfoFactory
         }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
+            // Say which member could not be described; the inner message says why.
+            if (ex.InnerException is NotSupportedException or ArgumentException or TypeLoadException or MemberAccessException)
+            {
+                throw new NotSupportedException($"The member '{typeof(T).Name}.{name}' of type '{propertyType}' cannot be bound: {ex.InnerException.Message}", ex.InnerException);
+            }
+
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
             throw;
         }

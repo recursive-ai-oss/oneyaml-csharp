@@ -16,6 +16,14 @@
     <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(_UserCache)/oneyaml-csharp/artifacts</ArtifactsPath>
   </PropertyGroup>
 
+  <!-- One version for the three packages. The suffix stays until the API is declared stable. -->
+  <PropertyGroup>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionSuffix>preview.1</VersionSuffix>
+    <PackageProjectUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
+  </PropertyGroup>
+
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>

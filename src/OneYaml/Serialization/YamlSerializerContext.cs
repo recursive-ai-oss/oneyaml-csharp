@@ -20,6 +20,8 @@ public abstract class YamlSerializerContext : IYamlTypeInfoResolver
             UnmappedMemberHandling = options?.UnmappedMemberHandling ?? YamlUnmappedMemberHandling.Skip,
             Limits = options?.Limits ?? YamlLimits.Default,
             MergeKeys = options?.MergeKeys ?? false,
+            EnumNamingPolicy = options?.EnumNamingPolicy,
+            SourceName = options?.SourceName,
             IndentSize = options?.IndentSize ?? 2,
             DefaultIgnoreCondition = options?.DefaultIgnoreCondition ?? YamlIgnoreCondition.Never,
             TypeInfoResolver = this,

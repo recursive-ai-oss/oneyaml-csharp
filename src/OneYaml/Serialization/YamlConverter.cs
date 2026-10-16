@@ -156,6 +156,25 @@ public sealed class YamlPropertyNameAttribute : Attribute
     public string Name { get; }
 }
 
+/// <summary>
+/// Names an enum member in YAML text, overriding <see cref="YamlSerializerOptions.EnumNamingPolicy"/>.
+/// <c>JsonStringEnumMemberName</c> does the same where this attribute is absent.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field, AllowMultiple = false)]
+public sealed class YamlEnumMemberNameAttribute : Attribute
+{
+    /// <summary>Creates the attribute.</summary>
+    /// <param name="name">The text written for the member.</param>
+    public YamlEnumMemberNameAttribute(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        Name = name;
+    }
+
+    /// <summary>The text written for the member.</summary>
+    public string Name { get; }
+}
+
 /// <summary>Leaves a member out of binding, or out of the output under a condition.</summary>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field, AllowMultiple = false)]
 public sealed class YamlIgnoreAttribute : Attribute

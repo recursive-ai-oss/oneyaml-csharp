@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using Xunit;
 using Cm = global::OneYaml.Compat.YamlDotNet.RepresentationModel;
@@ -18,6 +20,13 @@ public sealed class HeadroomChain
 public class CompatStackHeadroomTests
 {
     private static int Levels => global::OneYaml.YamlLimits.Default.MaxDepth - 1;
+
+    // The depth limit is sized for optimised code. Unoptimised frames are several times larger, so a build
+    // without optimisation cannot reach it on a 1 MB stack, and this test says so instead of failing.
+    private static void SkipWhenUnoptimised() =>
+        Assert.SkipWhen(
+            typeof(global::OneYaml.YamlSerializer).Assembly.GetCustomAttribute<DebuggableAttribute>() is { IsJITOptimizerDisabled: true },
+            "The library is built without optimisation, whose frames are too large to reach the depth limit on a 1 MB stack.");
 
     private static void OnMegabyteStack(Action run)
     {
@@ -84,6 +93,7 @@ public class CompatStackHeadroomTests
     [Fact]
     public void YamlDotNet_deserializer_reaches_the_depth_limit()
     {
+        SkipWhenUnoptimised();
         // This recursion limit counts the scalar at the bottom as a level, as the real library does.
         int levels = Levels - 1;
         string yaml = BlockChain(levels);

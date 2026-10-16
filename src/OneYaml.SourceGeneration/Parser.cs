@@ -443,6 +443,11 @@ internal sealed class Parser
                 case "System.Collections.Generic.IReadOnlyDictionary`2":
                     return Adapted("System.Collections.Generic.Dictionary`2", args, children, out implementation);
                 default:
+                    if (definition.StartsWith("System.Collections.Immutable.", StringComparison.Ordinal) && ImmutableFactory(definition, args, children, out implementation) is { } immutable)
+                    {
+                        return immutable;
+                    }
+
                     break;
             }
         }
@@ -471,6 +476,39 @@ internal sealed class Parser
         }
 
         return TypeShape.Object;
+    }
+
+    // The immutable collections are built from the list (or dictionary) the usual converter reads. The text in
+    // implementation is the body of a lambda from that list to the collection; an interface gets the usual class.
+    private static TypeShape? ImmutableFactory(string definition, ImmutableArray<ITypeSymbol> args, List<ITypeSymbol> children, out string? implementation)
+    {
+        const string ns = "global::System.Collections.Immutable.";
+        implementation = null;
+        string? body = definition.Substring("System.Collections.Immutable.".Length) switch
+        {
+            "ImmutableArray`1" => ns + "ImmutableArray.CreateRange(l)",
+            "ImmutableList`1" or "IImmutableList`1" => ns + "ImmutableList.CreateRange(l)",
+            "ImmutableHashSet`1" or "IImmutableSet`1" => ns + "ImmutableHashSet.CreateRange(l)",
+            "ImmutableSortedSet`1" => ns + "ImmutableSortedSet.CreateRange(l)",
+            "ImmutableQueue`1" or "IImmutableQueue`1" => ns + "ImmutableQueue.CreateRange(l)",
+            // A stack enumerates from the top, so the list is reversed to read back what was written.
+            "ImmutableStack`1" or "IImmutableStack`1" => ns + "ImmutableStack.CreateRange(global::System.Linq.Enumerable.Reverse(l))",
+            "ImmutableDictionary`2" or "IImmutableDictionary`2" => ns + "ImmutableDictionary.CreateRange(l)",
+            "ImmutableSortedDictionary`2" => ns + "ImmutableSortedDictionary.CreateRange(l)",
+            _ => null,
+        };
+        if (body is null)
+        {
+            return null;
+        }
+
+        implementation = body;
+        foreach (ITypeSymbol a in args)
+        {
+            children.Add(a);
+        }
+
+        return args.Length == 2 ? TypeShape.ImmutableDictionary : TypeShape.ImmutableCollection;
     }
 
     // An interface is read through a concrete collection that implements it.

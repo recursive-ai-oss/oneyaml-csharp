@@ -268,7 +268,7 @@ public sealed partial class Utf8YamlEmitter
 
         if (_depth >= _maxDepth)
         {
-            throw new YamlException("The value is nested deeper than the limit allows.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The value is nested deeper than the limit MaxDepth ({_maxDepth}).", YamlErrorCategory.Limit, 0, 0, 0);
         }
     }
 

@@ -84,11 +84,15 @@ internal ref struct FrameStack
         {
             if (_chunks is null)
             {
-                _chunks = new GenericFrame[]?[8];
+                // The directory is rented too, so a load deeper than the stack space takes nothing from the heap.
+                _chunks = ArrayPool<GenericFrame[]?>.Shared.Rent(8);
             }
             else if (_chunkCount == _chunks.Length)
             {
-                Array.Resize(ref _chunks, _chunks.Length * 2);
+                GenericFrame[]?[] bigger = ArrayPool<GenericFrame[]?>.Shared.Rent(_chunks.Length * 2);
+                Array.Copy(_chunks, bigger, _chunkCount);
+                ArrayPool<GenericFrame[]?>.Shared.Return(_chunks, clearArray: true);
+                _chunks = bigger;
             }
 
             _chunks[_chunkCount++] = ArrayPool<GenericFrame>.Shared.Rent(ChunkSize);
@@ -108,6 +112,11 @@ internal ref struct FrameStack
         }
 
         _chunkCount = 0;
+        if (_chunks is not null)
+        {
+            ArrayPool<GenericFrame[]?>.Shared.Return(_chunks, clearArray: true);
+            _chunks = null;
+        }
     }
 }
 
@@ -217,7 +226,7 @@ internal static class GenericLoader
                                 string? identity = reader.KeyIdentity();
                                 if (identity is not null && !((kf.Sets ??= new FrameSets()).Identities ??= []).Add(identity))
                                 {
-                                    throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, reader.Start);
+                                    throw reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", reader.Start);
                                 }
                             }
 
@@ -330,7 +339,7 @@ internal static class GenericLoader
                 {
                     if (string.Equals(e.Key, key, StringComparison.Ordinal))
                     {
-                        throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", input, frame.KeyOffset);
+                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", input, frame.KeyOffset);
                     }
                 }
 
@@ -359,7 +368,7 @@ internal static class GenericLoader
         }
         else if (!dict.TryAdd(key, value))
         {
-            throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", input, frame.KeyOffset);
+            throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", input, frame.KeyOffset);
         }
     }
 
@@ -403,7 +412,7 @@ internal static class GenericLoader
             {
                 if (item is not Dictionary<string, object?> d)
                 {
-                    throw YamlException.At(YamlErrorCategory.Binding, "A merge key needs a mapping or a sequence of mappings.", input, offset);
+                    throw YamlException.Located(YamlErrorCategory.Binding, "A merge key needs a mapping or a sequence of mappings.", input, offset, ErrorPath.Find(input, offset, atCollection: true));
                 }
 
                 Copy(into, ref merged, d);
@@ -412,7 +421,7 @@ internal static class GenericLoader
             return;
         }
 
-        throw YamlException.At(YamlErrorCategory.Binding, "A merge key needs a mapping or a sequence of mappings.", input, offset);
+        throw YamlException.Located(YamlErrorCategory.Binding, "A merge key needs a mapping or a sequence of mappings.", input, offset, ErrorPath.Find(input, offset, atCollection: true));
     }
 
     private static void Copy(Dictionary<string, object?> into, ref HashSet<string>? merged, Dictionary<string, object?> from)

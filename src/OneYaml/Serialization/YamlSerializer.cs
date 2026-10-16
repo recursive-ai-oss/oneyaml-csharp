@@ -257,7 +257,7 @@ public static partial class YamlSerializer
     public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlSerializerOptions? options = null)
     {
         YamlTypeInfo<T> info = Info<T>(options);
-        using YamlInput input = YamlInput.FromBytes(utf8Yaml, info.Options.Limits);
+        using YamlInput input = InputFromBytes(utf8Yaml, info.Options);
         return ReadAllUtf8(input.Utf8Text, info);
     }
 
@@ -270,7 +270,7 @@ public static partial class YamlSerializer
     public static List<T?> DeserializeAll<T>(ReadOnlySpan<byte> utf8Yaml, YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
-        using YamlInput input = YamlInput.FromBytes(utf8Yaml, typeInfo.Options.Limits);
+        using YamlInput input = InputFromBytes(utf8Yaml, typeInfo.Options);
         return ReadAllUtf8(input.Utf8Text, typeInfo);
     }
 
@@ -280,22 +280,38 @@ public static partial class YamlSerializer
     [RequiresDynamicCode(DynamicMessage)]
     private static YamlTypeInfo<T> Info<T>(YamlSerializerOptions? options) => (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo<T>();
 
+    // The source name is added to an error as it passes through the entry point, by an exception filter that never
+    // catches. It sits here and not in ReadUtf8, whose frame the reader lives in, so the hot path is as it was.
     private static T? ReadChars<T>(ReadOnlySpan<char> text, YamlTypeInfo<T> info)
     {
-        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
-        return ReadUtf8(input.Utf8Text, info);
+        try
+        {
+            using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+            return ReadUtf8(input.Utf8Text, info);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        {
+            throw;
+        }
     }
 
     private static T? ReadBytes<T>(ReadOnlySpan<byte> bytes, YamlTypeInfo<T> info)
     {
-        using YamlInput input = YamlInput.FromBytes(bytes, info.Options.Limits);
-        return ReadUtf8(input.Utf8Text, info);
+        try
+        {
+            using YamlInput input = YamlInput.FromBytes(bytes, info.Options.Limits);
+            return ReadUtf8(input.Utf8Text, info);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        {
+            throw;
+        }
     }
 
     private static object? ReadBoxed(ReadOnlySpan<char> text, YamlTypeInfo info)
     {
         info.Options.MakeReadOnly();
-        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+        using YamlInput input = InputFromChars(text, info.Options);
         YamlReader.Scratch scratch = default;
         var reader = new Utf8YamlReader(input.Utf8Text, info.Options, !IsGeneric(info), ref scratch);
         try
@@ -305,6 +321,10 @@ public static partial class YamlSerializer
             reader.EndDocument();
             reader.EndStreamAfterSingleDocument();
             return value;
+        }
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        {
+            throw;
         }
         finally
         {
@@ -332,12 +352,38 @@ public static partial class YamlSerializer
         }
     }
 
+    // The input is checked and transcoded here, before any reader exists, so an encoding or size error is
+    // marked with the source name on its way out. The filter never catches.
+    private static YamlInput InputFromChars(ReadOnlySpan<char> text, YamlSerializerOptions options)
+    {
+        try
+        {
+            return YamlInput.FromChars(text, options.Limits);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options.SourceName))
+        {
+            throw;
+        }
+    }
+
+    private static YamlInput InputFromBytes(ReadOnlySpan<byte> bytes, YamlSerializerOptions options)
+    {
+        try
+        {
+            return YamlInput.FromBytes(bytes, options.Limits);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options.SourceName))
+        {
+            throw;
+        }
+    }
+
     // Only a plain object target is read without following aliases, so that aliases share instances.
     private static bool IsGeneric(YamlTypeInfo info) => info.ConverterBase is GenericConverter;
 
     private static List<T?> ReadAll<T>(string text, YamlTypeInfo<T> info)
     {
-        using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
+        using YamlInput input = InputFromChars(text, info.Options);
         return ReadAllUtf8(input.Utf8Text, info);
     }
 
@@ -357,6 +403,10 @@ public static partial class YamlSerializer
             }
 
             return all;
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options.SourceName))
+        {
+            throw;
         }
         finally
         {
@@ -393,6 +443,12 @@ public static partial class YamlSerializer
     // Reads a stream to its end into a pooled buffer, stopping early once it passes the input limit.
     private static (byte[] Buffer, int Length) ReadAllBytes(Stream stream, long max)
     {
+        // A stream that says how long it is can be refused before any buffer is taken for it.
+        if (stream.CanSeek)
+        {
+            CheckSize(stream.Length - stream.Position, max);
+        }
+
         byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
         int length = 0;
         try
@@ -423,6 +479,12 @@ public static partial class YamlSerializer
 
     private static async ValueTask<(byte[] Buffer, int Length)> ReadAllBytesAsync(Stream stream, long max, CancellationToken cancellationToken)
     {
+        // A stream that says how long it is can be refused before any buffer is taken for it.
+        if (stream.CanSeek)
+        {
+            CheckSize(stream.Length - stream.Position, max);
+        }
+
         byte[] buffer = ArrayPool<byte>.Shared.Rent(stream.CanSeek ? (int)Math.Clamp(stream.Length - stream.Position + 1, 4096, 1 << 26) : 16384);
         int length = 0;
         try
@@ -451,11 +513,11 @@ public static partial class YamlSerializer
         }
     }
 
-    private static void CheckSize(int length, long max)
+    private static void CheckSize(long length, long max)
     {
         if (length > max)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
         }
     }
 
@@ -463,7 +525,7 @@ public static partial class YamlSerializer
     {
         if (buffer.Length >= int.MaxValue / 2 || buffer.Length > max)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
         }
 
         byte[] bigger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);

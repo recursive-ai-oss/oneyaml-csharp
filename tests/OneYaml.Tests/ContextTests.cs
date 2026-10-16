@@ -1,3 +1,4 @@
+using OneYaml.Serialization.Metadata;
 using Xunit;
 
 namespace OneYaml.Tests;

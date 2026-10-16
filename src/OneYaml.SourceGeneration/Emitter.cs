@@ -10,7 +10,7 @@ namespace OneYaml.SourceGeneration;
 // no reflection, so the result is safe to trim and to compile ahead of time.
 internal sealed class Emitter
 {
-    private const string Services = "global::OneYaml.YamlMetadataServices";
+    private const string Services = "global::OneYaml.Serialization.Metadata.YamlMetadataServices";
     private const string TypeInfo = "global::OneYaml.YamlTypeInfo";
 
     private readonly INamedTypeSymbol _context;
@@ -194,6 +194,16 @@ internal sealed class Emitter
             case TypeShape.CustomCollection:
                 Line($"return {Services}.CreateCustomCollectionInfo<{type.Name}, {type.Dependencies[0].Name}>(Options, this.{type.Dependencies[0].Property}, static () => new {type.Name}());");
                 break;
+            case TypeShape.ImmutableCollection:
+                {
+                    string isDefault = type.Symbol.OriginalDefinition.Name == "ImmutableArray" ? ", static v => v.IsDefault" : string.Empty;
+                    Line($"return {Services}.CreateConvertedCollectionInfo<{type.Name}, {type.Dependencies[0].Name}>(Options, this.{type.Dependencies[0].Property}, static l => {type.ImplementationName}{isDefault});");
+                    break;
+                }
+
+            case TypeShape.ImmutableDictionary:
+                Line($"return {Services}.CreateConvertedDictionaryInfo<{type.Name}, {type.Dependencies[0].Name}, {type.Dependencies[1].Name}>(Options, this.{type.Dependencies[0].Property}, this.{type.Dependencies[1].Property}, static l => {type.ImplementationName});");
+                break;
             default:
                 EmitObject(type);
                 break;
@@ -217,7 +227,7 @@ internal sealed class Emitter
             }
         }
 
-        Line($"var values = new global::OneYaml.YamlObjectInfoValues<{n}>");
+        Line($"var values = new global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<{n}>");
         Open();
         switch (obj.Creator)
         {
@@ -234,7 +244,7 @@ internal sealed class Emitter
                 break;
         }
 
-        Line("PropertyMetadataInitializer = _ => new global::OneYaml.YamlPropertyInfo[]");
+        Line("PropertyMetadataInitializer = _ => new global::OneYaml.Serialization.Metadata.YamlPropertyInfo[]");
         Open();
         for (int i = 0; i < obj.Members.Count; i++)
         {
@@ -263,12 +273,12 @@ internal sealed class Emitter
         }
 
         Line($"ConstructorCreator = static args => new {n}({args}){obj.InitializerText},");
-        Line("ConstructorParameterMetadataInitializer = static () => new global::OneYaml.YamlParameterInfo[]");
+        Line("ConstructorParameterMetadataInitializer = static () => new global::OneYaml.Serialization.Metadata.YamlParameterInfo[]");
         Open();
         foreach (ParameterSpec p in obj.Parameters)
         {
             string tail = p.HasDefault ? $", true, {p.DefaultText}" : string.Empty;
-            Line($"new global::OneYaml.YamlParameterInfo({Literal(p.Name)}, typeof({p.TypeName}){tail}),");
+            Line($"new global::OneYaml.Serialization.Metadata.YamlParameterInfo({Literal(p.Name)}, typeof({p.TypeName}){tail}),");
         }
 
         CloseWith("},");
@@ -278,7 +288,7 @@ internal sealed class Emitter
     {
         string d = type.Name;
         string t = m.TypeName;
-        Line($"{Services}.CreatePropertyInfo<{d}, {t}>(new global::OneYaml.YamlPropertyInfoValues<{d}, {t}>");
+        Line($"{Services}.CreatePropertyInfo<{d}, {t}>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<{d}, {t}>");
         Open();
         Line($"Name = {Literal(m.Name)},");
         if (m.SerializedName is not null)

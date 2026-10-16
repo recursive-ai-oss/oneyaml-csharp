@@ -205,7 +205,7 @@ public ref partial struct Utf8YamlReader
     {
         if (!CoreSchema.IsWithinIntegerDigits(text, _limits.MaxIntegerDigits))
         {
-            throw Error(YamlErrorCategory.Limit, "The integer has more digits than the configured limit.");
+            throw Error(YamlErrorCategory.Limit, $"The integer has more digits than the limit MaxIntegerDigits ({_limits.MaxIntegerDigits}).");
         }
     }
 

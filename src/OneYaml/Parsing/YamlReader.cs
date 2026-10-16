@@ -132,7 +132,7 @@ internal ref partial struct YamlReader
         _indent = -1;
         if (utf8.Length > _limits.MaxInputBytes)
         {
-            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            throw new YamlException($"The input is larger than the limit MaxInputBytes ({_limits.MaxInputBytes}).", YamlErrorCategory.Limit, 0, 0, 0);
         }
 
         _hasNonPrintable = ContainsNonPrintable(utf8);
@@ -354,42 +354,149 @@ internal ref partial struct YamlReader
     }
 
     /// <summary>The tag resolved against the document's <c>%TAG</c> directives, or null when there is no tag.</summary>
+    /// <remarks>Builds the string when asked, and keeps the last one, so a run of nodes that share a tag shares its string.</remarks>
     /// <returns>The full tag, or <c>!</c> for the non-specific tag.</returns>
-    public readonly string? GetResolvedTag()
+    public string? GetResolvedTag()
     {
         if (_tagLength == 0)
         {
             return null;
         }
 
+        ReadOnlySpan<byte> prefix = TagPrefixBytes();
         ReadOnlySpan<byte> suffix = _src[_tagSuffixStart.._tagSuffixEnd];
-        if (_tagVerbatim)
+        int key = PrefixKey();
+        if (_resolvedTagCache is not null && _resolvedPrefixKey == key && _resolvedPrefixLength == prefix.Length
+            && _src.Slice(_resolvedSuffixStart, _resolvedSuffixLength).SequenceEqual(suffix))
         {
-            return DecodePercent(default, suffix);
+            return _resolvedTagCache;
         }
 
-        ReadOnlySpan<byte> prefix;
-        if (_tagPrefix == -2)
-        {
-            prefix = "tag:yaml.org,2002:"u8;
-        }
-        else if (_tagPrefix == -1)
-        {
-            prefix = "!"u8;
-        }
-        else
-        {
-            int ps = _tagDirectives![(_tagPrefix * 4) + 2];
-            int pe = _tagDirectives[(_tagPrefix * 4) + 3];
-            prefix = _src[ps..pe];
-        }
-
-        return DecodePercent(prefix, suffix);
+        byte[] buffer = new byte[prefix.Length + suffix.Length];
+        int n = DecodePercent(buffer, prefix, suffix);
+        _resolvedTagCache = Encoding.UTF8.GetString(buffer, 0, n);
+        _resolvedPrefixKey = key;
+        _resolvedPrefixLength = prefix.Length;
+        _resolvedSuffixStart = _tagSuffixStart;
+        _resolvedSuffixLength = suffix.Length;
+        return _resolvedTagCache;
     }
 
-    private static string DecodePercent(ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
+    /// <summary>
+    /// Says which Core tag the node's tag resolves to, without building the tag string. A long <c>%TAG</c> prefix
+    /// used by many nodes costs nothing here.
+    /// </summary>
+    /// <returns><see cref="TagClass.None"/> when the node has no tag.</returns>
+    public readonly TagClass GetTagClass()
     {
-        byte[] buffer = new byte[prefix.Length + suffix.Length];
+        if (_tagLength == 0)
+        {
+            return TagClass.None;
+        }
+
+        ReadOnlySpan<byte> prefix = TagPrefixBytes();
+        ReadOnlySpan<byte> suffix = _src[_tagSuffixStart.._tagSuffixEnd];
+
+        // The longest Core tag is 24 bytes and decoding never lengthens, so anything larger is another tag.
+        if (prefix.Length > 24 || suffix.Length > 72)
+        {
+            return TagClass.Unknown;
+        }
+
+        Span<byte> buffer = stackalloc byte[96];
+        int n = DecodePercent(buffer, prefix, suffix);
+        ReadOnlySpan<byte> resolved = buffer[..n];
+        if (resolved.Length == 1 && resolved[0] == (byte)'!')
+        {
+            return TagClass.Str;
+        }
+
+        if (!resolved.StartsWith("tag:yaml.org,2002:"u8))
+        {
+            return TagClass.Unknown;
+        }
+
+        ReadOnlySpan<byte> name = resolved["tag:yaml.org,2002:".Length..];
+        if (name.SequenceEqual("str"u8))
+        {
+            return TagClass.Str;
+        }
+
+        if (name.SequenceEqual("int"u8))
+        {
+            return TagClass.Int;
+        }
+
+        if (name.SequenceEqual("float"u8))
+        {
+            return TagClass.Float;
+        }
+
+        if (name.SequenceEqual("bool"u8))
+        {
+            return TagClass.Bool;
+        }
+
+        if (name.SequenceEqual("null"u8))
+        {
+            return TagClass.Null;
+        }
+
+        if (name.SequenceEqual("binary"u8))
+        {
+            return TagClass.Binary;
+        }
+
+        if (name.SequenceEqual("map"u8))
+        {
+            return TagClass.Map;
+        }
+
+        return name.SequenceEqual("seq"u8) ? TagClass.Seq : TagClass.Unknown;
+    }
+
+    // The last resolved tag and what it was made from, so repeated tags are not rebuilt.
+    private string? _resolvedTagCache;
+    private int _resolvedPrefixKey;
+    private int _resolvedPrefixLength;
+    private int _resolvedSuffixStart;
+    private int _resolvedSuffixLength;
+
+    // Names the prefix without comparing its bytes: where a directive's prefix starts in the text, or a negative
+    // number for the built-in handles and verbatim tags.
+    private readonly int PrefixKey()
+    {
+        if (_tagVerbatim)
+        {
+            return -3;
+        }
+
+        return _tagPrefix < 0 ? _tagPrefix : _tagDirectives![(_tagPrefix * 4) + 2];
+    }
+
+    private readonly ReadOnlySpan<byte> TagPrefixBytes()
+    {
+        if (_tagVerbatim)
+        {
+            return default;
+        }
+
+        if (_tagPrefix == -2)
+        {
+            return "tag:yaml.org,2002:"u8;
+        }
+
+        if (_tagPrefix == -1)
+        {
+            return "!"u8;
+        }
+
+        return _src[_tagDirectives![(_tagPrefix * 4) + 2].._tagDirectives[(_tagPrefix * 4) + 3]];
+    }
+
+    // Writes prefix then suffix with escaped ASCII characters expanded; a UTF-8 sequence stays as written.
+    private static int DecodePercent(Span<byte> buffer, ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
+    {
         prefix.CopyTo(buffer);
         int n = prefix.Length;
         for (int i = 0; i < suffix.Length; i++)
@@ -397,7 +504,6 @@ internal ref partial struct YamlReader
             byte b = suffix[i];
             if (b == (byte)'%' && i + 2 < suffix.Length && ((HexValue(suffix[i + 1]) << 4) | HexValue(suffix[i + 2])) < 0x80)
             {
-                // Only an escaped ASCII character is expanded; a UTF-8 sequence stays as written.
                 buffer[n++] = (byte)((HexValue(suffix[i + 1]) << 4) | HexValue(suffix[i + 2]));
                 i += 2;
             }
@@ -407,16 +513,16 @@ internal ref partial struct YamlReader
             }
         }
 
-        return Encoding.UTF8.GetString(buffer, 0, n);
+        return n;
     }
 
     private static int HexValue(byte b) => b <= '9' ? b - '0' : (b | 0x20) - 'a' + 10;
 
     private readonly YamlException Error(string message, int offset)
-        => YamlException.At(YamlErrorCategory.Syntax, message, _src, offset);
+        => YamlException.Located(YamlErrorCategory.Syntax, message, _src, offset);
 
     private readonly YamlException LimitError(string message, int offset)
-        => YamlException.At(YamlErrorCategory.Limit, message, _src, offset);
+        => YamlException.Located(YamlErrorCategory.Limit, message, _src, offset);
 
     private void PushState(State s)
     {
@@ -575,7 +681,7 @@ internal ref partial struct YamlReader
 
         if (++_documents > _limits.MaxDocuments)
         {
-            throw LimitError("The stream has more documents than the configured limit.", _tok.Start);
+            throw LimitError($"The stream has more documents than the limit MaxDocuments ({_limits.MaxDocuments}).", _tok.Start);
         }
 
         if (kind is TokenKind.VersionDirective or TokenKind.TagDirective or TokenKind.ReservedDirective)
@@ -910,7 +1016,7 @@ internal ref partial struct YamlReader
     {
         if (_depth >= _limits.MaxDepth)
         {
-            throw LimitError("The nesting depth is larger than the configured limit.", start);
+            throw LimitError($"The nesting depth is larger than the limit MaxDepth ({_limits.MaxDepth}).", start);
         }
 
         TokenType = type;

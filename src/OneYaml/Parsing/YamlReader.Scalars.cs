@@ -16,7 +16,7 @@ internal ref partial struct YamlReader
     {
         if (length > _limits.MaxScalarBytes)
         {
-            throw LimitError("A scalar is larger than the configured limit.", offset);
+            throw LimitError($"A scalar is larger than the limit MaxScalarBytes ({_limits.MaxScalarBytes}).", offset);
         }
     }
 

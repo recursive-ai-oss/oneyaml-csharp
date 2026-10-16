@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
+using System.Reflection;
 using System.Text;
 using OneYaml.Parsing;
 
@@ -11,10 +13,13 @@ internal static class BindingErrors
 {
     public static YamlException Number(in Utf8YamlReader r, NumberStatus status, string type) =>
         r.CreateException(status == NumberStatus.OutOfRange
-            ? $"The number is outside the range of {type}."
-            : $"The value cannot be read as {type}.");
+            ? $"The number{Space(r)}is outside the range of {type}."
+            : $"The value{Space(r)}cannot be read as {type}.");
 
-    public static YamlException Text(in Utf8YamlReader r, string type) => r.CreateException($"The value cannot be read as {type}.");
+    public static YamlException Text(in Utf8YamlReader r, string type) => r.CreateException($"The value{Space(r)}cannot be read as {type}.");
+
+    // " 'text' " between the words of a message, or one space when the current token has no text to show.
+    private static string Space(in Utf8YamlReader r) => r.DescribeValue() is { Length: > 0 } v ? " " + v + " " : " ";
 }
 
 internal static class BuiltInConverters
@@ -703,37 +708,75 @@ internal sealed class NullableConverter<T> : YamlConverter<T?>
         reader.IsNull ? null : _inner.ReadValue(ref reader, options);
 }
 
-// Enums read by name (exact, then through the naming policy, then ignoring case) or by number.
-internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
+// Enums are written by their declared names, or by the names the enum member attributes or the enum naming
+// policy give them. They read by any of those names (exact, then ignoring case) or by number.
+internal sealed class EnumConverter<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields)] TEnum> : YamlConverter<TEnum>
     where TEnum : struct, Enum
 {
     private readonly Dictionary<string, TEnum> _exact = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TEnum> _ignoreCase = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<TEnum, string> _written = [];
+    private readonly Dictionary<string, string> _writtenByName = new(StringComparer.Ordinal);
+    private readonly bool _renames;
     private readonly TypeCode _underlying = Type.GetTypeCode(Enum.GetUnderlyingType(typeof(TEnum)));
 
     public EnumConverter(YamlSerializerOptions options)
     {
-        foreach (TEnum value in Enum.GetValues<TEnum>())
+        foreach (FieldInfo field in typeof(TEnum).GetFields(BindingFlags.Public | BindingFlags.Static))
         {
-            string name = value.ToString();
+            var value = (TEnum)field.GetValue(null)!;
+            string name = field.Name;
             _exact.TryAdd(name, value);
             _ignoreCase.TryAdd(name, value);
             string writtenName = name;
-            if (options.PropertyNamingPolicy is { } policy)
+            if (MemberNameOf(field) is { } attributed)
             {
-                string converted = policy.ConvertName(name);
-                _exact.TryAdd(converted, value);
-                _ignoreCase.TryAdd(converted, value);
-                writtenName = converted;
+                writtenName = attributed;
+            }
+            else if (options.EnumNamingPolicy is { } policy)
+            {
+                writtenName = policy.ConvertName(name);
+            }
+
+            if (writtenName != name)
+            {
+                _renames = true;
+                _exact.TryAdd(writtenName, value);
+                _ignoreCase.TryAdd(writtenName, value);
             }
 
             _written.TryAdd(value, writtenName);
+            _writtenByName.TryAdd(name, writtenName);
         }
     }
 
-    // A declared value is written by its name, through the naming policy. A combination of flags is written
-    // with the plain names, which the reader parses whatever the policy; a number outside the names stays a number.
+    // The name an attribute gives a member. The attribute is found by its name so that the .NET 8 build
+    // honours the System.Text.Json one too, which that runtime does not define.
+    private static string? MemberNameOf(FieldInfo field)
+    {
+        string? name = null;
+        foreach (CustomAttributeData data in field.GetCustomAttributesData())
+        {
+            string? full = data.AttributeType.FullName;
+            if (full == "OneYaml.YamlEnumMemberNameAttribute"
+                || (name is null && full == "System.Text.Json.Serialization.JsonStringEnumMemberNameAttribute"))
+            {
+                if (data.ConstructorArguments.Count == 1 && data.ConstructorArguments[0].Value is string given)
+                {
+                    name = given;
+                    if (full == "OneYaml.YamlEnumMemberNameAttribute")
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return name;
+    }
+
+    // A declared value is written by its name. A combination of flags is written as the names of its
+    // parts; a number outside the names stays a number.
     public override void Write(Utf8YamlEmitter writer, TEnum value, YamlSerializerOptions options)
     {
         if (_written.TryGetValue(value, out string? name))
@@ -749,8 +792,35 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
         }
         else
         {
-            writer.WriteStringValue(text);
+            writer.WriteStringValue(_renames ? RenameParts(text) : text);
         }
+    }
+
+    private string RenameParts(string combination)
+    {
+        string[] parts = combination.Split(", ");
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (_writtenByName.TryGetValue(parts[i], out string? renamed))
+            {
+                parts[i] = renamed;
+            }
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    // Turns a list of written names back into declared names, which Enum.TryParse understands.
+    private string DeclaredParts(string combination)
+    {
+        string[] parts = combination.Split(',');
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i].Trim();
+            parts[i] = _ignoreCase.TryGetValue(part, out TEnum single) ? single.ToString() : part;
+        }
+
+        return string.Join(", ", parts);
     }
 
     private bool InRange(long number) => _underlying switch
@@ -766,7 +836,7 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
     };
 
     private static YamlException OutOfRange(in Utf8YamlReader reader) =>
-        reader.CreateException($"The number is outside the range of {typeof(TEnum).Name}.");
+        reader.CreateException($"The number {reader.DescribeValue()} is outside the range of {typeof(TEnum).Name}.");
 
     public override TEnum Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
@@ -795,7 +865,7 @@ internal sealed class EnumConverter<TEnum> : YamlConverter<TEnum>
         }
 
         // Flag combinations such as "Read, Write".
-        if (text.Contains(',', StringComparison.Ordinal) && Enum.TryParse(text, ignoreCase: true, out v))
+        if (text.Contains(',', StringComparison.Ordinal) && Enum.TryParse(_renames ? DeclaredParts(text) : text, ignoreCase: true, out v))
         {
             return v;
         }

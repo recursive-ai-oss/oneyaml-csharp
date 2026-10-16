@@ -102,16 +102,26 @@ internal sealed class CollectionConverter<TCollection, T> : YamlConverter<TColle
     private readonly ListConverter<T> _list;
     private readonly YamlConverter<T> _element;
     private readonly Func<List<T>, TCollection> _make;
+    private readonly Func<TCollection, bool>? _isDefault;
 
-    public CollectionConverter(YamlTypeInfo<T> elementInfo, Func<List<T>, TCollection> make)
+    // isDefault names a value with nothing to enumerate (an uninitialised ImmutableArray), written as an empty sequence.
+    public CollectionConverter(YamlTypeInfo<T> elementInfo, Func<List<T>, TCollection> make, Func<TCollection, bool>? isDefault = null)
     {
         _list = new ListConverter<T>(elementInfo);
         _element = elementInfo.Converter;
         _make = make;
+        _isDefault = isDefault;
     }
 
     public override void Write(Utf8YamlEmitter writer, TCollection value, YamlSerializerOptions options)
     {
+        if (_isDefault is not null && _isDefault(value))
+        {
+            writer.Begin(isMapping: false, value);
+            writer.WriteEndSequence();
+            return;
+        }
+
         // The element type is known from the collection's interface; a value that is no sequence of T is a metadata mistake.
         if (value is not IEnumerable<T> items)
         {
@@ -210,7 +220,7 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
             }
             else if (!dict.TryAdd(key, value))
             {
-                throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
+                throw reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", keyStart);
             }
         }
     }
@@ -296,13 +306,45 @@ internal sealed class GeneralDictionaryConverter<TDictionary, TKey, TValue> : Ya
             // different in the mapping can still collide here.
             if (target.ContainsKey(pair.Key))
             {
-                throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has two keys the target treats as the same key.", reader.Source, reader.Start);
+                throw reader.ErrorAt(YamlErrorCategory.DuplicateKey, "The mapping has two keys the target treats as the same key.", reader.Start);
             }
 
             target.Add(pair.Key, pair.Value);
         }
 
         return target;
+    }
+}
+
+// A dictionary type that cannot be filled in place (the immutable ones): read as a Dictionary, then converted.
+internal sealed class ConvertedDictionaryConverter<TDictionary, TKey, TValue> : YamlConverter<TDictionary>
+    where TKey : notnull
+{
+    private readonly DictionaryConverter<TKey, TValue> _inner;
+    private readonly Func<Dictionary<TKey, TValue>, TDictionary> _make;
+
+    public ConvertedDictionaryConverter(YamlTypeInfo<TKey> keyInfo, YamlTypeInfo<TValue> valueInfo, Func<Dictionary<TKey, TValue>, TDictionary> make)
+    {
+        _inner = new DictionaryConverter<TKey, TValue>(keyInfo, valueInfo);
+        _make = make;
+    }
+
+    public override void Write(Utf8YamlEmitter writer, TDictionary value, YamlSerializerOptions options)
+    {
+        if (value is IEnumerable<KeyValuePair<TKey, TValue>> entries)
+        {
+            _inner.WriteEntries(writer, value, entries, options);
+        }
+        else
+        {
+            GenericWriter.Write(writer, value, options);
+        }
+    }
+
+    public override TDictionary? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
+    {
+        Dictionary<TKey, TValue>? source = _inner.Read(ref reader, typeToConvert, options);
+        return source is null ? default : _make(source);
     }
 }
 

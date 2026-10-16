@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 using Cs = global::OneYaml.Compat.SharpYaml.Serialization;
+using Om = global::OneYaml.Serialization.Metadata;
 using Oy = global::OneYaml;
 
 namespace OneYaml.Compat.SharpYaml;
@@ -92,12 +93,12 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         where T : struct
     {
         var inner = (Oy.YamlTypeInfo<T>)_default.GetTypeInfo(typeof(T), options)!;
-        return Oy.YamlMetadataServices.CreateValueInfo(options, new LenientScalarConverter<T>(inner.Converter, LenientScalarConverter<T>.ParserFor(inner), LenientScalarConverter<T>.IsInteger()));
+        return Om.YamlMetadataServices.CreateValueInfo(options, new LenientScalarConverter<T>(inner.Converter, LenientScalarConverter<T>.ParserFor(inner), LenientScalarConverter<T>.IsInteger()));
     }
 
     private static Oy.YamlTypeInfo<TEnum> MakeEnum<TEnum>(Oy.YamlSerializerOptions options)
         where TEnum : struct, Enum =>
-        Oy.YamlMetadataServices.CreateValueInfo(options, new EnumConverter<TEnum>());
+        Om.YamlMetadataServices.CreateValueInfo(options, new EnumConverter<TEnum>());
 
     private Oy.YamlTypeInfo<T> MakeObject<T>(Oy.YamlSerializerOptions options) => BuildObject<T>(options);
 
@@ -121,20 +122,20 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
             ctorCreator = CreateParameterized<T>(ctor, parameters);
         }
 
-        Oy.YamlParameterInfo[] parameterInfos = [.. parameters.Select(static p => new Oy.YamlParameterInfo(
+        Om.YamlParameterInfo[] parameterInfos = [.. parameters.Select(static p => new Om.YamlParameterInfo(
             p.Name ?? string.Empty,
             p.ParameterType,
             HasDefault(p),
             HasDefault(p) ? p.DefaultValue : null))];
 
-        var values = new Oy.YamlObjectInfoValues<T>
+        var values = new Om.YamlObjectInfoValues<T>
         {
             ObjectCreator = creator,
             ConstructorCreator = ctorCreator,
             ConstructorParameterMetadataInitializer = () => parameterInfos,
             PropertyMetadataInitializer = _ => BuildProperties<T>(parameters),
         };
-        return Oy.YamlMetadataServices.CreateObjectInfo(options, values);
+        return Om.YamlMetadataServices.CreateObjectInfo(options, values);
     }
 
     private static bool HasDefault(ParameterInfo p) => p.HasDefaultValue && p.DefaultValue is not (DBNull or Missing);
@@ -173,7 +174,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         return ctors.Length == 1 ? ctors[0] : null;
     }
 
-    private Oy.YamlPropertyInfo[] BuildProperties<T>(ParameterInfo[] parameters)
+    private Om.YamlPropertyInfo[] BuildProperties<T>(ParameterInfo[] parameters)
     {
         // Walk from the most derived type, so a member hidden by a derived one is the one that stays; the output lists
         // the base type's members first, the fields of a type before its properties.
@@ -256,7 +257,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
             }
         }
 
-        var result = new List<Oy.YamlPropertyInfo>(bound.Count);
+        var result = new List<Om.YamlPropertyInfo>(bound.Count);
         foreach ((MemberInfo member, Type type, string name) in bound)
         {
             result.Add(MakeProperty<T>(member, type, name, parameters, rank));
@@ -333,7 +334,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         return null;
     }
 
-    private Oy.YamlPropertyInfo MakeProperty<T>(MemberInfo member, Type propertyType, string name, ParameterInfo[] parameters, Dictionary<MemberInfo, int>? rank)
+    private Om.YamlPropertyInfo MakeProperty<T>(MemberInfo member, Type propertyType, string name, ParameterInfo[] parameters, Dictionary<MemberInfo, int>? rank)
     {
         string? explicitName = ExplicitName(member);
         ParameterInfo? parameter = ParameterOf(parameters, name);
@@ -352,7 +353,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         MethodInfo make = typeof(ReflectionResolver).GetMethod(nameof(MakeAccessors), Any)!.MakeGenericMethod(typeof(T), propertyType);
         try
         {
-            return (Oy.YamlPropertyInfo)make.Invoke(null, [member, name, explicitName, required, order, IgnoreConditionOf(member)])!;
+            return (Om.YamlPropertyInfo)make.Invoke(null, [member, name, explicitName, required, order, IgnoreConditionOf(member)])!;
         }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
@@ -361,11 +362,11 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         }
     }
 
-    private static Oy.YamlPropertyInfo MakeAccessors<TDeclaring, TProperty>(MemberInfo member, string name, string? explicitName, bool required, int order, YamlIgnoreCondition ignore)
+    private static Om.YamlPropertyInfo MakeAccessors<TDeclaring, TProperty>(MemberInfo member, string name, string? explicitName, bool required, int order, YamlIgnoreCondition ignore)
     {
         Func<TDeclaring, TProperty>? getter = null;
         Action<TDeclaring, TProperty>? classSetter = null;
-        Oy.YamlRefSetter<TDeclaring, TProperty>? refSetter = null;
+        Om.YamlRefSetter<TDeclaring, TProperty>? refSetter = null;
         bool isStruct = typeof(TDeclaring).IsValueType;
         if (member is PropertyInfo p)
         {
@@ -378,7 +379,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
             {
                 if (isStruct)
                 {
-                    refSetter = p.SetMethod.CreateDelegate<Oy.YamlRefSetter<TDeclaring, TProperty>>();
+                    refSetter = p.SetMethod.CreateDelegate<Om.YamlRefSetter<TDeclaring, TProperty>>();
                 }
                 else
                 {
@@ -409,7 +410,7 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         // A member with no setter is filled through the constructor, or its key is read and dropped.
         classSetter ??= isStruct ? null : static (_, _) => { };
         refSetter ??= isStruct ? static (ref TDeclaring _, TProperty _) => { } : null;
-        return Oy.YamlMetadataServices.CreatePropertyInfo(new Oy.YamlPropertyInfoValues<TDeclaring, TProperty>
+        return Om.YamlMetadataServices.CreatePropertyInfo(new Om.YamlPropertyInfoValues<TDeclaring, TProperty>
         {
             Name = name,
             SerializedName = explicitName,
@@ -466,13 +467,13 @@ internal sealed class ReflectionResolver : Oy.IYamlTypeInfoResolver
         return (o, v) => field.SetValue(o, v);
     }
 
-    private static Oy.YamlRefSetter<TDeclaring, TProperty> FieldRefSetter<TDeclaring, TProperty>(FieldInfo field)
+    private static Om.YamlRefSetter<TDeclaring, TProperty> FieldRefSetter<TDeclaring, TProperty>(FieldInfo field)
     {
         if (RuntimeFeature.IsDynamicCodeSupported)
         {
             ParameterExpression target = Expression.Parameter(typeof(TDeclaring).MakeByRefType());
             ParameterExpression value = Expression.Parameter(typeof(TProperty));
-            return Expression.Lambda<Oy.YamlRefSetter<TDeclaring, TProperty>>(Expression.Assign(Expression.Field(target, field), value), target, value).Compile();
+            return Expression.Lambda<Om.YamlRefSetter<TDeclaring, TProperty>>(Expression.Assign(Expression.Field(target, field), value), target, value).Compile();
         }
 
         return (ref TDeclaring o, TProperty v) =>

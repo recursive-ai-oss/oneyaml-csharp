@@ -23,23 +23,23 @@ partial class Outer
         private global::OneYaml.YamlTypeInfo<global::Item> _Item;
 
         /// <summary>Metadata for <c>Item</c>.</summary>
-        internal global::OneYaml.YamlTypeInfo<global::Item> Item => _Item ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Item>(Options) ?? CreateItem();
+        internal global::OneYaml.YamlTypeInfo<global::Item> Item => _Item ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Item>(Options) ?? CreateItem();
 
         private global::OneYaml.YamlTypeInfo<global::Item> CreateItem()
         {
-            var values = new global::OneYaml.YamlObjectInfoValues<global::Item>
+            var values = new global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<global::Item>
             {
                 ObjectCreator = static () => new global::Item(),
-                PropertyMetadataInitializer = _ => new global::OneYaml.YamlPropertyInfo[]
+                PropertyMetadataInitializer = _ => new global::OneYaml.Serialization.Metadata.YamlPropertyInfo[]
                 {
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Item, string>(new global::OneYaml.YamlPropertyInfoValues<global::Item, string>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Item, string>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Item, string>
                     {
                         Name = "Name",
                         PropertyTypeInfo = this.String,
                         Getter = static o => o.Name,
                         Setter = static (o, v) => o.Name = v,
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Item, global::Item[]>(new global::OneYaml.YamlPropertyInfoValues<global::Item, global::Item[]>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Item, global::Item[]>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Item, global::Item[]>
                     {
                         Name = "Parts",
                         PropertyTypeInfo = this.ItemArray,
@@ -48,27 +48,27 @@ partial class Outer
                     }),
                 },
             };
-            return global::OneYaml.YamlMetadataServices.CreateObjectInfo<global::Item>(Options, values);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateObjectInfo<global::Item>(Options, values);
         }
 
         private global::OneYaml.YamlTypeInfo<string> _String;
 
         /// <summary>Metadata for <c>string</c>.</summary>
-        internal global::OneYaml.YamlTypeInfo<string> String => _String ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<string>(Options) ?? CreateString();
+        internal global::OneYaml.YamlTypeInfo<string> String => _String ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<string>(Options) ?? CreateString();
 
         private global::OneYaml.YamlTypeInfo<string> CreateString()
         {
-            return global::OneYaml.YamlMetadataServices.CreateValueInfo<string>(Options, global::OneYaml.YamlMetadataServices.GetBuiltInConverter<string>(Options));
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateValueInfo<string>(Options, global::OneYaml.Serialization.Metadata.YamlMetadataServices.GetBuiltInConverter<string>(Options));
         }
 
         private global::OneYaml.YamlTypeInfo<global::Item[]> _ItemArray;
 
         /// <summary>Metadata for <c>Item[]</c>.</summary>
-        internal global::OneYaml.YamlTypeInfo<global::Item[]> ItemArray => _ItemArray ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Item[]>(Options) ?? CreateItemArray();
+        internal global::OneYaml.YamlTypeInfo<global::Item[]> ItemArray => _ItemArray ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Item[]>(Options) ?? CreateItemArray();
 
         private global::OneYaml.YamlTypeInfo<global::Item[]> CreateItemArray()
         {
-            return global::OneYaml.YamlMetadataServices.CreateArrayInfo<global::Item>(Options, this.Item);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateArrayInfo<global::Item>(Options, this.Item);
         }
 
         /// <inheritdoc/>
