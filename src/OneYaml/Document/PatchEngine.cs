@@ -542,7 +542,7 @@ internal static class PatchEngine
         ReadOnlySpan<byte> text = s.DecodedScalar(node, out byte[]? rented);
         try
         {
-            return DocState.SameValue(kind, text, expected.Text);
+            return DocState.SameValue(kind, text, expected.Text, s.MaxIntegerDigits);
         }
         finally
         {

@@ -31,8 +31,19 @@ internal static class ScalarRules
         }
     }
 
+    // Converting a long integer costs more than its length, so a literal past the library's digit limit is refused
+    // before any work is done on it. It is an overflow, the failure YamlDotNet gives for a number that does not fit.
+    private static void CheckIntegerLength(string text)
+    {
+        if (text.Length > global::OneYaml.YamlLimits.Default.MaxIntegerDigits + 2)
+        {
+            throw new OverflowException("The integer has more digits than the configured limit.");
+        }
+    }
+
     public static BigInteger ParseInteger(string text)
     {
+        CheckIntegerLength(text);
         if (text.Length > 0 && text.Length < 19 && text[0] != '0' && text[0] != '+' && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long quick) && !(text.Length > 1 && text[0] == '-' && text[1] == '0'))
         {
             return quick;
@@ -267,6 +278,12 @@ internal static class ScalarRules
 
         if (IsDecimalInteger(text) || (text.StartsWith("0x", StringComparison.Ordinal) && text.Length > 2 && IsHex(text.AsSpan(2))))
         {
+            if (text.Length > global::OneYaml.YamlLimits.Default.MaxIntegerDigits + 2)
+            {
+                // Too long to read as a number; it stays text rather than failing a load that asked for no type.
+                return text;
+            }
+
             BigInteger v = text.StartsWith("0x", StringComparison.Ordinal) ? ParseInteger(text) : BigInteger.Parse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
             if (v >= byte.MinValue && v <= byte.MaxValue)
             {

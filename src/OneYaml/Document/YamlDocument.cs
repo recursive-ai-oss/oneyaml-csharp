@@ -158,6 +158,7 @@ public sealed class YamlDocument : IDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
+        CheckRemaining(stream, max);
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -184,6 +185,7 @@ public sealed class YamlDocument : IDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
+        CheckRemaining(stream, max);
         using var buffer = new ByteBuffer(4096);
         while (true)
         {
@@ -198,6 +200,15 @@ public sealed class YamlDocument : IDisposable
         }
 
         return Parse(buffer.WrittenSpan, options);
+    }
+
+    // A stream that knows its length is refused before anything is read or rented.
+    private static void CheckRemaining(Stream stream, long max)
+    {
+        if (stream.CanSeek && stream.Length - stream.Position > max)
+        {
+            throw new YamlException("The input is larger than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+        }
     }
 
     // Stops reading as soon as the input passes the limit, so an endless stream cannot fill memory first.

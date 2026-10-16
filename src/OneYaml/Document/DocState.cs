@@ -17,6 +17,11 @@ internal sealed partial class DocState : IDisposable
     private const int PropWidth = 6;
 
     private byte[] _buf;
+
+    // The integer digit limit of the parse that built this state; duplicate-key checks refuse longer integer keys.
+    private int _maxIntegerDigits = YamlLimits.Default.MaxIntegerDigits;
+
+    internal int MaxIntegerDigits => _maxIntegerDigits;
     private CstNode[] _nodes;
     private int[] _props;
     private DocInfo[] _docs;
@@ -225,6 +230,7 @@ internal sealed partial class DocState : IDisposable
 
     private void Parse(YamlLimits limits)
     {
+        _maxIntegerDigits = limits.MaxIntegerDigits;
         ReadOnlySpan<byte> src = Text;
         // Guess the node count from the text so the array rarely has to grow, and so a text of comments or
         // long scalars does not hold storage it will never fill (a document keeps this array for as long as
@@ -800,13 +806,11 @@ internal sealed partial class DocState : IDisposable
 
         private static int Hash(ReadOnlySpan<byte> name)
         {
-            uint h = 2166136261;
-            foreach (byte b in name)
-            {
-                h = (h ^ b) * 16777619;
-            }
-
-            return (int)(h & 0x7FFFFFFF);
+            // A per-process random seed: with a fixed hash an input can pick anchor names
+            // that all collide and turn every lookup into a linear scan.
+            HashCode h = default;
+            h.AddBytes(name);
+            return h.ToHashCode() & 0x7FFFFFFF;
         }
 
         public void Dispose()
