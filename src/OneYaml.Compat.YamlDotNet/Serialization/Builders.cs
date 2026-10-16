@@ -307,8 +307,10 @@ public sealed class SerializerBuilder : BuilderSkeleton<SerializerBuilder>
         return this;
     }
 
-    /// <summary>Asks for output that a deserializer can read back into the same types.</summary>
+    /// <summary>Asks for output that a deserializer can read back into the same types. Not supported: a serializer built with it throws when it serializes.</summary>
     /// <returns>This builder.</returns>
+    /// <remarks>YamlDotNet adds type tags so the output reads back without a target type; this package does not write them, so it refuses instead of writing output that differs from what the program asked for. The call compiles, so the refusal comes at the first <c>Serialize</c>.</remarks>
+    [Obsolete("EnsureRoundtrip is not supported by OneYaml.Compat.YamlDotNet: a serializer built with it throws NotSupportedException when it serializes, because this package does not write the type tags the option adds. Remove the call and give the target type when reading the output back.", error: false)]
     public SerializerBuilder EnsureRoundtrip()
     {
         Settings.EnsureRoundtrip = true;

@@ -195,15 +195,6 @@ public class SharpYamlApiTests
     }
 
     [Fact]
-    public void WriteIndented_false_still_writes_valid_yaml()
-    {
-        // The real library writes the nested lines flush left, which is not YAML that reads back.
-        Plain value = SyHelp.Sample();
-        string text = Cs.YamlSerializer.Serialize(value, new Cs.YamlSerializerOptions { WriteIndented = false });
-        Assert.Equal(Differ.Dump(value), Differ.Dump(Cs.YamlSerializer.Deserialize<Plain>(text)));
-    }
-
-    [Fact]
     public void Sorted_order_sorts_by_the_written_key()
     {
         string text = Cs.YamlSerializer.Serialize(new Attributed(), new Cs.YamlSerializerOptions { MappingOrder = Cs.YamlMappingOrderPolicy.Sorted, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

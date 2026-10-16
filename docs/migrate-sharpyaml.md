@@ -12,7 +12,7 @@ A build that passes after the swap is not yet a finished migration. Check these 
 | Check | What to look for |
 |---|---|
 | **Compile gaps** | Custom converters (`YamlConverter<T>`, `YamlReader`, `YamlWriter`), the `IYamlOn*` hooks, polymorphism, extension data, generated contexts (`Ctx.Default` does not exist), and the `Model` and `Syntax` namespaces are not provided, so code that uses them fails to build. The [full list](compat/sharpyaml.md#what-is-left-out). |
-| **Runtime rejections** | Some options compile but throw `NotSupportedException` at first use: a schema other than Core, `DuplicateKeyHandling` other than the default, `DictionaryKeyPolicy`, `Populate`, some `DefaultIgnoreCondition` values, `UnsafeAllowDeserializeFromTagTypeName` and a custom `TypeInfoResolver`. The layout options the writer cannot follow are refused too: `BlockSequenceMappingStyle` other than `Default` or `Compact`, `BlockSequenceSequenceStyle` other than `Default` or `Expanded`, and `ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set. `ReferenceHandling` other than `None` is refused when writing; reading follows aliases with any value. |
+| **Runtime rejections** | Some options compile but throw `NotSupportedException` at first use: a schema other than Core, `DuplicateKeyHandling` other than the default, `DictionaryKeyPolicy`, `Populate`, some `DefaultIgnoreCondition` values, `UnsafeAllowDeserializeFromTagTypeName` and a custom `TypeInfoResolver`. The layout options the writer cannot follow are refused too: `BlockSequenceMappingStyle` other than `Default` or `Compact`, `BlockSequenceSequenceStyle` other than `Default` or `Expanded`, `ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set, and `WriteIndented = false`. `ReferenceHandling` other than `None` is refused when writing; reading follows aliases with any value. |
 | **Semantic changes** | Output can differ (whole floats, quoting of YAML 1.1 look-alikes), overflowing numbers are an error, and encodings without a byte order mark are detected. See [Check after the swap](#check-after-the-swap) and the [list of differences](compat/sharpyaml.md). |
 | **Safety limits** | `MaxDepth` defaults to 64, as in SharpYaml, and is never raised above the library limit. For input you do not control, set `Limits = YamlLimits.Untrusted` ([Input you do not control](#input-you-do-not-control)). `Limits` is an addition: SharpYaml has no such option. |
 
@@ -73,7 +73,7 @@ What it does not provide, and the options it rejects, are in [Before you swap](#
 
 Read [the full list of differences](compat/sharpyaml.md), each with a repro. The ones most likely to matter:
 
-- **Output.** Whole floats are written with a fraction (`100.0`), YAML 1.1 look-alikes are quoted (`'y'`, `'on'`), and output with `WriteIndented = false` is valid YAML.
+- **Output.** Whole floats are written with a fraction (`100.0`) and YAML 1.1 look-alikes are quoted (`'y'`, `'on'`).
 - **Numbers that overflow** their type are an error, where SharpYaml turns them into infinity.
 - **Streams in UTF-16 or UTF-32** without a byte order mark are detected, as YAML 1.2 says.
 - **Exceptions.** Syntax errors are `SyntaxErrorException`; every other error is a `YamlException`.
@@ -137,7 +137,7 @@ record Service(string Name, int Replicas);
 | `DuplicateKeyHandling` | a repeated key is always an error; `YamlDocumentOptions.AllowDuplicateKeys` lets you edit such a file |
 | `Schema`, `UseSchema` | the Core schema; `MergeKeys = true` for `<<` |
 | `ReferenceHandling = Preserve` to read aliases | aliases are read by default, as shared instances, within the alias budget |
-| `WriteIndented = false` | no equivalent: output is block style |
+| `WriteIndented = false` | no equivalent: output is block style; the compat package throws when writing with it |
 | `[YamlSerializable]` on a `YamlSerializerContext` | the same shape, `OneYaml.YamlSerializerContext` ([Source generation](serializer.md#source-generation-and-native-aot)) |
 | `YamlConverter<T>` with `YamlReader` and `YamlWriter` | `YamlConverter<T>` with `Utf8YamlReader` and `Utf8YamlEmitter` ([Converters](serializer.md#converters)) |
 | `[YamlPolymorphic]`, `[YamlDerivedType]` | the same names, with a key or a tag discriminator ([Polymorphism](serializer.md#polymorphism)) |

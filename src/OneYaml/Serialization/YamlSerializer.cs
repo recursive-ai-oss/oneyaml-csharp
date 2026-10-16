@@ -338,7 +338,7 @@ public static partial class YamlSerializer
             reader.EndStreamAfterSingleDocument();
             return value;
         }
-        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        catch (YamlException e) when (reader.Locate(e) || YamlException.Tag(e, info.Options.SourceName))
         {
             throw;
         }
@@ -361,6 +361,10 @@ public static partial class YamlSerializer
             reader.EndDocument();
             reader.EndStreamAfterSingleDocument();
             return value;
+        }
+        catch (YamlException e) when (reader.Locate(e))
+        {
+            throw;
         }
         finally
         {
@@ -420,7 +424,7 @@ public static partial class YamlSerializer
 
             return all;
         }
-        catch (YamlException e) when (YamlException.Tag(e, options.SourceName))
+        catch (YamlException e) when (reader.Locate(e) || YamlException.Tag(e, options.SourceName))
         {
             throw;
         }

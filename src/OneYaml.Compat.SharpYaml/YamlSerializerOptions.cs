@@ -102,7 +102,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>When members are left out of the output.</summary>
     public YamlIgnoreCondition DefaultIgnoreCondition { get; init; }
 
-    /// <summary>Whether the output is indented. The output is always valid block YAML, so the value has no effect here.</summary>
+    /// <summary>Whether the output is indented. The writer always writes indented block YAML, so <see langword="false"/> is an error when writing (reading is not affected).</summary>
     public bool WriteIndented { get; init; } = true;
 
     /// <summary>The number of spaces of one indent level, from 1 to 8.</summary>
@@ -282,6 +282,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
         BlockSequenceMappingStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Compact) ? nameof(BlockSequenceMappingStyle)
         : BlockSequenceSequenceStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Expanded) ? nameof(BlockSequenceSequenceStyle)
         : ScalarStylePreferences is { PreferPlainStyle: true } or { PreferQuotedForAmbiguousScalars: true } ? nameof(ScalarStylePreferences)
+        : !WriteIndented ? nameof(WriteIndented)
         : null;
 
     internal static NotSupportedException Unsupported(string what) =>

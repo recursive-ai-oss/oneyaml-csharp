@@ -717,14 +717,14 @@ public class WriterTests
     [Fact]
     public void The_emitter_refuses_calls_in_the_wrong_order()
     {
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartMapping(); e.WriteStartSequence(); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartMapping(); e.WritePropertyName("a"); e.WritePropertyName("b"); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartMapping(); e.WritePropertyName("a"); e.WriteEndMapping(); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartSequence(); e.WriteEndMapping(); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteEndSequence(); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteNullValue(); e.WriteNullValue(); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartSequence(); e.WritePropertyName("a"); }));
-        Assert.Throws<YamlException>(() => Emit(e => { e.WriteStartMapping(); e.WriteBinaryValue([1]); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartMapping(); e.WriteStartSequence(); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartMapping(); e.WritePropertyName("a"); e.WritePropertyName("b"); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartMapping(); e.WritePropertyName("a"); e.WriteEndMapping(); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartSequence(); e.WriteEndMapping(); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteEndSequence(); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteNullValue(); e.WriteNullValue(); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartSequence(); e.WritePropertyName("a"); }));
+        Assert.Throws<InvalidOperationException>(() => Emit(e => { e.WriteStartMapping(); e.WriteBinaryValue([1]); }));
         Assert.Throws<ArgumentNullException>(() => new Utf8YamlEmitter(null!));
         Assert.Throws<ArgumentNullException>(() => Emit(e => e.WritePropertyName((string)null!)));
     }

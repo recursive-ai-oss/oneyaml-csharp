@@ -6,7 +6,7 @@ using Xunit;
 namespace OneYaml.Tests.Writing;
 
 /// <summary>
-/// Random call sequences against the public emitter: a bad order is refused with a <see cref="YamlException"/>
+/// Random call sequences against the public emitter: a bad order is refused with an <see cref="InvalidOperationException"/>, bad data with a <see cref="YamlException"/>,
 /// and nothing else, and every sequence the emitter accepts to the end is text that two other parsers read the same.
 /// </summary>
 public class EmitterSequenceTests
@@ -38,7 +38,7 @@ public class EmitterSequenceTests
                     call(emitter);
                 }
             }
-            catch (YamlException)
+            catch (Exception e) when (e is YamlException or InvalidOperationException)
             {
                 failed = true;
                 refused++;

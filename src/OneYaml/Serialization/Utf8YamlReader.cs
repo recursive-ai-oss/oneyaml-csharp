@@ -480,6 +480,11 @@ public ref partial struct Utf8YamlReader
     // An error at a given offset, such as the start of a key. The path to the node is worked out here, from
     // the text, because an error is the only time it is needed. A limit error carries none: it can be about
     // a nesting too deep to write out.
+    // For an exception filter on the entry points: an exception a converter made with the public constructors gets the
+    // position the reader stands at. It never returns true, so nothing is caught.
+    internal readonly bool Locate(YamlException e) =>
+        e.Locate(_src, Start, Type is YamlTokenType.MappingStart or YamlTokenType.SequenceStart, QuietErrors);
+
     internal readonly YamlException ErrorAt(YamlErrorCategory category, string message, int offset, bool atCollection = false) =>
         QuietErrors ? new YamlException(message, category, 0, 0, offset) : YamlException.Located(category, message, _src, offset, category == YamlErrorCategory.Limit ? null : ErrorPath.Find(_src, offset, atCollection));
 

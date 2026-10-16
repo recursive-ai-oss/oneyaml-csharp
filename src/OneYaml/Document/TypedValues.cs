@@ -1,5 +1,8 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using OneYaml.Emitting;
 using OneYaml.Text;
 
 namespace OneYaml.Documents;
@@ -78,6 +81,12 @@ internal static class TypedValues
     [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Same switch as above: with it off, this method throws before any reflection runs.")]
     internal static ValueTree OfObject(object value, YamlLimits limits, bool reflectionEnabled)
     {
+        if (value is JsonNode or JsonElement)
+        {
+            // The System.Text.Json types have converters that need no reflection, and a number keeps its text.
+            return OfJson(value, limits);
+        }
+
         Type type = value.GetType();
         if (!reflectionEnabled)
         {
@@ -92,6 +101,39 @@ internal static class TypedValues
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
         {
             throw new ArgumentException($"A value of type {type.Name} has no YAML form: {ex.Message} Use the overload that takes a YamlTypeInfo for this type.", nameof(value), ex);
+        }
+        catch (YamlException ex)
+        {
+            throw InWrittenValue(ex);
+        }
+    }
+
+    private static ValueTree OfJson(object value, YamlLimits limits)
+    {
+        try
+        {
+            using var buffer = new PooledBufferWriter();
+            YamlSerializerOptions options = YamlSerializerOptions.Default;
+            Utf8YamlEmitter emitter = Utf8YamlEmitter.Rent(buffer, options);
+            try
+            {
+                if (value is JsonNode node)
+                {
+                    JsonTrees.WriteNode(emitter, node);
+                }
+                else
+                {
+                    JsonTrees.WriteElement(emitter, (JsonElement)value);
+                }
+
+                emitter.Finish();
+            }
+            finally
+            {
+                Utf8YamlEmitter.Return(emitter);
+            }
+
+            return Read(buffer.ToArray(), limits);
         }
         catch (YamlException ex)
         {

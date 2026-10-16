@@ -184,6 +184,13 @@ internal sealed class ValueTree
             return;
         }
 
+        if (value is JsonNode)
+        {
+            // Before the collection checks: a JsonObject or JsonArray is also an enumerable, and would read as pairs.
+            AppendTree(TypedValues.OfObject(value, limits));
+            return;
+        }
+
         if (value is IDictionary dict)
         {
             Push(stack, maxDepth, new Frame { Entries = dict.GetEnumerator() }, VKind.Mapping);

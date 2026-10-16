@@ -5,6 +5,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace OneYaml;
 
@@ -137,6 +139,11 @@ internal static class GenericWriter
         }
 
         if (TryWriteScalar(writer, value, options))
+        {
+            return null;
+        }
+
+        if (TryWriteJson(writer, value, options))
         {
             return null;
         }
@@ -341,6 +348,11 @@ internal static class GenericWriter
             return;
         }
 
+        if (TryWriteJson(writer, value, options))
+        {
+            return;
+        }
+
         Type type = value.GetType();
         if (!HasCustomConverter(options, type))
         {
@@ -378,11 +390,14 @@ internal static class GenericWriter
             throw Utf8YamlEmitter.Misuse("A mapping key cannot be null.");
         }
 
+        writer.WritingKey = true;
         if (!TryWriteScalar(writer, key, options))
         {
             // Not a type the walker knows as a scalar: its converter writes the key, or fails because it is no scalar.
             options.GetTypeInfo(key.GetType()).WriteBoxed(writer, key);
         }
+
+        writer.WritingKey = false;
     }
 
     // The scalars of a load into `object`, and the other types that have a converter without metadata.
@@ -438,6 +453,27 @@ internal static class GenericWriter
         }
 
         leaf.WriteBoxed(writer, value, options);
+        return true;
+    }
+
+    // A System.Text.Json value held in an object is written by its runtime type, the way a member of that type is. Without
+    // this, a JsonObject would be walked as a sequence of pairs and a JsonValue reflected as its internal class.
+    private static bool TryWriteJson(Utf8YamlEmitter writer, object value, YamlSerializerOptions options)
+    {
+        if (value is not (JsonNode or JsonElement) || (options.Converters.Count != 0 && HasCustomConverter(options, value.GetType())))
+        {
+            return false;
+        }
+
+        if (value is JsonNode node)
+        {
+            JsonTrees.WriteNode(writer, node);
+        }
+        else
+        {
+            JsonTrees.WriteElement(writer, (JsonElement)value);
+        }
+
         return true;
     }
 

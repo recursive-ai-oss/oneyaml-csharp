@@ -11,14 +11,14 @@ public class YamlException : Exception
 {
     /// <summary>Creates an exception with a default message and no position.</summary>
     public YamlException()
-        : this("A YAML error occurred.", YamlErrorCategory.Syntax, 0, 0, -1)
+        : this("A YAML error occurred.", YamlErrorCategory.None, 0, 0, -1, library: false)
     {
     }
 
     /// <summary>Creates an exception with a message and no position.</summary>
     /// <param name="message">The message.</param>
     public YamlException(string message)
-        : this(message, YamlErrorCategory.Syntax, 0, 0, -1)
+        : this(message, YamlErrorCategory.None, 0, 0, -1, library: false)
     {
     }
 
@@ -26,7 +26,7 @@ public class YamlException : Exception
     /// <param name="message">The message.</param>
     /// <param name="innerException">The exception that caused this one.</param>
     public YamlException(string message, Exception? innerException)
-        : this(message, YamlErrorCategory.Syntax, 0, 0, -1, null, innerException)
+        : this(message, YamlErrorCategory.None, 0, 0, -1, null, innerException, library: false)
     {
     }
 
@@ -40,34 +40,49 @@ public class YamlException : Exception
         long offset,
         int? operationIndex = null,
         Exception? innerException = null,
-        string? path = null)
+        string? path = null,
+        bool library = true)
         : base(message, innerException)
     {
-        Path = path;
-        Category = category;
-        Line = line;
-        Column = column;
-        Offset = offset;
+        _path = path;
+        _category = category;
+        _line = line;
+        _column = column;
+        _offset = offset;
+        _library = library;
         OperationIndex = operationIndex;
     }
 
-    /// <summary>The kind of error.</summary>
-    public YamlErrorCategory Category { get; init; }
+    // Whether the library made this exception, with its position already worked out. One made by the public
+    // constructors, in a converter for example, has none until the serializer fills it in.
+    private readonly bool _library;
+    private YamlErrorCategory _category;
+    private int _line;
+    private int _column;
+    private long _offset;
+    private string? _path;
+    private string? _located;
+
+    /// <summary>
+    /// The kind of error. The public constructors leave it <see cref="YamlErrorCategory.None"/>; when the serializer
+    /// catches such an exception from a converter it reports <see cref="YamlErrorCategory.Binding"/>.
+    /// </summary>
+    public YamlErrorCategory Category { get => _category; init => _category = value; }
 
     /// <summary>
     /// The 1-based line of the error, counting LF, CRLF and a lone CR as one break each, or 0 when
     /// the error has no position.
     /// </summary>
-    public int Line { get; init; }
+    public int Line { get => _line; init => _line = value; }
 
     /// <summary>The 1-based column of the error in decoded characters (a byte order mark is not counted), or 0.</summary>
-    public int Column { get; init; }
+    public int Column { get => _column; init => _column = value; }
 
     /// <summary>
     /// The byte offset of the error, or -1 when unknown. For text errors it counts bytes of the UTF-8
     /// text the parser read; for a malformed UTF-16 or UTF-32 input it counts bytes of the original input.
     /// </summary>
-    public long Offset { get; init; }
+    public long Offset { get => _offset; init => _offset = value; }
 
     /// <summary>
     /// A JSON Pointer (RFC 6901) to the node the error is about, such as <c>/endpoints/1/weight</c>; the
@@ -75,7 +90,7 @@ public class YamlException : Exception
     /// syntax error or an unreadable encoding, or when the node is under a mapping key that is a collection
     /// or an alias, which has no name to write.
     /// </summary>
-    public string? Path { get; init; }
+    public string? Path { get => _path; init => _path = value; }
 
     /// <summary>
     /// The name of the input given in <see cref="YamlSerializerOptions.SourceName"/> or <see cref="YamlDocumentOptions.SourceName"/>,
@@ -90,7 +105,7 @@ public class YamlException : Exception
     /// line, column and path when they are known. Text taken from the input (values, keys, paths) is cut
     /// to a short excerpt with control characters escaped; <see cref="Path"/> holds the full pointer.
     /// </summary>
-    public override string Message => _sourceName is null ? base.Message : _sourceName + ": " + base.Message;
+    public override string Message => _sourceName is null ? _located ?? base.Message : _sourceName + ": " + (_located ?? base.Message);
 
     /// <summary>For a patch, the zero-based index of the operation that failed; otherwise <see langword="null"/>.</summary>
     public int? OperationIndex { get; init; }
@@ -218,6 +233,36 @@ public class YamlException : Exception
         return path is { Length: > 0 }
             ? $"{message} (line {line}, column {column}, path {Excerpt(path, MessageExcerpt)})"
             : $"{message} (line {line}, column {column})";
+    }
+
+    // Gives an exception that a converter threw the position of the reader, as System.Text.Json does for a JsonException.
+    // Used in an exception filter, so it never catches. An exception that has a position, a path or a library origin is left alone.
+    internal bool Locate(ReadOnlySpan<byte> utf8, int offset, bool atCollection, bool quiet)
+    {
+        if (_library || _line != 0 || _path is not null)
+        {
+            return false;
+        }
+
+        if (_category == YamlErrorCategory.None)
+        {
+            _category = YamlErrorCategory.Binding;
+        }
+
+        if (quiet)
+        {
+            // A try-read never shows the error, so the line and path lookup is skipped.
+            _offset = offset;
+            return false;
+        }
+
+        YamlException at = Located(_category, base.Message, utf8, offset, ErrorPath.Find(utf8, offset, atCollection));
+        _line = at._line;
+        _column = at._column;
+        _offset = at._offset;
+        _path = at._path;
+        _located = at.Message;
+        return false;
     }
 
     // Marks an exception with the input's name while it passes; used in an exception filter, so it never catches.

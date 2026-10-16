@@ -255,7 +255,9 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
         writer.Begin(isMapping: true, reference);
         foreach (KeyValuePair<TKey, TValue> entry in entries)
         {
+            writer.WritingKey = true;
             _key.WriteValue(writer, entry.Key, options);
+            writer.WritingKey = false;
             _value.WriteValue(writer, entry.Value, options);
         }
 

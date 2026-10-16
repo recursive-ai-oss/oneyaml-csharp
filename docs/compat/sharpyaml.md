@@ -39,7 +39,7 @@ Fail at first use with `NotSupportedException` (naming the option): `Schema`/`Us
 `DefaultIgnoreCondition` of `Always`/`WhenWriting`/`WhenReading`, `UnsafeAllowDeserializeFromTagTypeName`, and a custom `TypeInfoResolver`.
 The writer has one layout, so the layout options are refused the same way unless they ask for that layout:
 `BlockSequenceMappingStyle` other than `Default` or `Compact`, `BlockSequenceSequenceStyle` other than `Default` or `Expanded`,
-and `ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set. `ReferenceHandling` other than
+`ScalarStylePreferences` with `PreferPlainStyle` or `PreferQuotedForAmbiguousScalars` set, and `WriteIndented = false`. `ReferenceHandling` other than
 `None` is refused when writing, because the writer writes a shared object in full each time and writes no anchors; reading
 follows aliases with any value.
 
@@ -53,7 +53,6 @@ follows aliases with any value.
 
 | Difference | Repro |
 |---|---|
-| Output with `WriteIndented = false` is malformed YAML in the real library (it writes valid YAML at `IndentSize` 4); here it is valid | `Serialize(new { A = new { B = 1 } }, new() { WriteIndented = false })` |
 | Empty or comment-only text read into a value type throws `NullReferenceException` in the real library; here it gives the default value, as a null member does | `Deserialize<int>("")` and `Deserialize<int>("# note")` give 0 |
 | `Uri` cannot be read or written by the real library | `Deserialize<Uri>("http://x/y")` |
 | The real library rejects about 70 valid YAML 1.2 documents (a bare document after `...`, `?x` as a plain scalar, anchor names containing `:`, and others) | yts `2EBW`-style cases; see `CorpusTests` |
@@ -83,7 +82,7 @@ follows aliases with any value.
 | Error marks are a point (`Start == End`), normally at the real library's line and column but not always | `Deserialize<object>("a: [")` |
 | Syntax errors are `SyntaxErrorException`; every other category is `YamlException` (the real `SemanticErrorException` is never raised) | `Deserialize<object>("a: [")` is a syntax error; `Deserialize<int>("x")` is a `YamlException` |
 | `Stream` input is read to the end, with UTF-8, UTF-16 and UTF-32 detected, and left open | `Deserialize<Plain>(stream)` |
-| `BlockSequenceMappingStyle`, `BlockSequenceSequenceStyle` and `ScalarStylePreferences` are accepted at their default values and refused at any value that asks for another layout | `Serialize(x, new() { BlockSequenceMappingStyle = YamlSequenceItemStyle.Expanded })` throws `NotSupportedException` |
+| `BlockSequenceMappingStyle`, `BlockSequenceSequenceStyle`, `ScalarStylePreferences` and `WriteIndented` are accepted at their default values and refused at any value that asks for another layout | `Serialize(x, new() { BlockSequenceMappingStyle = YamlSequenceItemStyle.Expanded })` throws `NotSupportedException` |
 | `GetTypeInfo` returns a nullable `YamlTypeInfo` | |
 | Only the first document is read, as in the real library; the rest of the stream is not parsed unless the first fails | `Deserialize<Plain>("a: 1\n---\n[")` |
 

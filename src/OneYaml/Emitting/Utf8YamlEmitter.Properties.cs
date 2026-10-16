@@ -26,10 +26,24 @@ public sealed partial class Utf8YamlEmitter
     /// <param name="tag">The resolved tag, exactly as <see cref="Utf8YamlReader.Tag"/> or <see cref="YamlNode.Tag"/> gives it.</param>
     /// <exception cref="ArgumentNullException"><paramref name="tag"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException"><paramref name="tag"/> is empty, too long, or has an unpaired surrogate.</exception>
-    /// <exception cref="YamlException">The next value already has a tag.</exception>
+    /// <exception cref="InvalidOperationException">The next value already has a tag.</exception>
     /// <remarks>The tag is never resolved or rewritten: a shorthand such as <c>!!str</c> or <c>!e!widget</c> names a local tag
-    /// here, because that is what a reader returns for it. A tag applies to a value, not to a mapping key; writing a key after it,
-    /// or ending a collection, is an error.</remarks>
+    /// here, because that is what a reader returns for it. To write the core string tag, pass its full form,
+    /// <c>tag:yaml.org,2002:str</c>, not <c>!!str</c>: the text <c>!!str</c> is a local tag with two bangs and is written as <c>!%21str</c>.
+    /// A tag applies to a value, not to a mapping key; writing a key after it, or ending a collection, is an error.</remarks>
+    /// <example>
+    /// <code language="csharp">
+    /// var buffer = new ArrayBufferWriter&lt;byte&gt;();
+    /// var emitter = new Utf8YamlEmitter(buffer);
+    /// emitter.WriteStartMapping();
+    /// emitter.WritePropertyName("id");
+    /// emitter.WriteTag("tag:yaml.org,2002:str");
+    /// emitter.WriteStringValue("1");
+    /// emitter.WriteEndMapping();
+    /// Console.Write(Encoding.UTF8.GetString(buffer.WrittenSpan));
+    /// // id: !!str '1'
+    /// </code>
+    /// </example>
     public void WriteTag(string tag)
     {
         ArgumentNullException.ThrowIfNull(tag);
@@ -45,7 +59,7 @@ public sealed partial class Utf8YamlEmitter
 
         if (_hasTag)
         {
-            throw Misuse("The next value already has a tag.");
+            throw State("The next value already has a tag.");
         }
 
         byte[] utf8;
@@ -95,13 +109,13 @@ public sealed partial class Utf8YamlEmitter
     /// <param name="name">The anchor name, without the <c>&amp;</c>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The name is empty, too long, or has a space, a control character, a flow indicator (<c>, [ ] { }</c>) or an unpaired surrogate.</exception>
-    /// <exception cref="YamlException">The next value already has an anchor.</exception>
+    /// <exception cref="InvalidOperationException">The next value already has an anchor.</exception>
     public void WriteAnchor(string name)
     {
         byte[] utf8 = EncodeAnchorName(name);
         if (_hasAnchor)
         {
-            throw Misuse("The next value already has an anchor.");
+            throw State("The next value already has an anchor.");
         }
 
         if (_propsLength != 0)
@@ -118,20 +132,20 @@ public sealed partial class Utf8YamlEmitter
     /// <param name="name">The anchor name, without the <c>*</c>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">The name is empty, too long, or has a space, a control character, a flow indicator or an unpaired surrogate.</exception>
-    /// <exception cref="YamlException">A value is not allowed here, a tag or anchor is waiting for its value (an alias takes none), or a mapping expects a key (an alias cannot be one).</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here, a tag or anchor is waiting for its value (an alias takes none), or a mapping expects a key (an alias cannot be one).</exception>
     public void WriteAlias(string name)
     {
         byte[] utf8 = EncodeAnchorName(name);
         if (_propsLength != 0)
         {
             ClearProperties();
-            throw Misuse("An alias cannot have a tag or an anchor.");
+            throw State("An alias cannot have a tag or an anchor.");
         }
 
         Place place = BeginScalarLead(out _, out Lead lead);
         if (place == Place.MapKey)
         {
-            throw Misuse("An alias cannot be a mapping key.");
+            throw KeyState("An alias cannot be a mapping key.");
         }
 
         WriteLead(lead);
@@ -217,10 +231,10 @@ public sealed partial class Utf8YamlEmitter
         _hasAnchor = false;
     }
 
-    private YamlException PendingProperties()
+    private InvalidOperationException PendingProperties()
     {
         ClearProperties();
-        return Misuse("A tag or anchor was written and no value followed it.");
+        return State("A tag or anchor was written and no value followed it.");
     }
 
     // A collection with a tag or anchor: they follow the key's colon or the dash on the same line, and the entries start on the next.
@@ -242,7 +256,7 @@ public sealed partial class Utf8YamlEmitter
         if (place == Place.MapKey)
         {
             ClearProperties();
-            throw Misuse("A tag or anchor applies to a value, not to a mapping key.");
+            throw KeyState("A tag or anchor applies to a value, not to a mapping key.");
         }
 
         WriteLead(lead);
