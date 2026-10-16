@@ -396,6 +396,12 @@ public class ReaderEdgeTests
     [InlineData("[a:{}]\n", 4)]
     [InlineData("[a:[]]\n", 4)]
     [InlineData("{x: 1, b:{c: d}}\n", 10)]
+    [InlineData("{? a:{}}\n", 6)]
+    [InlineData("[? a:{}]\n", 6)]
+    [InlineData("{? a:[]}\n", 6)]
+    [InlineData("{:{}}\n", 3)]
+    [InlineData("[:{}]\n", 3)]
+    [InlineData("{:[]}\n", 3)]
     public void A_colon_after_a_plain_key_cannot_run_into_a_collection(string yaml, int column)
     {
         YamlException ex = Fails(yaml);
@@ -415,6 +421,11 @@ public class ReaderEdgeTests
     [InlineData("{a:}\n")]
     [InlineData("{a:, b: 1}\n")]
     [InlineData("[a: []]\n")]
+    [InlineData("{? \"a\":{}}\n")]
+    [InlineData("{? [a]:{}}\n")]
+    [InlineData("{? a: {}}\n")]
+    [InlineData("{: {}}\n")]
+    [InlineData("[: []]\n")]
     public void A_collection_value_after_a_quoted_key_or_with_white_space_is_still_read(string yaml)
     {
         Events(yaml);

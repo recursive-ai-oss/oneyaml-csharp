@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using Oy = global::OneYaml;
 
 namespace OneYaml.Compat.SharpYaml;
 
@@ -9,13 +10,24 @@ namespace OneYaml.Compat.SharpYaml;
 // substitutes U+FFFD would turn damaged input into different, valid-looking text.
 internal static class StreamText
 {
-    public static string Read(Stream stream, string? sourceName)
+    public static string Read(Stream stream, string? sourceName, long maxBytes = long.MaxValue)
     {
         ArgumentNullException.ThrowIfNull(stream);
         byte[] bytes;
         using (var copy = new MemoryStream())
         {
-            stream.CopyTo(copy);
+            // Stop one byte past the limit: the stream may be endless, and the engine reports the excess.
+            byte[] chunk = new byte[8192];
+            int n;
+            while ((n = stream.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                copy.Write(chunk, 0, n);
+                if (copy.Length > maxBytes)
+                {
+                    throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({maxBytes}).") { Category = Oy.YamlErrorCategory.Limit }, default, sourceName);
+                }
+            }
+
             bytes = copy.ToArray();
         }
 

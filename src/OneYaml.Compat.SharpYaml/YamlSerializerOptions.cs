@@ -9,7 +9,7 @@ using Oy = global::OneYaml;
 
 namespace OneYaml.Compat.SharpYaml;
 
-/// <summary>Hints about the style of scalars in the output. This package cannot follow them: setting either to true is an error when the options are first used.</summary>
+/// <summary>Hints about the style of scalars in the output. This package cannot follow them: setting either to true is an error when writing (reading is not affected).</summary>
 public sealed class YamlScalarStylePreferences
 {
     /// <summary>Prefer plain scalars where they are valid.</summary>
@@ -115,10 +115,10 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>The order in which members are written.</summary>
     public YamlMappingOrderPolicy MappingOrder { get; init; }
 
-    /// <summary>The layout of mappings in block sequences. Output always starts such a mapping on the line of the dash, so any other value is an error when the options are first used.</summary>
+    /// <summary>The layout of mappings in block sequences. Output always starts such a mapping on the line of the dash, so any other value is an error when writing (reading is not affected).</summary>
     public YamlSequenceItemStyle BlockSequenceMappingStyle { get; init; } = YamlSequenceItemStyle.Compact;
 
-    /// <summary>The layout of sequences in block sequences. Output always puts a sequence inside a sequence in the layout described by <see cref="YamlSequenceItemStyle.Expanded"/>, so any other value is an error when the options are first used.</summary>
+    /// <summary>The layout of sequences in block sequences. Output always puts a sequence inside a sequence in the layout described by <see cref="YamlSequenceItemStyle.Expanded"/>, so any other value is an error when writing (reading is not affected).</summary>
     public YamlSequenceItemStyle BlockSequenceSequenceStyle { get; init; } = YamlSequenceItemStyle.Expanded;
 
     /// <summary>The schema used when <see cref="UseSchema"/> is set. Only <see cref="YamlSchemaKind.Core"/> is supported.</summary>
@@ -133,7 +133,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>Allows types to be named by tags. Not supported by this package: true is an error.</summary>
     public bool UnsafeAllowDeserializeFromTagTypeName { get; init; }
 
-    /// <summary>Hints about the style of scalars. This package cannot follow them: setting either to true is an error when the options are first used.</summary>
+    /// <summary>Hints about the style of scalars. This package cannot follow them: setting either to true is an error when writing (reading is not affected).</summary>
     public YamlScalarStylePreferences ScalarStylePreferences { get; init; } = new();
 
     /// <summary>How shared objects are read and written. Aliases are always followed when reading, within the limits. Writing cannot keep sharing, so a value other than <see cref="YamlReferenceHandling.None"/> is an error when writing.</summary>
@@ -213,7 +213,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
             Limits = limits,
             TypeInfoResolver = resolver,
         };
-        if (ReferenceHandling != YamlReferenceHandling.None)
+        if (ReferenceHandling != YamlReferenceHandling.None || UnsupportedLayout() is not null)
         {
             s_noWrite.Add(made, this);
         }
@@ -223,10 +223,18 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
 
     internal static void RefuseReferenceHandlingWrite(Oy.YamlTypeInfo info)
     {
-        if (s_noWrite.TryGetValue(info.Options, out _))
+        if (!s_noWrite.TryGetValue(info.Options, out object? made))
+        {
+            return;
+        }
+
+        var options = (YamlSerializerOptions)made;
+        if (options.ReferenceHandling != YamlReferenceHandling.None)
         {
             throw new NotSupportedException("ReferenceHandling other than None is not supported when writing with OneYaml.Compat.SharpYaml: shared objects are written in full each time and no anchors are written. Set ReferenceHandling to None to write (reading follows aliases with either value). See docs/compat/sharpyaml.md for what is and what is not covered.");
         }
+
+        throw new NotSupportedException($"{options.UnsupportedLayout()} at a non-default value is not supported when writing with OneYaml.Compat.SharpYaml: the writer has one layout. Leave it at its default value to write (reading is not affected). See docs/compat/sharpyaml.md for what is and what is not covered.");
     }
 
     // An option the engine cannot honour is refused loudly: silently ignoring it would change what the program means.
@@ -266,24 +274,15 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
         {
             throw Unsupported(nameof(TypeInfoResolver));
         }
-
-        // These only choose a layout, and the writer has one layout. Taking them and writing something else would hide
-        // that the output differs from what the program asked for.
-        if (BlockSequenceMappingStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Compact))
-        {
-            throw Unsupported(nameof(BlockSequenceMappingStyle));
-        }
-
-        if (BlockSequenceSequenceStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Expanded))
-        {
-            throw Unsupported(nameof(BlockSequenceSequenceStyle));
-        }
-
-        if (ScalarStylePreferences is { PreferPlainStyle: true } or { PreferQuotedForAmbiguousScalars: true })
-        {
-            throw Unsupported(nameof(ScalarStylePreferences));
-        }
     }
+
+    // These options only choose a layout, and the writer has one layout. Reading is not affected, so one options object
+    // can be shared for reading; writing with a different layout than asked for would hide that the output differs.
+    private string? UnsupportedLayout() =>
+        BlockSequenceMappingStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Compact) ? nameof(BlockSequenceMappingStyle)
+        : BlockSequenceSequenceStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Expanded) ? nameof(BlockSequenceSequenceStyle)
+        : ScalarStylePreferences is { PreferPlainStyle: true } or { PreferQuotedForAmbiguousScalars: true } ? nameof(ScalarStylePreferences)
+        : null;
 
     internal static NotSupportedException Unsupported(string what) =>
         new($"{what} is not supported by OneYaml.Compat.SharpYaml. Leave it at its default value. See docs/compat/sharpyaml.md for what is and what is not covered.");

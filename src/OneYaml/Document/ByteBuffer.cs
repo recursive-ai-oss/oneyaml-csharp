@@ -169,6 +169,24 @@ internal struct AliasBudget
     private readonly string Named() =>
         $" YamlLimits: AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}.";
 
+    /// <summary>
+    /// Charges for using an alias whose target a caller shares instead of copying: what the target stands for
+    /// once its own aliases are followed, so that sharing does not hide an expansion from the budget.
+    /// </summary>
+    /// <param name="state">The document.</param>
+    /// <param name="alias">The alias node (for the error position).</param>
+    /// <param name="target">The node it refers to.</param>
+    public void ChargeShared(DocState state, int alias, int target)
+    {
+        NodeReplay.ExpansionSizes sizes = NodeReplay.SizesOf(state);
+        _nodes -= sizes.Nodes[target];
+        _bytes -= Math.Max(sizes.Bytes[target], 1);
+        if (_nodes < 0 || _bytes < 0)
+        {
+            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(alias).Start);
+        }
+    }
+
     /// <summary>Charges for following an alias to <paramref name="target"/>.</summary>
     /// <param name="state">The document.</param>
     /// <param name="alias">The alias node (for the error position).</param>

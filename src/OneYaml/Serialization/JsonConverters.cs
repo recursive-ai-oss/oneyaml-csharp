@@ -40,13 +40,21 @@ internal static class JsonTrees
         public string? Key;
     }
 
-    // From the value of an untyped load (numbers as JsonNumber) to a node, or null for a YAML null. The nodes are built
-    // directly: going through JSON text and a parse costs several times the memory for a tree of small values.
+    // From the value of an untyped load (numbers as JsonNumber) to a node, or null for a YAML null. A single value and
+    // a small tree are built directly: going through JSON text and a parse costs several times the memory for them.
     public static JsonNode? ToNode(object? tree, in Utf8YamlReader reader)
     {
         if (tree is not (Dictionary<string, object?> or List<object?>))
         {
             return Leaf(tree, in reader);
+        }
+
+        // A larger tree goes through JSON text and one parse: the parse makes the nodes only when they are touched, which costs
+        // far less than building each one, while the writer and the buffer cost a fixed amount a small tree should not pay.
+        if (!IsSmall(tree))
+        {
+            ArrayBufferWriter<byte> json = ToJson(tree, in reader);
+            return JsonNode.Parse(json.WrittenSpan, documentOptions: s_documentOptions);
         }
 
         var stack = new List<NodeBuildFrame>();
@@ -95,6 +103,42 @@ internal static class JsonTrees
 
         return result;
     }
+
+    // Whether a tree holds no more than SmallTree values, counting a shared value each time it is used. The count stops
+    // at the budget, and every level of nesting costs at least one value, so the recursion is at most SmallTree deep.
+    private static bool IsSmall(object? tree)
+    {
+        int budget = SmallTree;
+        return Fits(tree, ref budget);
+    }
+
+    private static bool Fits(object? tree, ref int budget)
+    {
+        if (tree is Dictionary<string, object?> map)
+        {
+            foreach (object? child in map.Values)
+            {
+                if (--budget < 0 || !Fits(child, ref budget))
+                {
+                    return false;
+                }
+            }
+        }
+        else if (tree is List<object?> list)
+        {
+            foreach (object? child in list)
+            {
+                if (--budget < 0 || !Fits(child, ref budget))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private const int SmallTree = 8;
 
     private static void PushNode(List<NodeBuildFrame> stack, object? tree, in Utf8YamlReader reader)
     {
@@ -272,8 +316,9 @@ internal static class JsonTrees
         public JsonElement.ArrayEnumerator Array;
         public bool IsObject;
 
-        // The names written so far in an object: the element type may hold one twice, which YAML cannot.
-        public HashSet<string>? Names;
+        // The element type may hold a name twice, which YAML cannot: the names written so far are compared by scanning
+        // the object for the first few and by a set after that.
+        public int Written;
     }
 
     private sealed class NodeFrame
@@ -295,48 +340,171 @@ internal static class JsonTrees
         }
 
         var stack = new List<ElementFrame>();
+        NameSet?[]? sets = null;
         OpenElement(stack, writer, element);
-        while (stack.Count > 0)
+        try
         {
-            ElementFrame top = stack[^1];
-            JsonElement child;
-            if (top.IsObject)
+            while (stack.Count > 0)
             {
-                if (!top.Object.MoveNext())
+                ElementFrame top = stack[^1];
+                JsonElement child;
+                if (top.IsObject)
                 {
-                    writer.WriteEndMapping();
-                    stack.RemoveAt(stack.Count - 1);
-                    continue;
+                    if (!top.Object.MoveNext())
+                    {
+                        writer.WriteEndMapping();
+                        stack.RemoveAt(stack.Count - 1);
+                        continue;
+                    }
+
+                    string name = top.Object.Current.Name;
+                    if (RepeatsName(top, stack.Count - 1, name, ref sets))
+                    {
+                        throw new YamlException($"The object has the property name '{name}' twice, which a YAML mapping cannot hold.") { Category = YamlErrorCategory.Binding };
+                    }
+
+                    writer.WritePropertyName(name);
+                    child = top.Object.Current.Value;
+                }
+                else
+                {
+                    if (!top.Array.MoveNext())
+                    {
+                        writer.WriteEndSequence();
+                        stack.RemoveAt(stack.Count - 1);
+                        continue;
+                    }
+
+                    child = top.Array.Current;
                 }
 
-                string name = top.Object.Current.Name;
-                if (!(top.Names ??= new HashSet<string>(StringComparer.Ordinal)).Add(name))
+                if (child.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
                 {
-                    throw new YamlException($"The object has the property name '{name}' twice, which a YAML mapping cannot hold.") { Category = YamlErrorCategory.Binding };
+                    OpenElement(stack, writer, child);
+                }
+                else
+                {
+                    WriteElementLeaf(writer, child);
+                }
+            }
+        }
+        finally
+        {
+            if (sets is not null)
+            {
+                foreach (NameSet? set in sets)
+                {
+                    set?.Release();
+                }
+            }
+        }
+    }
+
+    private const int ScanLimit = 16;
+
+    private static bool RepeatsName(ElementFrame frame, int depth, string name, ref NameSet?[]? sets)
+    {
+        int written = frame.Written++;
+        if (written > ScanLimit)
+        {
+            return !sets![depth]!.Add(name);
+        }
+
+        // A copy of the enumerator, rewound, walks the names already written.
+        JsonElement.ObjectEnumerator earlier = frame.Object;
+        earlier.Reset();
+        if (written < ScanLimit)
+        {
+            for (int index = 0; index < written && earlier.MoveNext(); index++)
+            {
+                if (earlier.Current.NameEquals(name))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // A large object: its names go into a set that the objects at this depth after it reuse.
+        // GetPropertyCount needs a newer runtime than the oldest target: count by walking the object once.
+        JsonElement.ObjectEnumerator counted = earlier;
+        int count = 0;
+        while (counted.MoveNext())
+        {
+            count++;
+        }
+
+        if (sets is null || sets.Length <= depth)
+        {
+            Array.Resize(ref sets, depth + 1);
+        }
+
+        NameSet names = sets[depth] ??= new NameSet();
+        names.Reset(count);
+        for (int index = 0; index < written && earlier.MoveNext(); index++)
+        {
+            names.Add(earlier.Current.Name);
+        }
+
+        return !names.Add(name);
+    }
+
+    // The names of one large object, in storage from the pool: a set that grows on the heap costs more than the object it checks.
+    private sealed class NameSet
+    {
+        private string?[] _names = [];
+        private int[] _table = [];
+        private int _count;
+        private int _size;
+
+        public void Reset(int capacity)
+        {
+            Release();
+            _names = ArrayPool<string?>.Shared.Rent(Math.Max(capacity, 1));
+            _size = 16;
+            while (_size < capacity * 2)
+            {
+                _size <<= 1;
+            }
+
+            _table = ArrayPool<int>.Shared.Rent(_size);
+            Array.Clear(_table, 0, _size);
+            _count = 0;
+        }
+
+        // Whether the name was new. The table holds the position of a name in _names plus one; 0 is a free slot.
+        public bool Add(string name)
+        {
+            int mask = _size - 1;
+            int slot = name.GetHashCode() & mask;
+            while (_table[slot] != 0)
+            {
+                if (string.Equals(_names[_table[slot] - 1], name, StringComparison.Ordinal))
+                {
+                    return false;
                 }
 
-                writer.WritePropertyName(name);
-                child = top.Object.Current.Value;
-            }
-            else
-            {
-                if (!top.Array.MoveNext())
-                {
-                    writer.WriteEndSequence();
-                    stack.RemoveAt(stack.Count - 1);
-                    continue;
-                }
-
-                child = top.Array.Current;
+                slot = (slot + 1) & mask;
             }
 
-            if (child.ValueKind is JsonValueKind.Object or JsonValueKind.Array)
+            _names[_count++] = name;
+            _table[slot] = _count;
+            return true;
+        }
+
+        public void Release()
+        {
+            if (_names.Length != 0)
             {
-                OpenElement(stack, writer, child);
+                ArrayPool<string?>.Shared.Return(_names, clearArray: true);
+                _names = [];
             }
-            else
+
+            if (_table.Length != 0)
             {
-                WriteElementLeaf(writer, child);
+                ArrayPool<int>.Shared.Return(_table);
+                _table = [];
             }
         }
     }

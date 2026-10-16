@@ -93,10 +93,12 @@ public class RefusedOptionAndLimitTests
     [Fact]
     public void SharpYaml_untrusted_limits_refuse_an_alias_expansion_the_default_allows()
     {
-        // Each level doubles: far past the untrusted budget of 100,000 nodes, within the default budget of a million at depth 18.
-        string yaml = BombOf(18);
+        // Each level doubles: 16 levels charge about 524,000 nodes, over the untrusted budget of 100,000 and under the
+        // default budget of a million.
+        string yaml = BombOf(16);
         var untrusted = new Cs.YamlSerializerOptions { Limits = global::OneYaml.YamlLimits.Untrusted };
 
+        Assert.NotNull(Cs.YamlSerializer.Deserialize<object>(yaml));
         Assert.ThrowsAny<Cs.YamlException>(() => Cs.YamlSerializer.Deserialize<object>(yaml, untrusted));
     }
 
