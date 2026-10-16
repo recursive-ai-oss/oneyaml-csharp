@@ -348,27 +348,72 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     // A key that a member wrote, or that names the derived type, is not written from the dictionary: written twice it would
     // make a mapping that reads back as a duplicate key. A member that left itself out (an ignored null) wrote nothing, so
     // its dictionary entry is written; a reader hands that key to the member.
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     internal override void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey)
     {
-        if ((IDictionary<string, object?>?)(object?)_values.Getter!(instance) is not { } entries)
+        // The walk over the entries is kept in an object of its own, so that this frame, which stays on the stack while nested
+        // values are written, holds three references and no enumerator or pair. It is not pooled: nothing has to be given
+        // back when a write throws, which keeps the frame free of a handler.
+        EntryCursor? cursor = EntryCursor.Create(_values.Getter!(instance), instance, info, discriminatorKey);
+        if (cursor is null)
         {
             return;
         }
 
-        foreach (KeyValuePair<string, object?> entry in entries)
+        while (cursor.MoveNext())
         {
-            if (string.Equals(entry.Key, discriminatorKey, StringComparison.Ordinal))
+            writer.WritePropertyName(cursor.Key);
+            _extensionConverter!.WriteValue(writer, cursor.Value, _options!);
+        }
+    }
+
+    private sealed class EntryCursor
+    {
+        private readonly KeyValuePair<string, object?>[] _entries;
+        private readonly TDeclaring _instance;
+        private readonly YamlTypeInfo<TDeclaring> _info;
+        private readonly string? _discriminatorKey;
+        private int _next;
+
+        private EntryCursor(KeyValuePair<string, object?>[] entries, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey)
+        {
+            _entries = entries;
+            _instance = instance;
+            _info = info;
+            _discriminatorKey = discriminatorKey;
+        }
+
+        public string Key { get; private set; } = string.Empty;
+
+        public object? Value { get; private set; }
+
+        public static EntryCursor? Create(TProperty? dictionary, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey)
+        {
+            if ((IDictionary<string, object?>?)(object?)dictionary is not { Count: > 0 } entries)
             {
-                continue;
+                return null;
             }
 
-            if (MemberWroteKey(entry.Key, instance, info))
+            var copy = new KeyValuePair<string, object?>[entries.Count];
+            entries.CopyTo(copy, 0);
+            return new EntryCursor(copy, instance, info, discriminatorKey);
+        }
+
+        // The next entry to write: a key that a member wrote, or that names the derived type, is passed over.
+        public bool MoveNext()
+        {
+            while (_next < _entries.Length)
             {
-                continue;
+                KeyValuePair<string, object?> entry = _entries[_next++];
+                if (!string.Equals(entry.Key, _discriminatorKey, StringComparison.Ordinal) && !MemberWroteKey(entry.Key, _instance, _info))
+                {
+                    Key = entry.Key;
+                    Value = entry.Value;
+                    return true;
+                }
             }
 
-            writer.WritePropertyName(entry.Key);
-            _extensionConverter!.WriteValue(writer, entry.Value, _options!);
+            return false;
         }
     }
 

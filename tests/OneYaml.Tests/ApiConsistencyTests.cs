@@ -52,6 +52,23 @@ internal sealed class WideSquare : WideShape
     public int Side { get; set; }
 }
 
+[YamlPolymorphic(DiscriminatorKind = YamlDiscriminatorKind.Tag)]
+[YamlDerivedType(typeof(TagOne), "!!foo")]
+[YamlDerivedType(typeof(TagTwo), "!e!x")]
+internal abstract class TagShape
+{
+}
+
+internal sealed class TagOne : TagShape
+{
+    public int A { get; set; }
+}
+
+internal sealed class TagTwo : TagShape
+{
+    public int B { get; set; }
+}
+
 internal sealed class JsonHolder
 {
     public string Name { get; set; } = "";
@@ -96,6 +113,7 @@ internal sealed class NeedsNameParent
 
 [YamlSerializable(typeof(ManifestDoc))]
 [YamlSerializable(typeof(WideShape))]
+[YamlSerializable(typeof(TagShape))]
 [YamlSerializable(typeof(JsonHolder))]
 [YamlSerializable(typeof(DocumentHolder))]
 [YamlSerializable(typeof(RolloutPlan))]
@@ -186,35 +204,67 @@ public class ApiConsistencyTests
     }
 
     [Fact]
-    public void WriteTag_resolves_the_secondary_shorthand_and_refuses_forms_it_cannot_resolve()
+    public void WriteTag_writes_a_resolved_tag_as_exactly_that_tag()
     {
         Assert.Equal("!!str '1'\n", Emit(w =>
         {
-            w.WriteTag("!!str");
+            w.WriteTag("tag:yaml.org,2002:str");
             w.WriteStringValue("1");
         }));
 
-        foreach (string unresolvable in new[] { "!e!widget", "!<tag:example.com,2026:v>", "!!" })
+        // A local tag that merely looks like a shorthand stays a local tag.
+        foreach (string local in new[] { "!!foo", "!e!w", "!<x>", "!" })
         {
-            Assert.Throws<ArgumentException>(() => Emit(w => w.WriteTag(unresolvable)));
+            string text = Emit(w =>
+            {
+                w.WriteTag(local);
+                w.WriteStringValue("v");
+            });
+
+            using YamlDocument back = YamlDocument.Parse(text);
+            Assert.Equal(local, back.Root.Tag);
         }
+
+        Assert.Throws<ArgumentException>(() => Emit(w => w.WriteTag("")));
     }
 
     [Fact]
     public void A_tag_taken_from_a_node_is_written_back_as_the_same_tag()
     {
-        using YamlDocument source = YamlDocument.Parse(Tagged);
-        foreach (string key in new[] { "a", "b", "c", "d" })
+        const string text = Tagged + "f: !%21foo x\ng: !<!!foo> x\nh: !e%21w x\ni: !<!e!w> x\n";
+        using YamlDocument source = YamlDocument.Parse(text);
+        foreach (string key in new[] { "a", "b", "c", "d", "f", "g", "h", "i" })
         {
             string? tag = source.Root[key].Tag;
-            string text = Emit(w =>
+            string written = Emit(w =>
             {
                 w.WriteTag(tag!);
                 w.WriteStringValue("v");
             });
 
-            using YamlDocument back = YamlDocument.Parse(text);
+            using YamlDocument back = YamlDocument.Parse(written);
             Assert.Equal(tag, back.Root.Tag);
+        }
+
+        Assert.Equal("!!foo", source.Root["f"].Tag);
+        Assert.Equal("!e!w", source.Root["h"].Tag);
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void Tag_discriminators_that_look_like_shorthands_round_trip(int path)
+    {
+        if (path == 2)
+        {
+            return; // Writing has no document path.
+        }
+
+        foreach ((TagShape shape, string tag) in new (TagShape, string)[] { (new TagOne { A = 1 }, "!!foo"), (new TagTwo { B = 2 }, "!e!x") })
+        {
+            string yaml = Write<TagShape>(path, shape);
+            Assert.StartsWith("!", yaml, StringComparison.Ordinal);
+            using YamlDocument doc = YamlDocument.Parse(yaml);
+            Assert.Equal(tag, doc.Root.Tag);
+            Assert.Equal(shape.GetType(), Read<TagShape>(path, yaml)!.GetType());
         }
     }
 
@@ -249,6 +299,54 @@ public class ApiConsistencyTests
         Assert.Equal(YamlErrorCategory.Limit, ex.Category);
         ex = Assert.Throws<YamlException>(() => doc.Root["e"].GetValue<List<object?>>());
         Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+    }
+
+    [Fact]
+    public void Options_given_to_a_node_cannot_loosen_the_limits_of_its_document()
+    {
+        using YamlDocument doc = YamlDocument.Parse(AliasFan(), new YamlDocumentOptions { Limits = s_tiny });
+
+        foreach (YamlSerializerOptions options in new[] { new YamlSerializerOptions(), YamlSerializerOptions.Default, new YamlSerializerOptions { Limits = YamlLimits.None } })
+        {
+            YamlException ex = Assert.Throws<YamlException>(() => doc.Root.Deserialize<object>(options));
+            Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+        }
+
+        // Tighter options still apply, and the same options object is reused.
+        var tighter = new YamlSerializerOptions { Limits = YamlLimits.Untrusted with { MaxDepth = 2 } };
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root.Deserialize<object>(tighter)).Category);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => doc.Root.Deserialize<object>(tighter)).Category);
+    }
+
+    [Fact]
+    public void A_typed_try_read_that_does_not_fit_makes_a_quiet_error_without_the_work_of_a_position()
+    {
+        using YamlDocument doc = YamlDocument.Parse(Spec);
+        int thread = Environment.CurrentManagedThreadId;
+        var seen = new List<YamlException>();
+        void OnThrown(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
+        {
+            if (Environment.CurrentManagedThreadId == thread && e.Exception is YamlException y)
+            {
+                seen.Add(y);
+            }
+        }
+
+        AppDomain.CurrentDomain.FirstChanceException += OnThrown;
+        try
+        {
+            Assert.False(doc.Root["spec"]["mode"].TryGetValue(out RolloutPlan? _));
+            Assert.False(doc.TryGet("/spec/bad", out RolloutPlan? _));
+            Assert.False(doc.TryGet("/spec/mode", out RolloutPlan? _));
+        }
+        finally
+        {
+            AppDomain.CurrentDomain.FirstChanceException -= OnThrown;
+        }
+
+        // A quiet error carries its category and offset and nothing that costs a scan of the text to find.
+        Assert.NotEmpty(seen);
+        Assert.All(seen, y => Assert.Equal((0, 0), (y.Line, y.Column)));
     }
 
     [Fact]
@@ -449,10 +547,90 @@ public class ApiConsistencyTests
         string written = Write(path, h);
         JsonHolder back = Read<JsonHolder>(path, written)!;
 
-        Assert.Equal(h.Settings.GetRawText(), back.Settings.GetRawText());
-        Assert.Equal(h.Node.ToJsonString(), back.Node!.ToJsonString());
-        Assert.Equal(h.Object.ToJsonString(), back.Object!.ToJsonString());
-        Assert.Equal(h.Array.ToJsonString(), back.Array!.ToJsonString());
+        // Compared with the text the YAML says, not with the first load: both loads could be wrong the same way.
+        Assert.Equal("{\"retries\":3,\"mode\":\"fast\",\"ratio\":1.5,\"list\":[1,true,null,\"big\"],\"big\":123456789012345678901234567890}", back.Settings.GetRawText());
+        Assert.Equal("{\"a\":[1,2],\"b\":\"text\"}", back.Node!.ToJsonString());
+        Assert.Equal("{\"k\":\"v\"}", back.Object!.ToJsonString());
+        Assert.Equal("[1,\"two\"]", back.Array!.ToJsonString());
+    }
+
+    private const string NumberYaml = "name: x\nsettings: {a: -0.0, b: 1.0, c: 1e3, d: 3.141592653589793238462643383279, e: 1e-400, f: 1.5e400, g: -0, h: .5, i: 1., j: 0x1F, k: 007, l: +3, m: 1E5, p: 0.1}\n";
+
+    private const string NumberJson = "{\"a\":-0.0,\"b\":1.0,\"c\":1e3,\"d\":3.141592653589793238462643383279,\"e\":1e-400,\"f\":1.5e400,\"g\":-0,\"h\":0.5,\"i\":1.0,\"j\":31,\"k\":7,\"l\":3,\"m\":1E5,\"p\":0.1}";
+
+    [Theory, MemberData(nameof(Paths))]
+    public void JSON_members_read_a_number_with_the_digits_it_was_written_with(int path)
+    {
+        JsonHolder h = Read<JsonHolder>(path, NumberYaml)!;
+
+        Assert.Equal(NumberJson, h.Settings.GetRawText());
+        JsonHolder viaNode = Read<JsonHolder>(path, NumberYaml.Replace("settings:", "node:", StringComparison.Ordinal))!;
+        Assert.Equal(NumberJson, viaNode.Node!.ToJsonString());
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void JSON_members_write_a_number_as_the_digits_it_has(int path)
+    {
+        using JsonDocument source = JsonDocument.Parse(NumberJson);
+        var h = new JsonHolder { Name = "x", Settings = source.RootElement.Clone(), Node = JsonNode.Parse(NumberJson) };
+
+        string yaml = Write(path, h);
+
+        foreach (string line in new[] { "a: -0.0", "b: 1.0", "c: 1e3", "d: 3.141592653589793238462643383279", "e: 1e-400", "f: 1.5e400", "g: -0", "m: 1E5", "p: 0.1" })
+        {
+            Assert.Contains("  " + line + "\n", yaml, StringComparison.Ordinal);
+        }
+
+        JsonHolder back = Read<JsonHolder>(path, yaml)!;
+        string expected = NumberJson;
+        Assert.Equal(expected, back.Settings.GetRawText());
+        Assert.Equal(expected, back.Node!.ToJsonString());
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void JSON_members_refuse_not_a_number_and_infinity_from_YAML(int path)
+    {
+        foreach (string value in new[] { ".inf", "-.inf", ".nan" })
+        {
+            YamlException ex = Assert.Throws<YamlException>(() => Read<JsonHolder>(path, "settings: {a: " + value + "}\n"));
+            Assert.Equal(YamlErrorCategory.Binding, ex.Category);
+        }
+    }
+
+    private static JsonNode Nested(int levels)
+    {
+        JsonNode node = new JsonArray();
+        for (int i = 1; i < levels; i++)
+        {
+            node = new JsonArray(node);
+        }
+
+        return node;
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void A_JSON_node_nested_past_the_depth_the_types_read_is_a_limit_error_when_written(int path)
+    {
+        var fits = new JsonHolder { Node = Nested(JsonTrees.MaxJsonDepth) };
+        Assert.Equal(fits.Node.ToJsonString(), Read<JsonHolder>(path, Write(path, fits))!.Node!.ToJsonString());
+
+        foreach (int levels in new[] { JsonTrees.MaxJsonDepth + 1, 1_001, 5_000 })
+        {
+            var tooDeep = new JsonHolder { Node = Nested(levels) };
+            YamlException ex = Assert.Throws<YamlException>(() => Write(path, tooDeep));
+            Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+        }
+    }
+
+    [Theory, MemberData(nameof(Paths))]
+    public void A_JSON_element_nested_past_the_depth_the_types_read_is_a_limit_error_when_written(int path)
+    {
+        string json = new string('[', 100) + new string(']', 100);
+        using JsonDocument document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 200 });
+
+        YamlException ex = Assert.Throws<YamlException>(() => Write(path, new JsonHolder { Settings = document.RootElement }));
+
+        Assert.Equal(YamlErrorCategory.Limit, ex.Category);
     }
 
     [Theory, MemberData(nameof(Paths))]

@@ -256,7 +256,8 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <summary>The tag resolved against the document's <c>%TAG</c> directives, or <see langword="null"/> when the node has none.</summary>
     /// <remarks>
     /// <c>!!str</c> reads as <c>tag:yaml.org,2002:str</c> and a local tag such as <c>!Sub</c> as <c>!Sub</c>. This is the form
-    /// <see cref="Utf8YamlReader.Tag"/> returns and <see cref="Utf8YamlEmitter.WriteTag(string)"/> takes. Use
+    /// <see cref="Utf8YamlReader.Tag"/> returns and <see cref="Utf8YamlEmitter.WriteTag(string)"/> takes, and writes back as the same tag, including a local tag
+    /// such as <c>!!foo</c> (from <c>!%21foo</c>). Use
     /// <see cref="RawTag"/> for the text as it appears in the source.
     /// </remarks>
     public string? Tag
@@ -380,6 +381,28 @@ public sealed class YamlNode : IEquatable<YamlNode>
         return Deserialize<T>(_doc!.BindOptions)!;
     }
 
+    // The same read as BindAny, for a caller that only asks whether it fits: a miss makes no error to throw and catch.
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Same switch as BindAny: with reflection off this method returns before any reflection runs.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Same switch as BindAny.")]
+    private bool TryBindAny<T>(out T value)
+    {
+        if (!YamlSerializer.IsReflectionEnabledByDefault)
+        {
+            throw new NotSupportedException($"{typeof(T).Name} is not a plain scalar type, and reflection is turned off in this application. Use the overload that takes a YamlTypeInfo, or turn the OneYaml.YamlSerializer.IsReflectionEnabledByDefault switch on.");
+        }
+
+        try
+        {
+            value = NodeReplay.Bind(State(), _index, _doc!.BindOptions.GetReflectiveTypeInfo<T>(), quiet: true)!;
+            return true;
+        }
+        catch (YamlException e) when (e.Category == YamlErrorCategory.Binding)
+        {
+            value = default!;
+            return false;
+        }
+    }
+
     /// <summary>Reads a scalar as a CLR value, if it has that type.</summary>
     /// <typeparam name="T">A string, boolean, integer, floating-point, big integer, character, date or time, or GUID type, or <see cref="object"/>.</typeparam>
     /// <param name="value">The value, or the default.</param>
@@ -389,16 +412,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         DocState s = State();
         if (!NodeValues.IsLeafType(typeof(T)))
         {
-            try
-            {
-                value = BindAny<T>();
-                return true;
-            }
-            catch (YamlException e) when (e.Category == YamlErrorCategory.Binding)
-            {
-                value = default!;
-                return false;
-            }
+            return TryBindAny(out value);
         }
 
         int t = Followed(s, out bool via);
@@ -408,7 +422,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     /// <summary>Binds the node to a type with the reflection binder, as <see cref="YamlSerializer"/> would bind the same text.</summary>
     /// <typeparam name="T">The type to read.</typeparam>
-    /// <param name="options">Options; <see langword="null"/> means the document's own limits and <see cref="YamlDocumentOptions.SourceName"/> with the defaults of <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <param name="options">Options; <see langword="null"/> means the document's own limits and <see cref="YamlDocumentOptions.SourceName"/> with the defaults of <see cref="YamlSerializerOptions.Default"/>. Whatever limits the options carry, no limit is looser than the one the document was opened with.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
     /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
@@ -419,7 +433,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         DocState s = State();
         try
         {
-            return NodeReplay.Bind(s, _index, (options ?? _doc!.BindOptions).GetReflectiveTypeInfo<T>());
+            return NodeReplay.Bind(s, _index, (options is null ? _doc!.BindOptions : _doc!.StricterOptions(options)).GetReflectiveTypeInfo<T>());
         }
         catch (YamlException e) when (YamlException.Tag(e, _doc!.SourceName))
         {
