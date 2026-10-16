@@ -144,7 +144,7 @@ internal static class NodeReplay
     /// <returns>A book holding the tape and the anchored segments; its tape goes back to the pool when the reader that takes it is disposed.</returns>
     public static AnchorBook Record(DocState s, int root, out int rootCount)
     {
-        var book = new AnchorBook();
+        var book = AnchorBook.ForDocument();
         book.Tape = ArrayPool<TapeEvent>.Shared.Rent(Math.Max(16, Math.Min(s.Node(root).Size * 2 + 2, 1 << 16)));
         var closes = new CloseStack();
         Dictionary<int, int>? entryOf = null;
@@ -210,7 +210,7 @@ internal static class NodeReplay
         }
 
         ExpansionSizes sizes = SizesOf(s);
-        var book = new AnchorBook();
+        var book = AnchorBook.ForDocument();
         book.Tape = ArrayPool<TapeEvent>.Shared.Rent(Math.Max(16, Math.Min(s.Node(root).Size * 2 + 2, 1 << 16)));
         var closes = new CloseStack();
         Dictionary<int, int> entryOf = [];
@@ -231,11 +231,12 @@ internal static class NodeReplay
                 }
 
                 TapeEvent e = n.Kind == NodeKind.Scalar
-                    ? ScalarEvent(s, i, in n)
+                    ? ScalarEvent(book, s, i, in n)
                     : new TapeEvent
                     {
                         Type = n.Kind == NodeKind.Mapping ? YamlTokenType.MappingStart : YamlTokenType.SequenceStart,
                         Tag = s.TagClassOf(i),
+                        TagRef = TagRefOf(book, s, i),
                         Start = n.Start,
                         End = n.Start,
                     };
@@ -244,7 +245,7 @@ internal static class NodeReplay
                     int entry = book.Count++;
                     if (entry == book.Entries.Length)
                     {
-                        Array.Resize(ref book.Entries, book.Entries.Length * 2);
+                        Array.Resize(ref book.Entries, Math.Max(4, book.Entries.Length * 2));
                     }
 
                     book.Entries[entry] = new AnchorEntry
@@ -322,7 +323,7 @@ internal static class NodeReplay
                             entry = book.Count++;
                             if (entry == book.Entries.Length)
                             {
-                                Array.Resize(ref book.Entries, book.Entries.Length * 2);
+                                Array.Resize(ref book.Entries, Math.Max(4, book.Entries.Length * 2));
                             }
 
                             book.Entries[entry] = new AnchorEntry { Nodes = Math.Min(sizes.Nodes[target], Cap), Bytes = Math.Min(sizes.Bytes[target], Cap) };
@@ -335,13 +336,14 @@ internal static class NodeReplay
                     }
 
                 case NodeKind.Scalar:
-                    Emit(book, ScalarEvent(s, i, in n));
+                    Emit(book, ScalarEvent(book, s, i, in n));
                     break;
                 default:
                     Emit(book, new TapeEvent
                     {
                         Type = n.Kind == NodeKind.Mapping ? YamlTokenType.MappingStart : YamlTokenType.SequenceStart,
                         Tag = s.TagClassOf(i),
+                        TagRef = TagRefOf(book, s, i),
                         Start = n.Start,
                         End = n.Start,
                     });
@@ -356,7 +358,38 @@ internal static class NodeReplay
         }
     }
 
-    private static TapeEvent ScalarEvent(DocState s, int index, in CstNode n)
+    // Records the node's full tag on the book so the reader can report it as it does for text. Zero when untagged.
+    private static int TagRefOf(AnchorBook book, DocState s, int node)
+    {
+        if (!s.HasTag(node))
+        {
+            return 0;
+        }
+
+        // A run of nodes with one tag shares one string: the same text in one subtree resolves the same way.
+        List<TagRecord> tags = book.Tags ??= [];
+        ReadOnlySpan<byte> raw = s.RawTag(node);
+        if (tags.Count > 0)
+        {
+            TagRecord last = tags[^1];
+            if (s.Text.Slice(last.Start, last.Length).SequenceEqual(raw))
+            {
+                tags.Add(new TagRecord(s.TagStartOf(node), raw.Length, last.Resolved));
+                return tags.Count;
+            }
+        }
+
+        string? resolved = s.ResolveTag(node, out int start, out int length);
+        if (resolved is null)
+        {
+            return 0;
+        }
+
+        tags.Add(new TagRecord(start, length, resolved));
+        return tags.Count;
+    }
+
+    private static TapeEvent ScalarEvent(AnchorBook book, DocState s, int index, in CstNode n)
     {
         ContentOf(s, in n, out int cs, out int ce);
         bool empty = (n.Flags & NodeFlags.Empty) != 0;
@@ -367,6 +400,7 @@ internal static class NodeReplay
             Type = YamlTokenType.Scalar,
             Style = (ScalarStyle)n.Style,
             Tag = s.TagClassOf(index),
+            TagRef = TagRefOf(book, s, index),
             Chomping = block ? (Chomping)n.Chomp : default,
             Escaped = (n.Flags & NodeFlags.Escaped) != 0,
             Start = start,

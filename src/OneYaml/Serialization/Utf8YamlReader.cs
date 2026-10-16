@@ -125,6 +125,26 @@ internal sealed class AnchorBook
     public int FrameCount;
     public List<TagRecord>? Tags;
 
+    public AnchorBook()
+    {
+    }
+
+    private AnchorBook(bool forDocument)
+    {
+        // A tape made from a document needs entries only for the anchors its aliases name, and never looks one up by
+        // name or opens one while reading, so most books need none of these arrays; a single-value try-read makes
+        // one per call.
+        if (forDocument)
+        {
+            Entries = [];
+            Buckets = [];
+            Open = [];
+        }
+    }
+
+    /// <summary>A book for a tape recorded from a document, with its arrays left empty until an entry is added.</summary>
+    public static AnchorBook ForDocument() => new(forDocument: true);
+
     public void Reset()
     {
         Count = 0;
@@ -330,7 +350,6 @@ public ref partial struct Utf8YamlReader
     /// <c>!!str</c> reads as <c>tag:yaml.org,2002:str</c>, a local tag such as <c>!Sub</c> as <c>!Sub</c>, and the bare <c>!</c> as <c>!</c>.
     /// Reading it makes a string (the last one is kept, so a run of nodes with one tag shares it); use
     /// <see cref="TryGetTag"/> to compare without allocating. A node that an alias brings in has the tag it was written with.
-    /// A node read from a <see cref="YamlDocument"/> reports no tag.
     /// </remarks>
     public string? Tag
     {
@@ -370,7 +389,7 @@ public ref partial struct Utf8YamlReader
     }
 
     /// <summary>The anchor name of the current node, without the <c>&amp;</c>, or <see langword="null"/> when the node is not anchored.</summary>
-    /// <remarks>An alias is followed for you, so the nodes it brings in carry no anchor of their own.</remarks>
+    /// <remarks>An alias is followed for you, so the nodes it brings in carry no anchor of their own. A node replayed from a <see cref="YamlDocument"/> reports its tag but not its anchor.</remarks>
     public readonly string? Anchor => TryGetAnchor(out ReadOnlySpan<byte> name) ? Encoding.UTF8.GetString(name) : null;
 
     /// <summary>Gets the anchor name of the current node without allocating.</summary>
@@ -870,21 +889,6 @@ public ref partial struct Utf8YamlReader
     }
 
     private static long Sat(long v) => v > Cap ? Cap : v;
-
-    private static TagClass ClassifyTag(string? tag) => tag switch
-    {
-        null => TagClass.None,
-        "!" => TagClass.Str,
-        "tag:yaml.org,2002:str" => TagClass.Str,
-        "tag:yaml.org,2002:int" => TagClass.Int,
-        "tag:yaml.org,2002:float" => TagClass.Float,
-        "tag:yaml.org,2002:bool" => TagClass.Bool,
-        "tag:yaml.org,2002:null" => TagClass.Null,
-        "tag:yaml.org,2002:binary" => TagClass.Binary,
-        "tag:yaml.org,2002:map" => TagClass.Map,
-        "tag:yaml.org,2002:seq" => TagClass.Seq,
-        _ => TagClass.Unknown,
-    };
 
     // The generic loader keeps the value it built for an anchored node, so an alias shares it.
     internal void SetAnchorValue(int entry, object? value)

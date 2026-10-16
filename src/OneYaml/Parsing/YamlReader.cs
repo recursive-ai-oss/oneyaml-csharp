@@ -495,7 +495,7 @@ internal ref partial struct YamlReader
     }
 
     // Writes prefix then suffix with escaped ASCII characters expanded; a UTF-8 sequence stays as written.
-    private static int DecodePercent(Span<byte> buffer, ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
+    internal static int DecodePercent(Span<byte> buffer, ReadOnlySpan<byte> prefix, ReadOnlySpan<byte> suffix)
     {
         prefix.CopyTo(buffer);
         int n = prefix.Length;

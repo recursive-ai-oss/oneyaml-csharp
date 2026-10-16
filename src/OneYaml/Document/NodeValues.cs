@@ -82,6 +82,9 @@ internal static class NodeValues
 
         AnchorBook book = NodeReplay.Record(s, node, out int count);
         var reader = new Utf8YamlReader(s.Text, options, book, count);
+
+        // A caller that never sees the error must not pay for a line, column and path lookup in it.
+        reader.QuietErrors = !wantError;
         try
         {
             reader.BeginReplay();

@@ -11,9 +11,6 @@ public ref partial struct Utf8YamlReader
     // the way the live reader does it.
     private bool _countReplayed;
 
-    // Classifies a tag whose handle is resolved, as the live reader does for every tagged node.
-    internal static TagClass ClassifyResolvedTag(string? resolvedTag) => ClassifyTag(resolvedTag);
-
     // Makes a reader that delivers the first rootCount events of the book's tape, and the anchored
     // segments after them when an alias event names one. The reader owns the book's tape afterwards
     // and returns it to the pool in Dispose. Positions and error messages refer to source, the text the
@@ -31,6 +28,24 @@ public ref partial struct Utf8YamlReader
         _book = book;
         _started = true;
         _countReplayed = true;
+    }
+
+    // Charges entries a converter copied (by a merge) to the alias node budget. When aliases are expanded, an
+    // anchored mapping is built again at every level of a chain of merges, and the alias charge counts its nodes
+    // once; charging the copies keeps that work inside the budget. Only a reader that expands
+    // aliases needs it: one that shares the value of an anchor copies no more than the alias charge counted.
+    internal void ChargeCopied(long entries)
+    {
+        if (!_expand)
+        {
+            return;
+        }
+
+        _chargedNodes = Sat(_chargedNodes + entries);
+        if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes))
+        {
+            throw Error(YamlErrorCategory.Limit, $"Merging mappings exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}).");
+        }
     }
 
     // Moves to the first event, as a converter expects for the single value of a document.

@@ -16,7 +16,7 @@ public class SharpYamlTypedTests
     //   double-fraction: a whole-number double is written with a fraction (100.0), so it reads back as a double; the real library writes 100.
     //   real-uri: the real library cannot read or write System.Uri; the compat package can.
     //   real-crash: the real library fails with a NullReferenceException where the compat package reports a YamlException.
-    //   top-level-null: a null at the top level into a value type is a YamlException in the real library; the compat package gives the default, as it does for a member.
+    //   top-level-null: no text, a comment, or (for an enum) a bare null at the top level into a value type is an error in the real library; the compat package gives the default, as it does for a member.
     private static readonly Dictionary<string, string> Known = new(StringComparer.Ordinal)
     {
         ["scalar Age: 1_000"] = "real-1.1-number",
@@ -30,14 +30,18 @@ public class SharpYamlTypedTests
         AddNullInputs(Known);
     }
 
-    // An empty text, a bare null and a text with only a comment, read into a value type: the real library fails (with a
-    // NullReferenceException for the first and last), the compat package gives the default value.
+    // An empty text and a text with only a comment, read into a value type: the real library fails with a
+    // NullReferenceException, the compat package gives the default value. A bare null into an enum is the same.
     private static void AddNullInputs(Dictionary<string, string> known)
     {
         foreach (string type in new[] { "Int32", "Mood", "Boolean", "Double" })
         {
             known[$"{type} <- "] = "top-level-null";
-            known[$"{type} <- ~"] = "top-level-null";
+            if (type == "Mood")
+            {
+                known[$"{type} <- ~"] = "top-level-null";
+            }
+
             known[$"{type} <- # only a comment"] = "top-level-null";
         }
     }

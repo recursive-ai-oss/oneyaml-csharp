@@ -303,7 +303,7 @@ internal static class GenericLoader
                     return value;
                 }
 
-                Add(reader.Source, ref stack.Top, value, ref staged);
+                reader.ChargeCopied(Add(reader.Source, ref stack.Top, value, ref staged));
 
             Next:
                 if (!reader.Read())
@@ -319,12 +319,13 @@ internal static class GenericLoader
         }
     }
 
-    private static void Add(ReadOnlySpan<byte> input, ref GenericFrame frame, object? value, ref StagedEntries staged)
+    // Returns how many entries a merge copied, which the caller charges to the reader.
+    private static long Add(ReadOnlySpan<byte> input, ref GenericFrame frame, object? value, ref StagedEntries staged)
     {
         if (!frame.IsMap)
         {
             ((List<object?>)frame.Container!).Add(value);
-            return;
+            return 0;
         }
 
         string key = frame.Key!;
@@ -346,7 +347,7 @@ internal static class GenericLoader
                 if (held.Length < StagedLimit)
                 {
                     staged.Push(key, value, frame.KeyOffset);
-                    return;
+                    return 0;
                 }
             }
 
@@ -360,7 +361,7 @@ internal static class GenericLoader
         var dict = (Dictionary<string, object?>)frame.Container;
         if (frame.KeyIsMerge)
         {
-            Merge(input, dict, ref (frame.Sets ??= new FrameSets()).Merged, value, frame.KeyOffset);
+            return Merge(input, dict, ref (frame.Sets ??= new FrameSets()).Merged, value, frame.KeyOffset);
         }
         else if (frame.Sets?.Merged is { } merged && merged.Remove(key))
         {
@@ -370,6 +371,8 @@ internal static class GenericLoader
         {
             throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", input, frame.KeyOffset);
         }
+
+        return 0;
     }
 
     private static Dictionary<string, object?> Materialise(ReadOnlySpan<StagedEntry> entries, int capacity)
@@ -398,16 +401,17 @@ internal static class GenericLoader
     }
 
     // The merge key copies the entries of a mapping, or of each mapping in a sequence, that are not already there.
-    private static void Merge(ReadOnlySpan<byte> input, Dictionary<string, object?> into, ref HashSet<string>? merged, object? source, int offset)
+    private static long Merge(ReadOnlySpan<byte> input, Dictionary<string, object?> into, ref HashSet<string>? merged, object? source, int offset)
     {
         if (source is Dictionary<string, object?> one)
         {
             Copy(into, ref merged, one);
-            return;
+            return one.Count;
         }
 
         if (source is List<object?> many)
         {
+            long copied = 0;
             foreach (object? item in many)
             {
                 if (item is not Dictionary<string, object?> d)
@@ -416,9 +420,10 @@ internal static class GenericLoader
                 }
 
                 Copy(into, ref merged, d);
+                copied += d.Count;
             }
 
-            return;
+            return copied;
         }
 
         throw YamlException.Located(YamlErrorCategory.Binding, "A merge key needs a mapping or a sequence of mappings.", input, offset, ErrorPath.Find(input, offset, atCollection: true));

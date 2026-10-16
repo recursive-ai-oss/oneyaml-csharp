@@ -179,12 +179,28 @@ public class HostileInputCostTests
             {
                 seen = true;
                 Assert.Equal(Enum.Parse<TagClass>(expected), reader.GetTagClass());
-                Assert.Equal(Utf8YamlReader.ClassifyResolvedTag(reader.GetResolvedTag()), reader.GetTagClass());
+                Assert.Equal(ClassOfResolvedTag(reader.GetResolvedTag()), reader.GetTagClass());
             }
         }
 
         Assert.True(seen);
     }
+
+    // The class a fully resolved tag stands for, worked out from the string alone.
+    private static TagClass ClassOfResolvedTag(string? tag) => tag switch
+    {
+        null => TagClass.None,
+        "!" => TagClass.Str,
+        "tag:yaml.org,2002:str" => TagClass.Str,
+        "tag:yaml.org,2002:int" => TagClass.Int,
+        "tag:yaml.org,2002:float" => TagClass.Float,
+        "tag:yaml.org,2002:bool" => TagClass.Bool,
+        "tag:yaml.org,2002:null" => TagClass.Null,
+        "tag:yaml.org,2002:binary" => TagClass.Binary,
+        "tag:yaml.org,2002:map" => TagClass.Map,
+        "tag:yaml.org,2002:seq" => TagClass.Seq,
+        _ => TagClass.Unknown,
+    };
 
     [Fact]
     public void Nodes_that_share_a_tag_share_its_string()
