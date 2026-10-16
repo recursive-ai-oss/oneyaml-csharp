@@ -139,6 +139,24 @@ public class AttributeFollowUpTests
         Assert.Equal(1L, Assert.IsType<Wild>(Read<Home>(path, pets)!.Pet).More["z"]);
     }
 
+    [Theory, MemberData(nameof(Paths))]
+    public void Extension_data_is_written_for_a_member_that_left_itself_out(int path)
+    {
+        if (path == 2)
+        {
+            return;
+        }
+
+        var left = new Optional();
+        left.Extra["name"] = "kept";
+        left.Extra["other"] = 1;
+        Assert.Equal("name: kept\nother: 1\n", Write(path, left));
+
+        var written = new Optional { Name = "own" };
+        written.Extra["name"] = "dropped";
+        Assert.Equal("name: own\n", Write(path, written));
+    }
+
     // ---- mistakes in the attributes ----
 
     [Fact]

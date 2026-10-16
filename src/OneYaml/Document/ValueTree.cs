@@ -37,6 +37,9 @@ internal struct VNode
 
     /// <summary>The scalar's UTF-8 text.</summary>
     public byte[]? Text;
+
+    /// <summary>Whether the scalar is written with a <c>!!float</c> tag: its text is integer-shaped and would read as an integer without it.</summary>
+    public bool FloatTag;
 }
 
 /// <summary>
@@ -633,14 +636,12 @@ internal sealed class ValueTree
         try
         {
             byte[] bytes = kind == ScalarKind.Null && text.IsEmpty ? "null"u8.ToArray() : text.ToArray();
-            if (kind == ScalarKind.Float && CoreSchema.ResolvePlain(text) != ScalarKind.Float)
-            {
-                // A float tag lets integer text stand for a float (!!float 1). Written plain it would read as an
-                // integer, so the copy spells the fraction out.
-                bytes = [.. bytes, (byte)'.', (byte)'0'];
-            }
+            VNode made = Make(kind, bytes);
 
-            return Make(kind, bytes);
+            // A float tag lets integer text stand for a float (!!float 1). Written plain it would read as an integer, so
+            // the copy keeps the tag and the source's own spelling.
+            made.FloatTag = kind == ScalarKind.Float && CoreSchema.ResolvePlain(text) != ScalarKind.Float;
+            return made;
         }
         finally
         {

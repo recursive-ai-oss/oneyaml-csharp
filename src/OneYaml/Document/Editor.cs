@@ -233,7 +233,9 @@ internal static partial class Editor
 
         if (v.IsScalar)
         {
-            ref readonly VNode sv = ref v[0];
+            // A kept tag already says float: the value's own tag would be a second one.
+            VNode sv = v[0];
+            sv.FloatTag &= !keepTag;
             if (sv.Scalar == ScalarKind.String && pref is ScalarWriteStyle.Literal or ScalarWriteStyle.Folded && n.Kind == NodeKind.Scalar && ctx == EmitContext.BlockValue
                 && Utf8YamlWriter.CanWriteBlock(sv.Text, ownerCol, contentIndent))
             {
@@ -286,7 +288,13 @@ internal static partial class Editor
             }
             else if ((n.Flags & NodeFlags.Bare) != 0)
             {
-                // A flow entry with no value: the colon is missing as well.
+                // A flow entry with no value: the colon is missing as well. Behind a bare tag or anchor the colon
+                // needs a blank first, or the tag would swallow it.
+                if (n.Start > 0 && !(src[n.Start - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r') && (s.Node(s.PrevSibling(node)).Flags & NodeFlags.Empty) != 0)
+                {
+                    edit.Write((byte)' ');
+                }
+
                 edit.Write(": "u8);
             }
             else if ((n.Flags & NodeFlags.Empty) != 0 && n.Start > 0 && !(src[n.Start - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r'))

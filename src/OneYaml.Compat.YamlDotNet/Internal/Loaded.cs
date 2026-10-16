@@ -178,43 +178,61 @@ internal sealed class Loaded : IDisposable
 
 // The prefix a %TAG directive gives a handle. It is shared by every tag written with the handle, so the work that
 // depends only on the prefix (hashing it, which can cost as much as the input) is done once.
-internal sealed class TagPrefix(string text)
+internal sealed class TagPrefix
 {
-    private int _state;
-    private bool _hashed;
+    public TagPrefix(string text)
+    {
+        Text = text;
+        State = TagText.Extend(TagText.Seed, text);
+    }
 
-    public string Text { get; } = text;
+    public string Text { get; }
 
     // The hash state after the prefix, to be continued over the suffix: a tag hashes the same whichever way it was split.
-    public int State
-    {
-        get
-        {
-            if (!_hashed)
-            {
-                _state = TagText.Hash(TagText.Seed, Text);
-                _hashed = true;
-            }
-
-            return _state;
-        }
-    }
+    // Computed here, once, so no reader sees a half-published value.
+    public long State { get; }
 }
 
-// Hashing and comparing tags as prefix + suffix pairs, without building the joined text.
+// Hashing and comparing tags as prefix + suffix pairs, without building the joined text. The hash is polynomial modulo
+// 2^61 - 1 with a base drawn at random per process, so tags cannot be crafted to collide ahead of time.
 internal static class TagText
 {
-    public const int Seed = unchecked((int)2166136261);
+    private const ulong Modulus = (1UL << 61) - 1;
+    private static readonly ulong Base = DrawBase();
 
-    public static int Hash(int state, ReadOnlySpan<char> text)
+    public const long Seed = 0;
+
+    private static ulong DrawBase()
     {
+        Span<byte> bytes = stackalloc byte[8];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        return (System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(bytes) % (Modulus - 1000)) + 500;
+    }
+
+    // Continues a hash state over more text.
+    public static long Extend(long state, ReadOnlySpan<char> text)
+    {
+        ulong h = (ulong)state;
         foreach (char c in text)
         {
-            state = unchecked((state ^ c) * 16777619);
+            ulong high = Math.BigMul(h, Base, out ulong low);
+            ulong r = (low & Modulus) + ((low >> 61) | (high << 3));
+            r += c + 1UL;
+            r = (r & Modulus) + (r >> 61);
+            if (r >= Modulus)
+            {
+                r -= Modulus;
+            }
+
+            h = r;
         }
 
-        return state;
+        return (long)h;
     }
+
+    public static int Finish(long state) => unchecked((int)state ^ (int)(state >> 32));
+
+    public static int Hash(long state, ReadOnlySpan<char> text) => Finish(Extend(state, text));
 
     // Whether prefix1 + suffix1 is the same text as prefix2 + suffix2.
     public static bool Equal(ReadOnlySpan<char> prefix1, ReadOnlySpan<char> suffix1, ReadOnlySpan<char> prefix2, ReadOnlySpan<char> suffix2)

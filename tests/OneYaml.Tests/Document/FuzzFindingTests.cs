@@ -116,7 +116,7 @@ public class FuzzFindingTests
     [InlineData("a: |\n  old\nb: 1", "[{\"op\":\"remove\",\"path\":\"/b\"}]", "a: |\n  old\n")]
     [InlineData("a: |\n  o", "[{\"op\":\"add\",\"path\":\"/b\",\"value\":1}]", "a: |-\n  o\nb: 1")]
     [InlineData("a: |+\n  o", "[{\"op\":\"add\",\"path\":\"/b\",\"value\":1}]", "a: |-\n  o\nb: 1")]
-    [InlineData("- !!float 1\n- x\n", "[{\"op\":\"copy\",\"path\":\"/1\",\"from\":\"/0\"}]", "- !!float 1\n- 1.0\n- x\n")]
+    [InlineData("- !!float 1\n- x\n", "[{\"op\":\"copy\",\"path\":\"/1\",\"from\":\"/0\"}]", "- !!float 1\n- !!float 1\n- x\n")]
     [InlineData("!!str #c\nr", "[{\"op\":\"replace\",\"path\":\"\",\"value\":[1]}]", " #c\n- 1")]
     [InlineData("?\n  \n:*b: 1\n", "[{\"op\":\"replace\",\"path\":\"/\",\"value\":\"v\"}]", "?\n: v\n  \n:*b: 1\n")]
     [InlineData("a:\n>\nx1:", "[{\"op\":\"replace\",\"path\":\"/a\",\"value\":1}]", "a:\n  1\nx1:")]

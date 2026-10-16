@@ -42,6 +42,11 @@ internal static class ValueWriter
 
         if (n.Scalar != ScalarKind.String)
         {
+            if (n.FloatTag)
+            {
+                o.Write("!!float "u8);
+            }
+
             o.Write(n.Text);
             return ScalarWriteStyle.Plain;
         }

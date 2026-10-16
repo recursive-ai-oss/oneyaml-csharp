@@ -477,6 +477,12 @@ internal static partial class Editor
             }
             else
             {
+                if (q >= src.Length && q - p0 > column)
+                {
+                    // The last line has only blanks, more than the scalar's indentation, and no line break.
+                    end = q;
+                }
+
                 break;
             }
         }
@@ -586,6 +592,20 @@ internal static partial class Editor
             {
                 from = s.PropStart(first);
                 to = s.PropStart(nextEntry);
+                if (map && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0)
+                {
+                    // An empty key sits at the next token, behind its own "?", which stays with it.
+                    int back = to;
+                    while (back > from && src[back - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+                    {
+                        back--;
+                    }
+
+                    if (back > from && src[back - 1] == (byte)'?')
+                    {
+                        to = back - 1;
+                    }
+                }
             }
             else
             {
@@ -648,12 +668,8 @@ internal static partial class Editor
     // Whether the entry that follows the text up to an offset is a colon with no key before it.
     private static bool IsColonOnlyEntry(ReadOnlySpan<byte> src, int from)
     {
-        int i = from;
-        while (i < src.Length && src[i] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
-        {
-            i++;
-        }
-
+        // Comment lines may sit between the removed entry and the colon.
+        int i = DocState.SkipTrivia(src, from);
         return i < src.Length && src[i] == (byte)':' && (i + 1 >= src.Length || src[i + 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r');
     }
 }

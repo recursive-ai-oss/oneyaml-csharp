@@ -125,6 +125,10 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
         }
     }
 
+    // Members are configured on first use, not when the metadata is created: configuring a member asks the options for
+    // the metadata of its type, and a type that refers to itself (a tree node, a pair of types that hold each other)
+    // would otherwise ask for metadata that is still being created. A configuration error is a NotSupportedException
+    // raised when the type is first used.
     private void Configure()
     {
         lock (_gate)
