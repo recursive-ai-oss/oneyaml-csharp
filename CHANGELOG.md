@@ -13,6 +13,8 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ### Fixed
 
+- **A repeated key inside a merge source is an error.** With `MergeKeys` on, a mapping used as the source of a `<<` key could repeat a key that binds to a member or a dictionary entry, and the second value was dropped without a word. It now fails with `DuplicateKey` at the repeated key, as a repeated key does anywhere else. The same key in two different sources is still fine; the first source wins.
+- **The YamlDotNet adapter's `Serializer` bounds a graph that shares its parts.** With `DisableAliases()` or `JsonCompatible()`, a graph in which objects are reachable many times over was written out in full without limit. The nodes written for repeated objects are now held to the alias budget of the limits and the writer throws `MaximumRecursionLevelReachedException` beyond it. `SerializerBuilder.WithLimits` sets the limits; the default is `YamlLimits.Default`.
 - The documentation of `MaxDepth` in the SharpYaml adapter now matches what it does: the property reads back the value set, and the lower of it and `Limits.MaxDepth` applies.
 
 ## [1.0.0] - 2026-10-16

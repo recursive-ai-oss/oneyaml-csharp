@@ -16,6 +16,27 @@ internal struct MemberSet
 
     public MemberSet(int count) => _high = count > 64 ? new ulong[(count - 1) / 64] : null;
 
+    // Adds every member of another set of the same size.
+    public void UnionWith(in MemberSet other)
+    {
+        _low |= other._low;
+        if (_high is not null)
+        {
+            for (int i = 0; i < _high.Length; i++)
+            {
+                _high[i] |= other._high![i];
+            }
+        }
+    }
+
+    // A set of its own with the same members.
+    public MemberSet Copy()
+    {
+        MemberSet copy = this;
+        copy._high = (ulong[]?)_high?.Clone();
+        return copy;
+    }
+
     public bool Contains(int index) =>
         index < 64 ? (_low & (1UL << index)) != 0 : (_high![(index / 64) - 1] & (1UL << (index % 64))) != 0;
 
@@ -397,7 +418,15 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                     throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
                 }
 
-                ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                if (merging)
+                {
+                    ReadMergeInSource(ref reader, options, ref instance, slots, ref seen, ref merged);
+                }
+                else
+                {
+                    ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                }
+
                 continue;
             }
 
@@ -480,7 +509,15 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                     throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
                 }
 
-                ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                if (merging)
+                {
+                    ReadMergeInSource(ref reader, options, ref instance, slots, ref seen, ref merged);
+                }
+                else
+                {
+                    ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                }
+
                 continue;
             }
 
@@ -625,14 +662,21 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     {
         if (merging)
         {
-            // A merged entry never replaces an explicit key or an entry merged before it.
-            if (seen.Contains(index) || merged.Contains(index))
+            // A merged mapping is read with the members that are decided already in `seen` and the members this very
+            // mapping has given in `merged`, so that a key twice in it is an error, and an entry never replaces an
+            // explicit key or an entry merged before it.
+            if (merged.Contains(index))
+            {
+                throw DuplicateKey(in reader, keyStart);
+            }
+
+            merged.Add(index);
+            if (seen.Contains(index))
             {
                 reader.Skip();
                 return false;
             }
 
-            merged.Add(index);
             return true;
         }
 
@@ -645,37 +689,68 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         return true;
     }
 
+    // Reads one mapping that a merge key names. It is out of line and holds the two sets this mapping needs, so that
+    // only a merge pays for them: ReadMembers runs with the decided members as `seen` and an empty set as `merged`,
+    // and the keys the mapping gave are added to the caller's set afterwards.
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void ReadMergedMapping(
         ref Utf8YamlReader reader,
         YamlSerializerOptions options,
         ref T instance,
         object?[]? slots,
         ref MemberSet seen,
-        ref MemberSet merged)
+        ref MemberSet merged,
+        bool inSource)
     {
+        MemberSet decided = seen.Copy();
+        decided.UnionWith(in merged);
+        var own = new MemberSet(_info.Props.Length);
         if (_info.Extension is null)
         {
-            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);
+            ReadMembers(ref reader, options, ref instance, slots, ref decided, ref own, merging: true);
         }
         else
         {
-            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ReadMerging, null);
+            ReadMembersGeneral(ref reader, options, ref instance, slots, ref decided, ref own, ReadMerging, null);
+        }
+
+        // Inside another merged mapping the keys count as decided there, not as keys that mapping gave itself: an
+        // explicit key after the merge key still takes the place of a merged one.
+        if (inSource)
+        {
+            seen.UnionWith(in own);
+        }
+        else
+        {
+            merged.UnionWith(in own);
         }
     }
 
-    private void ReadMerge(
+    // The two ways into a merge: from a mapping that is read itself, and from a mapping that is a merge source. They are
+    // methods of their own, and ReadMergeCore takes the difference as an argument, so that the loops which call them keep
+    // the frames and argument lists they had before.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReadMerge(ref Utf8YamlReader reader, YamlSerializerOptions options, ref T instance, object?[]? slots, ref MemberSet seen, ref MemberSet merged) =>
+        ReadMergeCore(ref reader, options, ref instance, slots, ref seen, ref merged, inSource: false);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReadMergeInSource(ref Utf8YamlReader reader, YamlSerializerOptions options, ref T instance, object?[]? slots, ref MemberSet seen, ref MemberSet merged) =>
+        ReadMergeCore(ref reader, options, ref instance, slots, ref seen, ref merged, inSource: true);
+
+    private void ReadMergeCore(
         ref Utf8YamlReader reader,
         YamlSerializerOptions options,
         ref T instance,
         object?[]? slots,
         ref MemberSet seen,
-        ref MemberSet merged)
+        ref MemberSet merged,
+        bool inSource)
     {
         // A merge value may itself hold a merge key, so this recurses with the input.
         ConverterGuards.EnsureStack(in reader);
         if (reader.Type == YamlTokenType.MappingStart)
         {
-            ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged);
+            ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged, inSource);
         }
         else if (reader.Type == YamlTokenType.SequenceStart)
         {
@@ -686,7 +761,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                     throw reader.CreateException("A merge key needs a mapping or a sequence of mappings.");
                 }
 
-                ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged);
+                ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged, inSource);
             }
         }
         else

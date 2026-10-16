@@ -315,6 +315,41 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
         }
     }
 
+    // The entries of a mapping that a merge key names. It has a loop of its own so that the set of keys it has seen
+    // does not enlarge the frame of ReadEntries, which is on the stack once for every level of a nested document.
+    private void ReadMergedEntries(ref Utf8YamlReader reader, YamlSerializerOptions options, Dictionary<TKey, TValue> dict, ref HashSet<TKey>? merged)
+    {
+        // A key twice in one merged mapping is an error, though the entries already there win over both.
+        HashSet<TKey>? own = null;
+        while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
+        {
+            if (ConverterGuards.IsMergeKey(in reader))
+            {
+                ReadMerge(ref reader, options, dict, ref merged);
+                continue;
+            }
+
+            int keyStart = reader.Start;
+            TKey key = ReadKey(ref reader, options);
+            if (!reader.Read())
+            {
+                throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+            }
+
+            TValue value = _value.ReadValue(ref reader, options)!;
+            if (!(own ??= []).Add(key))
+            {
+                throw reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", keyStart);
+            }
+
+            // Merged entries never replace an entry that is already there.
+            if (dict.TryAdd(key, value))
+            {
+                (merged ??= []).Add(key);
+            }
+        }
+    }
+
     private void ReadMerge(ref Utf8YamlReader reader, YamlSerializerOptions options, Dictionary<TKey, TValue> dict, ref HashSet<TKey>? merged)
     {
         // A merge value may itself hold a merge key, so this recurses with the input.
@@ -326,7 +361,7 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
 
         if (reader.Type == YamlTokenType.MappingStart)
         {
-            ReadEntries(ref reader, options, dict, ref merged, merging: true);
+            ReadMergedEntries(ref reader, options, dict, ref merged);
         }
         else if (reader.Type == YamlTokenType.SequenceStart)
         {
@@ -337,7 +372,7 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
                     throw reader.CreateException("A merge key needs a mapping or a sequence of mappings.");
                 }
 
-                ReadEntries(ref reader, options, dict, ref merged, merging: true);
+                ReadMergedEntries(ref reader, options, dict, ref merged);
             }
         }
         else
