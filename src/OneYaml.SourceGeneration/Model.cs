@@ -17,6 +17,8 @@ internal enum TypeShape
     Interface,
     CustomDictionary,
     CustomCollection,
+    ImmutableCollection,
+    ImmutableDictionary,
     Object,
 }
 

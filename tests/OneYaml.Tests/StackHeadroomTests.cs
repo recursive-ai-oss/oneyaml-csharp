@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using Xunit;
 
@@ -14,6 +16,9 @@ internal sealed class ChainNode
     public string? S { get; set; }
 }
 
+// Bound through its constructor: the reader holds every level's arguments until the innermost value is read.
+internal sealed record RecordNode(RecordNode? C, string? S);
+
 internal sealed class ObjectBox
 {
     public object? Child { get; set; }
@@ -25,6 +30,7 @@ internal sealed class TreeNode
 }
 
 [YamlSerializable(typeof(ChainNode))]
+[YamlSerializable(typeof(RecordNode))]
 [YamlSerializable(typeof(ObjectBox))]
 [YamlSerializable(typeof(TreeNode))]
 [YamlSerializable(typeof(object))]
@@ -37,6 +43,13 @@ public class StackHeadroomTests
     private static int Levels => YamlLimits.Default.MaxDepth - 1;
 
     private static YamlTypeInfo<T> Generated<T>() => (YamlTypeInfo<T>)new HeadroomContext().GetTypeInfo(typeof(T))!;
+
+    // The depth limit is sized for optimised code. Unoptimised frames are several times larger, so a build
+    // without optimisation cannot reach it on a 1 MB stack, and these tests say so instead of failing.
+    private static void SkipWhenUnoptimised() =>
+        Assert.SkipWhen(
+            typeof(YamlSerializer).Assembly.GetCustomAttribute<DebuggableAttribute>() is { IsJITOptimizerDisabled: true },
+            "The library is built without optimisation, whose frames are too large to reach the depth limit on a 1 MB stack.");
 
     private static void OnMegabyteStack(Action run)
     {
@@ -83,6 +96,17 @@ public class StackHeadroomTests
         return node;
     }
 
+    private static int Length(RecordNode? node)
+    {
+        int n = 0;
+        for (; node is not null; node = node.C)
+        {
+            n++;
+        }
+
+        return n;
+    }
+
     private static int Length(ChainNode? node)
     {
         int n = 0;
@@ -112,6 +136,20 @@ public class StackHeadroomTests
     {
         string yaml = BlockChain(Levels);
         OnMegabyteStack(() => Assert.Equal(Levels + 1, Length(YamlSerializer.Deserialize<ChainNode>(yaml))));
+    }
+
+    [Fact]
+    public void Constructor_bound_records_reach_the_depth_limit_by_both_paths()
+    {
+        SkipWhenUnoptimised();
+        string yaml = BlockChain(Levels);
+        YamlTypeInfo<RecordNode> info = Generated<RecordNode>();
+        OnMegabyteStack(() =>
+        {
+            RecordNode? reflected = YamlSerializer.Deserialize<RecordNode>(yaml);
+            Assert.Equal(Levels + 1, Length(reflected));
+            Assert.Equal(Levels + 1, Length(YamlSerializer.Deserialize(yaml, info)));
+        });
     }
 
     [Fact]
@@ -176,6 +214,7 @@ public class StackHeadroomTests
     [Fact]
     public void Objects_and_dictionaries_alternating_under_object_members_reach_the_depth_limit()
     {
+        SkipWhenUnoptimised();
         object? value = ObjectChain(Levels, alternate: true);
         YamlTypeInfo<object> info = Generated<object>();
         OnMegabyteStack(() =>

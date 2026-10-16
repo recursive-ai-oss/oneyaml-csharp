@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
 using OneYaml.Parsing;
+using OneYaml.Serialization.Metadata;
 
 namespace OneYaml;
 
@@ -266,7 +267,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
         if (!skipped.Add(skippedKey, reader.Source))
         {
-            throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
+            throw DuplicateKey(in reader, keyStart);
         }
 
         reader.Skip();
@@ -291,7 +292,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
         if (seen.Contains(index))
         {
-            throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", reader.Source, keyStart);
+            throw DuplicateKey(in reader, keyStart);
         }
 
         seen.Add(index);
@@ -341,8 +342,12 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         reader.CreateException($"This mapping key is a collection; {ConverterGuards.DescribeType(typeof(T))} binds scalar keys only. Read documents with complex keys through YamlDocument.");
 
     [MethodImpl(MethodImplOptions.NoInlining)]
+    private static YamlException DuplicateKey(in Utf8YamlReader reader, int keyStart) =>
+        reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", keyStart);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static YamlException UnmappedKey(in Utf8YamlReader reader, int keyStart) =>
-        YamlException.At(YamlErrorCategory.Binding, $"The key is not a member of {ConverterGuards.DescribeType(typeof(T))}.", reader.Source, keyStart);
+        reader.ErrorAtKey(YamlErrorCategory.Binding, $"The key '{{0}}' is not a member of {ConverterGuards.DescribeType(typeof(T))}.", keyStart);
 
     private static int FindMember(ref Utf8YamlReader reader, YamlTypeInfo<T> info)
     {
@@ -372,7 +377,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         {
             if (p.IsRequired && !seen.Contains(p.Index) && !merged.Contains(p.Index))
             {
-                throw YamlException.At(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", reader.Source, start);
+                throw reader.ErrorAt(YamlErrorCategory.Binding, $"The required key '{p.Name}' is missing.", start);
             }
         }
     }

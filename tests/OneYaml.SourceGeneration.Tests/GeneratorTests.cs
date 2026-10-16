@@ -38,6 +38,33 @@ public class GeneratorTests
         }
         """;
 
+    private const string Immutables = Header + """
+        using System.Collections.Immutable;
+
+        namespace Imm;
+
+        public enum Access
+        {
+            [YamlEnumMemberName("ro")] ReadOnly,
+            ReadWrite,
+        }
+
+        public sealed class Holder
+        {
+            public ImmutableArray<int> Array { get; set; }
+            public ImmutableList<string>? List { get; set; }
+            public IImmutableSet<int>? Set { get; set; }
+            public ImmutableStack<int>? Stack { get; set; }
+            public ImmutableDictionary<string, Access>? Map { get; set; }
+            public ImmutableSortedDictionary<string, int>? Sorted { get; set; }
+        }
+
+        [YamlSerializable(typeof(Holder))]
+        public partial class ImmContext : YamlSerializerContext
+        {
+        }
+        """;
+
     [Fact]
     public void A_context_gets_metadata_that_compiles_cleanly()
     {
@@ -50,6 +77,7 @@ public class GeneratorTests
 
     [Theory]
     [InlineData("Demo", Demo)]
+    [InlineData("Immutable", Immutables)]
     [InlineData("Nested", Header + """
         public sealed class Item { public string Name { get; set; } = ""; public Item[] Parts { get; set; } = []; }
 
@@ -74,6 +102,33 @@ public class GeneratorTests
         // so the source location is not usable on a build server.
         string expected = Path.Combine(AppContext.BaseDirectory, "Snapshots", name + ".g.cs.txt");
         Assert.Equal(File.ReadAllText(expected).Replace("\r\n", "\n", StringComparison.Ordinal), actual);
+    }
+
+    [Fact]
+    public void Immutable_collections_and_attributed_enums_compile_cleanly_and_use_the_library_converters()
+    {
+        GeneratorRun run = GeneratorHarness.Run(Immutables);
+        string source = Assert.Single(run.Sources).Source;
+
+        Assert.Empty(run.GeneratorDiagnostics);
+        Assert.DoesNotContain(run.CompilationDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
+        Assert.Contains("CreateConvertedCollectionInfo<global::System.Collections.Immutable.ImmutableArray<int>, int>", source, StringComparison.Ordinal);
+        Assert.Contains("static v => v.IsDefault", source, StringComparison.Ordinal);
+        Assert.Contains("CreateConvertedDictionaryInfo<global::System.Collections.Immutable.ImmutableSortedDictionary<string, int>, string, int>", source, StringComparison.Ordinal);
+        Assert.Contains("ImmutableStack.CreateRange(global::System.Linq.Enumerable.Reverse(l))", source, StringComparison.Ordinal);
+        // The converter reads the member attributes at run time, so reflection and generated metadata name enum values alike.
+        Assert.Contains("CreateEnumInfo<global::Imm.Access>", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_emitted_code_uses_the_metadata_namespace_for_the_plumbing()
+    {
+        string source = Assert.Single(GeneratorHarness.Run(Demo).Sources).Source;
+
+        Assert.Contains("global::OneYaml.Serialization.Metadata.YamlMetadataServices", source, StringComparison.Ordinal);
+        Assert.Contains("global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("global::OneYaml.YamlMetadataServices", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("global::OneYaml.YamlPropertyInfo", source, StringComparison.Ordinal);
     }
 
     [Fact]

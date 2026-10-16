@@ -23,37 +23,37 @@ namespace Demo
         private global::OneYaml.YamlTypeInfo<global::Demo.Server> _Server;
 
         /// <summary>Metadata for <c>Demo.Server</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::Demo.Server> Server => _Server ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Server>(Options) ?? CreateServer();
+        public global::OneYaml.YamlTypeInfo<global::Demo.Server> Server => _Server ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Server>(Options) ?? CreateServer();
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Server> CreateServer()
         {
-            var values = new global::OneYaml.YamlObjectInfoValues<global::Demo.Server>
+            var values = new global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<global::Demo.Server>
             {
                 ObjectCreator = static () => new global::Demo.Server(),
-                PropertyMetadataInitializer = _ => new global::OneYaml.YamlPropertyInfo[]
+                PropertyMetadataInitializer = _ => new global::OneYaml.Serialization.Metadata.YamlPropertyInfo[]
                 {
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, string>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Server, string>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, string>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Server, string>
                     {
                         Name = "Host",
                         PropertyTypeInfo = this.String,
                         Getter = static o => o.Host,
                         Setter = static (o, v) => o.Host = v,
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, int>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Server, int>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, int>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Server, int>
                     {
                         Name = "Port",
                         PropertyTypeInfo = this.Int32,
                         Getter = static o => o.Port,
                         Setter = static (o, v) => SetInit1(o, v),
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, global::System.Collections.Generic.List<string>>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Server, global::System.Collections.Generic.List<string>>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, global::System.Collections.Generic.List<string>>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Server, global::System.Collections.Generic.List<string>>
                     {
                         Name = "Tags",
                         PropertyTypeInfo = this.ListString,
                         Getter = static o => o.Tags,
                         Setter = static (o, v) => o.Tags = v,
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, int?>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Server, int?>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Server, int?>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Server, int?>
                     {
                         Name = "MaxConnections",
                         SerializedName = "max-conn",
@@ -63,34 +63,34 @@ namespace Demo
                     }),
                 },
             };
-            return global::OneYaml.YamlMetadataServices.CreateObjectInfo<global::Demo.Server>(Options, values);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateObjectInfo<global::Demo.Server>(Options, values);
         }
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Limits> _Limits;
 
         /// <summary>Metadata for <c>Demo.Limits</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::Demo.Limits> Limits => _Limits ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Limits>(Options) ?? CreateLimits();
+        public global::OneYaml.YamlTypeInfo<global::Demo.Limits> Limits => _Limits ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Limits>(Options) ?? CreateLimits();
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Limits> CreateLimits()
         {
-            var values = new global::OneYaml.YamlObjectInfoValues<global::Demo.Limits>
+            var values = new global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<global::Demo.Limits>
             {
                 ConstructorCreator = static args => new global::Demo.Limits(args[0] is null ? default(int) : (int)args[0], (string)args[1]),
-                ConstructorParameterMetadataInitializer = static () => new global::OneYaml.YamlParameterInfo[]
+                ConstructorParameterMetadataInitializer = static () => new global::OneYaml.Serialization.Metadata.YamlParameterInfo[]
                 {
-                    new global::OneYaml.YamlParameterInfo("Cpu", typeof(int)),
-                    new global::OneYaml.YamlParameterInfo("Memory", typeof(string), true, "1Gi"),
+                    new global::OneYaml.Serialization.Metadata.YamlParameterInfo("Cpu", typeof(int)),
+                    new global::OneYaml.Serialization.Metadata.YamlParameterInfo("Memory", typeof(string), true, "1Gi"),
                 },
-                PropertyMetadataInitializer = _ => new global::OneYaml.YamlPropertyInfo[]
+                PropertyMetadataInitializer = _ => new global::OneYaml.Serialization.Metadata.YamlPropertyInfo[]
                 {
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Limits, int>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Limits, int>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Limits, int>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Limits, int>
                     {
                         Name = "Cpu",
                         PropertyTypeInfo = this.Int32,
                         Getter = static o => o.Cpu,
                         Setter = static (_, _) => { },
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Limits, string>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Limits, string>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Limits, string>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Limits, string>
                     {
                         Name = "Memory",
                         PropertyTypeInfo = this.String,
@@ -99,29 +99,29 @@ namespace Demo
                     }),
                 },
             };
-            return global::OneYaml.YamlMetadataServices.CreateObjectInfo<global::Demo.Limits>(Options, values);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateObjectInfo<global::Demo.Limits>(Options, values);
         }
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Pair> _Pair;
 
         /// <summary>Metadata for <c>Demo.Pair</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::Demo.Pair> Pair => _Pair ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Pair>(Options) ?? CreatePair();
+        public global::OneYaml.YamlTypeInfo<global::Demo.Pair> Pair => _Pair ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Pair>(Options) ?? CreatePair();
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Pair> CreatePair()
         {
-            var values = new global::OneYaml.YamlObjectInfoValues<global::Demo.Pair>
+            var values = new global::OneYaml.Serialization.Metadata.YamlObjectInfoValues<global::Demo.Pair>
             {
                 ObjectCreator = static () => default(global::Demo.Pair),
-                PropertyMetadataInitializer = _ => new global::OneYaml.YamlPropertyInfo[]
+                PropertyMetadataInitializer = _ => new global::OneYaml.Serialization.Metadata.YamlPropertyInfo[]
                 {
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Pair, int>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Pair, int>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Pair, int>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Pair, int>
                     {
                         Name = "Right",
                         PropertyTypeInfo = this.Int32,
                         Getter = static o => o.Right,
                         RefSetter = static (ref global::Demo.Pair o, int v) => o.Right = v,
                     }),
-                    global::OneYaml.YamlMetadataServices.CreatePropertyInfo<global::Demo.Pair, int>(new global::OneYaml.YamlPropertyInfoValues<global::Demo.Pair, int>
+                    global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreatePropertyInfo<global::Demo.Pair, int>(new global::OneYaml.Serialization.Metadata.YamlPropertyInfoValues<global::Demo.Pair, int>
                     {
                         Name = "Left",
                         PropertyTypeInfo = this.Int32,
@@ -130,67 +130,67 @@ namespace Demo
                     }),
                 },
             };
-            return global::OneYaml.YamlMetadataServices.CreateObjectInfo<global::Demo.Pair>(Options, values);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateObjectInfo<global::Demo.Pair>(Options, values);
         }
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Mode> _Mode;
 
         /// <summary>Metadata for <c>Demo.Mode</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::Demo.Mode> Mode => _Mode ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Mode>(Options) ?? CreateMode();
+        public global::OneYaml.YamlTypeInfo<global::Demo.Mode> Mode => _Mode ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::Demo.Mode>(Options) ?? CreateMode();
 
         private global::OneYaml.YamlTypeInfo<global::Demo.Mode> CreateMode()
         {
-            return global::OneYaml.YamlMetadataServices.CreateEnumInfo<global::Demo.Mode>(Options);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateEnumInfo<global::Demo.Mode>(Options);
         }
 
         private global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>> _DictionaryStringLimits;
 
         /// <summary>Metadata for <c>System.Collections.Generic.Dictionary&lt;string, Demo.Limits&gt;</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>> DictionaryStringLimits => _DictionaryStringLimits ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>>(Options) ?? CreateDictionaryStringLimits();
+        public global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>> DictionaryStringLimits => _DictionaryStringLimits ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>>(Options) ?? CreateDictionaryStringLimits();
 
         private global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.Dictionary<string, global::Demo.Limits>> CreateDictionaryStringLimits()
         {
-            return global::OneYaml.YamlMetadataServices.CreateDictionaryInfo<string, global::Demo.Limits>(Options, this.String, this.Limits);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateDictionaryInfo<string, global::Demo.Limits>(Options, this.String, this.Limits);
         }
 
         private global::OneYaml.YamlTypeInfo<string> _String;
 
         /// <summary>Metadata for <c>string</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<string> String => _String ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<string>(Options) ?? CreateString();
+        public global::OneYaml.YamlTypeInfo<string> String => _String ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<string>(Options) ?? CreateString();
 
         private global::OneYaml.YamlTypeInfo<string> CreateString()
         {
-            return global::OneYaml.YamlMetadataServices.CreateValueInfo<string>(Options, global::OneYaml.YamlMetadataServices.GetBuiltInConverter<string>(Options));
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateValueInfo<string>(Options, global::OneYaml.Serialization.Metadata.YamlMetadataServices.GetBuiltInConverter<string>(Options));
         }
 
         private global::OneYaml.YamlTypeInfo<int> _Int32;
 
         /// <summary>Metadata for <c>int</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<int> Int32 => _Int32 ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<int>(Options) ?? CreateInt32();
+        public global::OneYaml.YamlTypeInfo<int> Int32 => _Int32 ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<int>(Options) ?? CreateInt32();
 
         private global::OneYaml.YamlTypeInfo<int> CreateInt32()
         {
-            return global::OneYaml.YamlMetadataServices.CreateValueInfo<int>(Options, global::OneYaml.YamlMetadataServices.GetBuiltInConverter<int>(Options));
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateValueInfo<int>(Options, global::OneYaml.Serialization.Metadata.YamlMetadataServices.GetBuiltInConverter<int>(Options));
         }
 
         private global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.List<string>> _ListString;
 
         /// <summary>Metadata for <c>System.Collections.Generic.List&lt;string&gt;</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.List<string>> ListString => _ListString ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<global::System.Collections.Generic.List<string>>(Options) ?? CreateListString();
+        public global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.List<string>> ListString => _ListString ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<global::System.Collections.Generic.List<string>>(Options) ?? CreateListString();
 
         private global::OneYaml.YamlTypeInfo<global::System.Collections.Generic.List<string>> CreateListString()
         {
-            return global::OneYaml.YamlMetadataServices.CreateListInfo<string>(Options, this.String);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateListInfo<string>(Options, this.String);
         }
 
         private global::OneYaml.YamlTypeInfo<int?> _NullableInt32;
 
         /// <summary>Metadata for <c>int?</c>.</summary>
-        public global::OneYaml.YamlTypeInfo<int?> NullableInt32 => _NullableInt32 ??= global::OneYaml.YamlMetadataServices.TryCreateCustomConverterInfo<int?>(Options) ?? CreateNullableInt32();
+        public global::OneYaml.YamlTypeInfo<int?> NullableInt32 => _NullableInt32 ??= global::OneYaml.Serialization.Metadata.YamlMetadataServices.TryCreateCustomConverterInfo<int?>(Options) ?? CreateNullableInt32();
 
         private global::OneYaml.YamlTypeInfo<int?> CreateNullableInt32()
         {
-            return global::OneYaml.YamlMetadataServices.CreateNullableInfo<int>(Options, this.Int32);
+            return global::OneYaml.Serialization.Metadata.YamlMetadataServices.CreateNullableInfo<int>(Options, this.Int32);
         }
 
         /// <inheritdoc/>

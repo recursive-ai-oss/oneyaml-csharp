@@ -135,15 +135,12 @@ internal sealed class AnchorBook
         }
     }
 
+    // Seeded per process, so no input can be built to put many names in one bucket.
     public static uint HashOf(ReadOnlySpan<byte> name)
     {
-        uint h = 2166136261;
-        foreach (byte b in name)
-        {
-            h = (h ^ b) * 16777619;
-        }
-
-        return h;
+        HashCode h = default;
+        h.AddBytes(name);
+        return (uint)h.ToHashCode();
     }
 
     public int Find(ReadOnlySpan<byte> src, ReadOnlySpan<byte> name, uint hash)
@@ -317,11 +314,51 @@ public ref partial struct Utf8YamlReader
     /// <summary>Creates a binding error that points at the current token.</summary>
     /// <param name="message">What went wrong.</param>
     /// <returns>The exception, ready to throw.</returns>
-    public readonly YamlException CreateException(string message) =>
-        YamlException.At(YamlErrorCategory.Binding, message, _src, Start);
+    public readonly YamlException CreateException(string message) => Error(YamlErrorCategory.Binding, message);
 
     internal readonly YamlException Error(YamlErrorCategory category, string message) =>
-        YamlException.At(category, message, _src, Start);
+        ErrorAt(category, message, Start, Type is YamlTokenType.MappingStart or YamlTokenType.SequenceStart);
+
+    // An error at a given offset, such as the start of a key. The path to the node is worked out here, from
+    // the text, because an error is the only time it is needed. A limit error carries none: it can be about
+    // a nesting too deep to write out.
+    internal readonly YamlException ErrorAt(YamlErrorCategory category, string message, int offset, bool atCollection = false) =>
+        YamlException.Located(category, message, _src, offset, category == YamlErrorCategory.Limit ? null : ErrorPath.Find(_src, offset, atCollection));
+
+    internal readonly YamlException ErrorAtKey(YamlErrorCategory category, string template, int offset) =>
+        YamlException.AtKey(category, template, _src, offset);
+
+    // The current scalar as quoted text for a message, cut short so a huge value cannot flood a log.
+    internal readonly string DescribeValue()
+    {
+        if (Type != YamlTokenType.Scalar)
+        {
+            return string.Empty;
+        }
+
+        ReadOnlySpan<byte> raw = _src.Slice(ContentStart, ContentEnd - ContentStart);
+        bool cut = raw.Length > 40;
+        if (cut)
+        {
+            raw = raw[..40];
+            // Do not cut inside a multi-byte character.
+            int n = raw.Length;
+            while (n > 0 && (raw[n - 1] & 0xC0) == 0x80)
+            {
+                n--;
+            }
+
+            if (n > 0 && raw[n - 1] >= 0xC0)
+            {
+                n--;
+            }
+
+            raw = raw[..n];
+        }
+
+        string text = Encoding.UTF8.GetString(raw).ReplaceLineEndings(" ");
+        return cut ? "'" + text + "...'" : "'" + text + "'";
+    }
 
     /// <summary>Returns pooled buffers. The serializer calls it; so must anyone who creates a reader.</summary>
     internal void Dispose()
@@ -480,7 +517,7 @@ public ref partial struct Utf8YamlReader
             case YamlTokenType.SequenceStart:
                 if (++_depth > _limits.MaxDepth)
                 {
-                    throw Error(YamlErrorCategory.Limit, "The nesting is deeper than the configured limit.");
+                    throw Error(YamlErrorCategory.Limit, $"The nesting is deeper than the limit MaxDepth ({_limits.MaxDepth}).");
                 }
 
                 break;
@@ -554,7 +591,7 @@ public ref partial struct Utf8YamlReader
                 Style = _r.ScalarStyle;
                 Escaped = _r.ValueIsEscapedOrFolded;
                 _r.GetScalarDetails(out ContentStart, out ContentEnd, out BlockIndent, out Chomping);
-                Tag = _r.HasTag ? ClassifyTag(_r.GetResolvedTag()) : TagClass.None;
+                Tag = _r.GetTagClass();
                 _liveNodes++;
                 _expNodes = Sat(_expNodes + 1);
                 _expBytes = Sat(_expBytes + (ContentEnd - ContentStart) + 1);
@@ -576,7 +613,7 @@ public ref partial struct Utf8YamlReader
                 break;
             case YamlTokenType.MappingStart:
             case YamlTokenType.SequenceStart:
-                Tag = _r.HasTag ? ClassifyTag(_r.GetResolvedTag()) : TagClass.None;
+                Tag = _r.GetTagClass();
                 Track(t);
                 _liveNodes++;
                 if (anchored)
@@ -639,7 +676,7 @@ public ref partial struct Utf8YamlReader
         _chargedBytes = Sat(_chargedBytes + e.Bytes);
         if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes) || _chargedBytes > _limits.AliasByteBudget(_src.Length))
         {
-            throw Error(YamlErrorCategory.Limit, "Expanding the aliases exceeds the configured limit.");
+            throw Error(YamlErrorCategory.Limit, $"Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}).");
         }
 
         _expNodes = Sat(_expNodes + e.Nodes);

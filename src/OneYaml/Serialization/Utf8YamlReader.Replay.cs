@@ -59,7 +59,7 @@ public ref partial struct Utf8YamlReader
                     _chargedBytes = Sat(_chargedBytes + a.Bytes);
                     if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes) || _chargedBytes > _limits.AliasByteBudget(_src.Length))
                     {
-                        throw Error(YamlErrorCategory.Limit, "Expanding the aliases exceeds the configured limit.");
+                        throw Error(YamlErrorCategory.Limit, $"Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}).");
                     }
 
                     break;

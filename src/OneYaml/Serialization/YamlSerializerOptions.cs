@@ -79,6 +79,21 @@ public sealed class YamlSerializerOptions
         init => _namingPolicy = value;
     }
 
+    /// <summary>
+    /// How enum members are named in YAML text. <see langword="null"/> (the default) uses the declared names
+    /// unchanged, so <c>PullPolicy.IfNotPresent</c> is written as <c>IfNotPresent</c>; set a policy such as
+    /// <see cref="JsonNamingPolicy.CamelCase"/> to rename them. A name given with
+    /// <see cref="YamlEnumMemberNameAttribute"/> or <c>JsonStringEnumMemberName</c> is used as written.
+    /// Reading accepts any letter case, the declared names and the attributed names.
+    /// </summary>
+    public JsonNamingPolicy? EnumNamingPolicy { get; init; }
+
+    /// <summary>
+    /// A name for the input, such as a file name. It starts the message of every <see cref="YamlException"/>
+    /// raised while reading with these options, followed by a colon.
+    /// </summary>
+    public string? SourceName { get; init; }
+
     /// <summary>Whether keys match member names without regard to case, after the naming policy. Off by default.</summary>
     public bool PropertyNameCaseInsensitive { get; init; }
 

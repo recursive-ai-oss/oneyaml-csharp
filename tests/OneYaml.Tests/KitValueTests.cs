@@ -14,7 +14,7 @@ public class KitValueTests
     {
         ["schema/mapping-as-a-mapping-key"] = (YamlErrorCategory.Binding, "complex keys"),
         ["schema/sequence-as-a-mapping-key"] = (YamlErrorCategory.Binding, "complex keys"),
-        ["schema/quoted-and-plain-keys-differ-by-type"] = (YamlErrorCategory.DuplicateKey, "same key twice"),
+        ["schema/quoted-and-plain-keys-differ-by-type"] = (YamlErrorCategory.DuplicateKey, "appears twice in the mapping"),
     };
 
     public static IEnumerable<object[]> Cases() => Corpus.Rows(Corpus.Tier(ValueCaseIds("schema", "safety", "parse", "diagnostics"), large: false), Corpus.KitVariable);

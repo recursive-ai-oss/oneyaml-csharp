@@ -304,7 +304,7 @@ public class WriterTests
         var byGuid = new Dictionary<Guid, int> { [Guid.Parse("00000000-0000-0000-0000-000000000001")] = 1 };
 
         Assert.Equal("1: one\n-2: minus two\n", Dump(byNumber));
-        Assert.Equal("darkGreen: 1\nred: 2\n", Dump(byColor));
+        Assert.Equal("DarkGreen: 1\nRed: 2\n", Dump(byColor));
         Assert.Equal("true: t\n", Dump(byFlag));
         Assert.Equal("1.5: x\n2.0: z\n", Dump(byDouble));
         Assert.Equal(byNumber, YamlSerializer.Deserialize<Dictionary<int, string>>(Dump(byNumber)));
@@ -399,14 +399,17 @@ public class WriterTests
     }
 
     [Fact]
-    public void Enums_are_written_by_name_through_the_policy_and_flags_by_their_plain_names()
+    public void Enums_are_written_by_declared_name_or_through_the_enum_policy_and_flags_by_their_plain_names()
     {
-        Assert.Equal("darkGreen\n", Dump(Color.DarkGreen));
+        var camel = new YamlSerializerOptions { EnumNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase };
+        Assert.Equal("DarkGreen\n", Dump(Color.DarkGreen));
+        Assert.Equal("darkGreen\n", Dump(Color.DarkGreen, camel));
         Assert.Equal("DarkGreen\n", Dump(Color.DarkGreen, new YamlSerializerOptions { PropertyNamingPolicy = null }));
-        Assert.Equal("read\n", Dump(Perm.Read));
+        Assert.Equal("Read\n", Dump(Perm.Read));
+        Assert.Equal("read\n", Dump(Perm.Read, camel));
         Assert.Equal("Read, Write\n", Dump(Perm.Read | Perm.Write).Replace("'", string.Empty, StringComparison.Ordinal));
         Assert.Equal("7\n", Dump((Color)7));
-        Assert.Equal("none\n", Dump(Perm.None));
+        Assert.Equal("None\n", Dump(Perm.None));
         Assert.Equal(Perm.Read | Perm.Write, YamlSerializer.Deserialize<Perm>(Dump(Perm.Read | Perm.Write)));
         Assert.Equal((Color)7, YamlSerializer.Deserialize<Color>(Dump((Color)7)));
     }
@@ -476,7 +479,7 @@ public class WriterTests
         string yaml = Dump(holder);
 
         Assert.Equal(
-            "value:\n  name: Ada\n  age: 0\n  nickname: null\n  tags:\n    - t\nbag:\n  nn: 1\n  color: blue\n  when: '2024-01-02'\n  p:\n    x: 1\n    'y': 2\n  bytes: !!binary AQ==\n",
+            "value:\n  name: Ada\n  age: 0\n  nickname: null\n  tags:\n    - t\nbag:\n  nn: 1\n  color: Blue\n  when: '2024-01-02'\n  p:\n    x: 1\n    'y': 2\n  bytes: !!binary AQ==\n",
             yaml);
     }
 

@@ -66,6 +66,10 @@ internal ref partial struct YamlReader
     private Token[]? _queueRented;
     private int _qHead;
     private int _qTail;
+
+    // Closers that wait in the queue as members of a run, beyond the one slot each run takes. The pending limit
+    // counts them, so it bounds tokens, not queue slots.
+    private int _runExtra;
     private int _tokensParsed;
     private int _lastTokenEnd;
 
@@ -154,12 +158,14 @@ internal ref partial struct YamlReader
             if (head.Kind == TokenKind.BlockEnd)
             {
                 head.X--;
+                _runExtra--;
                 return;
             }
 
             if (head.Kind is TokenKind.FlowSequenceEnd or TokenKind.FlowMappingEnd)
             {
                 head.X--;
+                _runExtra--;
                 head.Start++;
                 head.End++;
                 return;
@@ -171,6 +177,7 @@ internal ref partial struct YamlReader
         if (_qHead == _qTail)
         {
             _qHead = _qTail = 0;
+            _runExtra = 0;
         }
     }
 
@@ -246,7 +253,7 @@ internal ref partial struct YamlReader
                 throw Error("The input ended unexpectedly.", _src.Length);
             }
 
-            if (_qTail - _qHead > MaxPendingTokens)
+            if (_qTail - _qHead + (long)_runExtra > MaxPendingTokens)
             {
                 throw LimitError("A mapping key is too long to read.", _pos);
             }
@@ -445,6 +452,7 @@ internal ref partial struct YamlReader
             {
                 ref Token last = ref _queue[_qTail - 1];
                 last.X = last.X == 0 ? 2 : last.X + 1;
+                _runExtra++;
             }
 
             _indent = _indents[--_indentCount];
@@ -899,7 +907,7 @@ internal ref partial struct YamlReader
         // this one; saying so here stops a long run of brackets from filling the queue first.
         if (_flowLevel + _indentCount >= _limits.MaxDepth)
         {
-            throw LimitError("The nesting depth is larger than the configured limit.", _pos);
+            throw LimitError($"The nesting depth is larger than the limit MaxDepth ({_limits.MaxDepth}).", _pos);
         }
 
         SaveSimpleKey();
@@ -935,6 +943,7 @@ internal ref partial struct YamlReader
             if (last.Kind == kind && last.Start + members == _pos)
             {
                 last.X = members + 1;
+                _runExtra++;
                 _lastTokenEnd = _pos + 1;
                 _pos++;
                 return;
