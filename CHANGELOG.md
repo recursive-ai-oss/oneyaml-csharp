@@ -8,6 +8,7 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 - **`Get<object>` and `GetValue<object>` read collections.** Asking a node for `object`, through `YamlDocument.Get<object>`, `TryGet`, `YamlNode.GetValue<object>` or `TryGetValue`, now gives what `YamlSerializer.Deserialize<object>` gives: a `Dictionary<string, object?>` for a mapping and a `List<object?>` for a sequence. It used to fail with "The node is not a scalar".
 - **A reader that was copied and left behind says so.** A `Utf8YamlReader` shares its scanner with its copies. When a copy read past the end of its value, the original used to fail with a syntax error that blamed the input. It now throws `InvalidOperationException` that names the misuse; the same holds for a copy used after the original read on. Looking ahead on a copy inside the current value still works. The failure is reported when the reader hits the damaged position, so a copy that damaged a reader without causing an error stays undetected: do not copy the reader.
+- **Faster write-back of an unedited document.** `YamlDocument.ToUtf8Bytes` no longer clears the output array before copying into it.
 - **Error messages.** A refused alias expansion reads the same from a document and from the serializer, and names a position. A key discriminator that is missing points at the mapping, not at its first key. The SharpYaml adapter's messages state the position once.
 
 ### Fixed
