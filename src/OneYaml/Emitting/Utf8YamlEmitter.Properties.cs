@@ -18,42 +18,24 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>
     /// Gives the next value a tag. Call it before the value: a scalar, or the start of a mapping or sequence. The tag is the
-    /// full, resolved form that <see cref="Utf8YamlReader.Tag"/> returns, and is written in the shortest form that reads back
-    /// as the same tag: <c>tag:yaml.org,2002:str</c> as <c>!!str</c>, a local tag such as <c>!Sub</c> as it is, and any other
-    /// tag as a verbatim <c>!&lt;...&gt;</c> tag. Characters that a tag cannot hold are percent-encoded.
+    /// full, resolved form that <see cref="Utf8YamlReader.Tag"/> returns, and it is written so that it reads back as exactly that
+    /// tag: <c>tag:yaml.org,2002:str</c> as <c>!!str</c>, a local tag such as <c>!Sub</c> as it is, and any other tag as a
+    /// verbatim <c>!&lt;...&gt;</c> tag. Characters that a tag cannot hold are percent-encoded, so the local tag <c>!!foo</c>
+    /// (written <c>!%21foo</c> in a source) is written as <c>!%21foo</c> and is not taken for <c>tag:yaml.org,2002:foo</c>.
     /// </summary>
-    /// <param name="tag">The resolved tag.</param>
+    /// <param name="tag">The resolved tag, exactly as <see cref="Utf8YamlReader.Tag"/> or <see cref="YamlNode.Tag"/> gives it.</param>
     /// <exception cref="ArgumentNullException"><paramref name="tag"/> is <see langword="null"/>.</exception>
-    /// <exception cref="ArgumentException"><paramref name="tag"/> is empty, too long, has an unpaired surrogate, or is a tag as written in a source (<c>!&lt;...&gt;</c>) rather than a resolved one.</exception>
+    /// <exception cref="ArgumentException"><paramref name="tag"/> is empty, too long, or has an unpaired surrogate.</exception>
     /// <exception cref="YamlException">The next value already has a tag.</exception>
-    /// <remarks>The secondary shorthand is resolved for you: <c>!!str</c> is taken as <c>tag:yaml.org,2002:str</c>. A named handle such as
-    /// <c>!e!widget</c> cannot be resolved without its <c>%TAG</c> line, so pass the resolved tag (<see cref="YamlNode.Tag"/>) instead.
-    /// A tag applies to a value, not to a mapping key; writing a key after it, or ending a collection, is an error.</remarks>
+    /// <remarks>The tag is never resolved or rewritten: a shorthand such as <c>!!str</c> or <c>!e!widget</c> names a local tag
+    /// here, because that is what a reader returns for it. A tag applies to a value, not to a mapping key; writing a key after it,
+    /// or ending a collection, is an error.</remarks>
     public void WriteTag(string tag)
     {
         ArgumentNullException.ThrowIfNull(tag);
         if (tag.Length == 0 || tag.Length > MaxPropertyChars)
         {
             throw new ArgumentException($"A tag must have between 1 and {MaxPropertyChars} characters.", nameof(tag));
-        }
-
-        // Shorthand forms would otherwise be percent-encoded into a different tag, silently.
-        if (tag.StartsWith("!!", StringComparison.Ordinal))
-        {
-            if (tag.Length == 2)
-            {
-                throw new ArgumentException("The tag '!!' names nothing.", nameof(tag));
-            }
-
-            tag = string.Concat("tag:yaml.org,2002:", tag.AsSpan(2));
-        }
-        else if (tag.StartsWith("!<", StringComparison.Ordinal) && tag.EndsWith('>'))
-        {
-            throw new ArgumentException("The tag is written in its verbatim form; pass the resolved tag instead.", nameof(tag));
-        }
-        else if (IsNamedHandleShorthand(tag))
-        {
-            throw new ArgumentException("The tag uses a named handle, which needs its %TAG directive to resolve; pass the resolved tag instead.", nameof(tag));
         }
 
         if (tag.Length == 0 || tag.Length > MaxPropertyChars)
@@ -104,27 +86,6 @@ public sealed partial class Utf8YamlEmitter
         }
 
         _hasTag = true;
-    }
-
-    // "!name!suffix": a handle declared by a %TAG directive. Handle characters are letters, digits and '-'.
-    private static bool IsNamedHandleShorthand(string tag)
-    {
-        int close = tag.IndexOf('!', 1);
-        if (close < 2)
-        {
-            return false;
-        }
-
-        for (int i = 1; i < close; i++)
-        {
-            char c = tag[i];
-            if (!(char.IsAsciiLetterOrDigit(c) || c == '-'))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>
