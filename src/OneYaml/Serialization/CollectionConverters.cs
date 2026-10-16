@@ -280,6 +280,8 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
 
     private void ReadEntries(ref Utf8YamlReader reader, YamlSerializerOptions options, Dictionary<TKey, TValue> dict, ref HashSet<TKey>? merged, bool merging)
     {
+        // The keys of one merged mapping: a key twice in it is an error, though the entries already there win over both.
+        HashSet<TKey>? own = null;
         while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
         {
             if (ConverterGuards.IsMergeKey(in reader))
@@ -298,6 +300,11 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
             TValue value = _value.ReadValue(ref reader, options)!;
             if (merging)
             {
+                if (!(own ??= []).Add(key))
+                {
+                    throw reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", keyStart);
+                }
+
                 // Merged entries never replace an entry that is already there.
                 if (dict.TryAdd(key, value))
                 {

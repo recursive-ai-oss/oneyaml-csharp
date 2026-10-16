@@ -172,6 +172,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         int start = reader.Start;
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);
+        var noOwn = default(MemberSet);
         if (info.UsesConstructor)
         {
             return ReadThroughConstructor(ref reader, options, info, start, ReadNormal, null, ref seen, ref merged);
@@ -180,11 +181,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         T instance = info.CreateInstance();
         if (info.Extension is null)
         {
-            ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, merging: false);
+            ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, ref noOwn, merging: false);
         }
         else
         {
-            ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ReadNormal, null);
+            ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ref noOwn, ReadNormal, null);
         }
 
         if (info.RequiredCount > 0)
@@ -227,13 +228,14 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         info.EnsureConfigured();
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);
+        var noOwn = default(MemberSet);
         if (info.UsesConstructor)
         {
             return ReadThroughConstructor(ref reader, options, info, start, mode, discriminatorKey, ref seen, ref merged);
         }
 
         T instance = info.CreateInstance();
-        ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, mode, discriminatorKey);
+        ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ref noOwn, mode, discriminatorKey);
         if (info.RequiredCount > 0)
         {
             CheckRequired(in reader, start, ref seen, ref merged);
@@ -249,7 +251,8 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
     {
         object?[] slots = info.NewArguments();
         T instance = default!;
-        ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, mode, discriminatorKey);
+        var noOwn = default(MemberSet);
+        ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ref noOwn, mode, discriminatorKey);
         CheckRequired(in reader, start, ref seen, ref merged);
         instance = info.CreateWith(slots);
         if (info.Extension is { ParameterIndex: < 0 } extension && slots[extension.Slot] is { } collected)
@@ -329,6 +332,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         ref SkippedKeys skipped)
     {
         YamlTypeInfo<T> info = _info;
+        var noOwn = default(MemberSet);
         while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
         {
             if (reader.Type != YamlTokenType.Scalar)
@@ -360,7 +364,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
             }
 
-            if (Claim(ref reader, ref seen, ref merged, index, merging: false, keyStart))
+            if (Claim(ref reader, ref seen, ref merged, ref noOwn, index, merging: false, keyStart))
             {
                 return info.Props[index];
             }
@@ -379,6 +383,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         object?[]? slots,
         ref MemberSet seen,
         ref MemberSet merged,
+        ref MemberSet own,
         bool merging)
     {
         YamlTypeInfo<T> info = _info;
@@ -414,7 +419,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
             }
 
-            if (!Claim(ref reader, ref seen, ref merged, index, merging, keyStart))
+            if (!Claim(ref reader, ref seen, ref merged, ref own, index, merging, keyStart))
             {
                 continue;
             }
@@ -446,6 +451,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         object?[]? slots,
         ref MemberSet seen,
         ref MemberSet merged,
+        ref MemberSet own,
         int mode,
         byte[]? discriminatorKey)
     {
@@ -511,7 +517,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                 throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
             }
 
-            if (!Claim(ref reader, ref seen, ref merged, index, merging, keyStart))
+            if (!Claim(ref reader, ref seen, ref merged, ref own, index, merging, keyStart))
             {
                 continue;
             }
@@ -621,10 +627,18 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
     // Records that a member got a value, or says the value is to be skipped because an earlier one wins. Small enough for
     // the optimised code to inline; the code compiled first does not inline, and keeps the frame of ReadMembers small.
-    private static bool Claim(ref Utf8YamlReader reader, ref MemberSet seen, ref MemberSet merged, int index, bool merging, int keyStart)
+    private static bool Claim(ref Utf8YamlReader reader, ref MemberSet seen, ref MemberSet merged, ref MemberSet own, int index, bool merging, int keyStart)
     {
         if (merging)
         {
+            // A key twice in one merged mapping is an error even when an explicit key or an earlier source wins over both.
+            if (own.Contains(index))
+            {
+                throw DuplicateKey(in reader, keyStart);
+            }
+
+            own.Add(index);
+
             // A merged entry never replaces an explicit key or an entry merged before it.
             if (seen.Contains(index) || merged.Contains(index))
             {
@@ -653,13 +667,14 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         ref MemberSet seen,
         ref MemberSet merged)
     {
+        var own = new MemberSet(_info.Props.Length);
         if (_info.Extension is null)
         {
-            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);
+            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, ref own, merging: true);
         }
         else
         {
-            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ReadMerging, null);
+            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ref own, ReadMerging, null);
         }
     }
 
