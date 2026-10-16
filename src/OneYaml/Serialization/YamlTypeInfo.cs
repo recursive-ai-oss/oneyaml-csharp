@@ -84,6 +84,20 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
 
     internal YamlPropertyInfo<T>[] Props => _properties;
 
+    // Whether a mapping can be read into the type itself, as a polymorphic base is when no discriminator is present.
+    internal bool CanReadAsBase => _values is not null && CanCreate;
+
+    // The member that collects the keys no other member takes, when the type has one.
+    internal YamlPropertyInfo<T>? Extension { get; private set; }
+
+    // The converter that binds a mapping to members, whichever way the type is created; null for a custom converter.
+    internal ObjectConverter<T>? ObjectBinder => Converter switch
+    {
+        ObjectConverter<T> plain => plain,
+        ConstructedObjectConverter<T> constructed => constructed.Plain,
+        _ => null,
+    };
+
     // The members that can be written, in the order they are written: by order, then as described.
     internal YamlPropertyInfo<T>[] WriteProps => _writeProps;
 
@@ -123,10 +137,20 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
             YamlObjectInfoValues<T> values = _values!;
             YamlPropertyInfo[] raw = values.PropertyMetadataInitializer?.Invoke(Options) ?? [];
             var props = new YamlPropertyInfo<T>[raw.Length];
+            YamlPropertyInfo<T>? extension = null;
             for (int i = 0; i < raw.Length; i++)
             {
                 props[i] = (YamlPropertyInfo<T>)raw[i];
                 props[i].Configure(Options, i);
+                if (props[i].IsExtensionData)
+                {
+                    if (extension is not null)
+                    {
+                        throw new InvalidOperationException($"Type '{typeof(T)}' has more than one extension data member.");
+                    }
+
+                    extension = props[i];
+                }
             }
 
             YamlParameterInfo[] parameters = values.ConstructorParameterMetadataInitializer?.Invoke() ?? [];
@@ -175,6 +199,13 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
             Dictionary<string, int>? ignoreCase = Options.PropertyNameCaseInsensitive ? new(StringComparer.OrdinalIgnoreCase) : null;
             for (int i = 0; i < props.Length; i++)
             {
+                if (props[i].IsExtensionData)
+                {
+                    // It reads no key of its own.
+                    names[i] = [];
+                    continue;
+                }
+
                 names[i] = props[i].NameUtf8;
                 int b = (int)(Hash(names[i]) & (uint)(size - 1));
                 while (buckets[b] != 0)
@@ -194,7 +225,8 @@ public sealed class YamlTypeInfo<T> : YamlTypeInfo
                 }
             }
 
-            _writeProps = [.. props.Where(static p => p.CanWrite).OrderBy(static p => p.Order)];
+            _writeProps = [.. props.Where(static p => p.CanWrite && !p.IsExtensionData).OrderBy(static p => p.Order)];
+            Extension = extension;
             _properties = props;
             _parameters = parameters;
             _extraSlots = extra;

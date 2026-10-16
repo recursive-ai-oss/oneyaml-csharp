@@ -220,7 +220,7 @@ internal static class GenericLoader
                             kf.KeyOffset = reader.Start;
                             kf.Key = reader.GetSharedString();
                             kf.HaveKey = true;
-                            if (reader.Style == ScalarStyle.Plain || reader.Tag is not TagClass.None)
+                            if (reader.Style == ScalarStyle.Plain || reader.TagKind is not TagClass.None)
                             {
                                 // Keys are judged after resolution: 1 and 0x1 are the same key.
                                 string? identity = reader.KeyIdentity();

@@ -57,6 +57,13 @@ internal sealed class Parser
     private readonly INamedTypeSymbol? _jsonOrder;
     private readonly INamedTypeSymbol? _jsonConstructor;
     private readonly INamedTypeSymbol? _setsRequired;
+    private readonly INamedTypeSymbol? _yamlConverter;
+    private readonly INamedTypeSymbol? _yamlExtension;
+    private readonly INamedTypeSymbol? _jsonExtension;
+    private readonly INamedTypeSymbol? _yamlPolymorphic;
+    private readonly INamedTypeSymbol? _yamlDerived;
+    private readonly INamedTypeSymbol? _jsonPolymorphic;
+    private readonly INamedTypeSymbol? _jsonDerived;
 
     private bool _hasErrors;
 
@@ -76,6 +83,13 @@ internal sealed class Parser
         _jsonOrder = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPropertyOrderAttribute");
         _jsonConstructor = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonConstructorAttribute");
         _setsRequired = compilation.GetTypeByMetadataName("System.Diagnostics.CodeAnalysis.SetsRequiredMembersAttribute");
+        _yamlConverter = compilation.GetTypeByMetadataName("OneYaml.YamlConverterAttribute");
+        _yamlExtension = compilation.GetTypeByMetadataName("OneYaml.YamlExtensionDataAttribute");
+        _jsonExtension = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonExtensionDataAttribute");
+        _yamlPolymorphic = compilation.GetTypeByMetadataName("OneYaml.YamlPolymorphicAttribute");
+        _yamlDerived = compilation.GetTypeByMetadataName("OneYaml.YamlDerivedTypeAttribute");
+        _jsonPolymorphic = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonPolymorphicAttribute");
+        _jsonDerived = compilation.GetTypeByMetadataName("System.Text.Json.Serialization.JsonDerivedTypeAttribute");
         foreach (string reserved in s_reserved)
         {
             _names.Add(reserved);
@@ -238,10 +252,24 @@ internal sealed class Parser
             return null;
         }
 
-        TypeShape shape = Classify(type, out List<ITypeSymbol> children, out string? implementation);
+        string? converterText = null;
+        if (type is INamedTypeSymbol)
+        {
+            converterText = ConverterText(type, type, where, out bool bad);
+            if (bad)
+            {
+                _failed.Add(type);
+                return null;
+            }
+        }
+
+        List<ITypeSymbol> children = [];
+        string? implementation = null;
+        TypeShape shape = converterText is not null ? TypeShape.Converter : Classify(type, out children, out implementation);
         var spec = new TypeSpec(type, type.ToDisplayString(s_typeFormat), UniqueName(type), shape)
         {
             ImplementationName = implementation,
+            ConverterText = converterText,
             Visibility = Visibility(type),
         };
         _specs.Add(type, spec);
@@ -392,6 +420,11 @@ internal sealed class Parser
     {
         children = [];
         implementation = null;
+        if (HasPolymorphism(type))
+        {
+            return TypeShape.Object;
+        }
+
         if (IsLeaf(type))
         {
             return TypeShape.Leaf;
@@ -604,6 +637,8 @@ internal sealed class Parser
         var obj = new ObjectSpec { IsStruct = type.IsValueType };
         spec.Object = obj;
 
+        PolymorphismSpec? polymorphism = HasPolymorphism(type) ? ReadPolymorphism(type, typeLocation) : null;
+        obj.Polymorphism = polymorphism;
         IMethodSymbol? ctor = SelectConstructor(type, out bool parameterless);
         IParameterSymbol[] parameters = ctor is not null && !parameterless ? [.. ctor.Parameters] : [];
         if (ctor is not null && parameterless)
@@ -617,6 +652,10 @@ internal sealed class Parser
         else if (ctor is not null)
         {
             obj.Creator = CreatorKind.Constructor;
+        }
+        else if (polymorphism is not null)
+        {
+            // The base of derived types need not be created itself: a value without a discriminator is then an error at run time.
         }
         else
         {
@@ -643,7 +682,190 @@ internal sealed class Parser
             obj.InitializerText = RequiredInitializer(type);
         }
 
-        CollectMembers(type, obj, parameters);
+        if (obj.Creator != CreatorKind.None)
+        {
+            CollectMembers(type, obj, parameters);
+        }
+    }
+
+    // ---- Converters, extension data, polymorphism ----
+
+    // The code that makes the converter a YamlConverter attribute on the symbol names; null when there is no attribute.
+    // An open generic converter is closed over the type arguments of the type it converts.
+    private string? ConverterText(ISymbol symbol, ITypeSymbol target, Location where, out bool bad)
+    {
+        bad = false;
+        AttributeData? attribute = FindAttribute(symbol, _yamlConverter);
+        if (attribute is null)
+        {
+            return null;
+        }
+
+        if (attribute.ConstructorArguments.Length != 1 || attribute.ConstructorArguments[0].Value is not INamedTypeSymbol converter)
+        {
+            bad = true;
+            Report(Diagnostics.ConverterAttribute, where, "The YamlConverter attribute needs a converter type.");
+            return null;
+        }
+
+        if (converter.IsUnboundGenericType)
+        {
+            INamedTypeSymbol definition = converter.OriginalDefinition;
+            if (target is not INamedTypeSymbol { IsGenericType: true } closed || closed.TypeArguments.Length != definition.TypeParameters.Length)
+            {
+                bad = true;
+                Report(Diagnostics.ConverterAttribute, where, $"The open generic converter '{Show(definition)}' named by YamlConverter does not fit '{Show(target)}': it needs the same number of type arguments.");
+                return null;
+            }
+
+            converter = definition.Construct([.. closed.TypeArguments]);
+        }
+
+        bool derives = false;
+        for (INamedTypeSymbol? t = converter.BaseType; t is not null; t = t.BaseType)
+        {
+            if (t.Name == "YamlConverter" && t.ContainingNamespace.ToDisplayString() == "OneYaml")
+            {
+                derives = true;
+                break;
+            }
+        }
+
+        bool constructible = !converter.IsAbstract
+            && converter.TypeKind == TypeKind.Class
+            && converter.InstanceConstructors.Any(c => c.DeclaredAccessibility == Accessibility.Public && c.Parameters.Length == 0);
+        if (!derives || !constructible || !IsAccessible(converter))
+        {
+            bad = true;
+            Report(Diagnostics.ConverterAttribute, where, $"The type '{Show(converter)}' named by YamlConverter must be an accessible converter with a public parameterless constructor.");
+            return null;
+        }
+
+        return "new " + converter.ToDisplayString(s_typeFormat) + "()";
+    }
+
+    private static bool IsExtensionType(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 2 } named
+        && named.TypeArguments[0].SpecialType == SpecialType.System_String
+        && named.TypeArguments[1].SpecialType == SpecialType.System_Object
+        && MetadataName(named.OriginalDefinition) is "System.Collections.Generic.Dictionary`2" or "System.Collections.Generic.IDictionary`2";
+
+    // The member that collects unmapped keys: marked with YamlExtensionData, or with the System.Text.Json attribute when its type
+    // is one that can hold them. The same rule as the reflection resolver.
+    private bool IsExtensionData(ISymbol member, ITypeSymbol type, bool hasGetter, Location where)
+    {
+        bool fits = IsExtensionType(type);
+        if (HasAttribute(member, _yamlExtension))
+        {
+            if (!fits || !hasGetter)
+            {
+                Report(Diagnostics.ExtensionDataMember, where, member.ContainingType.Name + "." + member.Name);
+                return false;
+            }
+
+            return true;
+        }
+
+        return fits && hasGetter && HasAttribute(member, _jsonExtension);
+    }
+
+    private bool HasPolymorphism(ITypeSymbol type) =>
+        type is INamedTypeSymbol { TypeKind: TypeKind.Class or TypeKind.Interface or TypeKind.Struct }
+        && (HasAttribute(type, _yamlPolymorphic) || HasAttribute(type, _jsonPolymorphic) || HasAttribute(type, _yamlDerived) || HasAttribute(type, _jsonDerived));
+
+    // The polymorphism of a type, from its own attributes. The YAML attributes win over the System.Text.Json ones.
+    private PolymorphismSpec ReadPolymorphism(INamedTypeSymbol type, Location where)
+    {
+        var result = new PolymorphismSpec();
+        AttributeData? yaml = FindAttribute(type, _yamlPolymorphic);
+        AttributeData? json = FindAttribute(type, _jsonPolymorphic);
+        string? key = null;
+        foreach (AttributeData? source in new[] { yaml, json })
+        {
+            if (source is null)
+            {
+                continue;
+            }
+
+            foreach (KeyValuePair<string, TypedConstant> named in source.NamedArguments)
+            {
+                if (named.Key == "TypeDiscriminatorPropertyName" && named.Value.Value is string text)
+                {
+                    key ??= text;
+                }
+                else if (named.Key == "Discriminator" && source == yaml && named.Value.Value is int kind)
+                {
+                    result.Kind = kind;
+                }
+            }
+        }
+
+        result.Key = key ?? "$type";
+        var listed = new List<(INamedTypeSymbol Type, string Discriminator)>();
+        foreach (AttributeData data in type.GetAttributes())
+        {
+            if (SymbolEqualityComparer.Default.Equals(data.AttributeClass, _yamlDerived) && data.ConstructorArguments.Length == 2
+                && data.ConstructorArguments[0].Value is INamedTypeSymbol yamlDerived && data.ConstructorArguments[1].Value is string yamlText)
+            {
+                listed.Add((yamlDerived, yamlText));
+            }
+        }
+
+        if (listed.Count == 0)
+        {
+            foreach (AttributeData data in type.GetAttributes())
+            {
+                // A derived type with no discriminator cannot be told apart, so it is not listed.
+                if (SymbolEqualityComparer.Default.Equals(data.AttributeClass, _jsonDerived) && data.ConstructorArguments.Length == 2
+                    && data.ConstructorArguments[0].Value is INamedTypeSymbol jsonDerived && data.ConstructorArguments[1].Value is { } value)
+                {
+                    listed.Add((jsonDerived, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty));
+                }
+            }
+        }
+
+        foreach ((INamedTypeSymbol derived, string discriminator) in listed)
+        {
+            if (SymbolEqualityComparer.Default.Equals(derived, type) || !Derives(derived, type))
+            {
+                Report(Diagnostics.DerivedTypeListing, where, $"The derived type '{Show(derived)}' listed for '{Show(type)}' must derive from it, or implement it, and must not be the type itself.");
+                continue;
+            }
+
+            TypeSpec? spec = Require(derived, where, isRoot: false);
+            if (spec is not null)
+            {
+                result.Derived.Add((spec, discriminator));
+            }
+        }
+
+        return result;
+    }
+
+    private static bool Derives(INamedTypeSymbol derived, INamedTypeSymbol baseType)
+    {
+        if (baseType.TypeKind == TypeKind.Interface)
+        {
+            foreach (INamedTypeSymbol i in derived.AllInterfaces)
+            {
+                if (SymbolEqualityComparer.Default.Equals(i, baseType))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        for (INamedTypeSymbol? t = derived.BaseType; t is not null; t = t.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(t, baseType))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private IMethodSymbol? SelectConstructor(INamedTypeSymbol type, out bool parameterless)
@@ -742,7 +964,9 @@ internal sealed class Parser
 
                 bool bound = BoundByConstructor(p.Name, p.Type, p.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None);
                 bool publicSetter = p.SetMethod is { DeclaredAccessibility: Accessibility.Public };
-                if (!publicSetter && !bound)
+                Location memberWhere = p.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None;
+                bool extension = IsExtensionData(p, p.Type, p.GetMethod is { DeclaredAccessibility: Accessibility.Public }, memberWhere);
+                if (!publicSetter && !bound && !extension)
                 {
                     continue;
                 }
@@ -759,7 +983,7 @@ internal sealed class Parser
                     continue;
                 }
 
-                MemberSpec member = NewMember(p, p.Name, memberType, p.IsRequired);
+                MemberSpec member = NewMember(p, p.Name, memberType, p.IsRequired, extension, where);
                 member.CanRead = p.GetMethod is { DeclaredAccessibility: Accessibility.Public };
                 // A member filled through the constructor is never assigned afterwards.
                 member.Setter = !publicSetter || bound ? SetterKind.None : p.SetMethod!.IsInitOnly ? SetterKind.InitOnly : SetterKind.Plain;
@@ -780,7 +1004,9 @@ internal sealed class Parser
                 }
 
                 bool bound = BoundByConstructor(f.Name, f.Type, f.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None);
-                if (f.IsReadOnly && !bound)
+                Location fieldWhere = f.Locations.FirstOrDefault(l => l.IsInSource) ?? type.Locations.FirstOrDefault() ?? Location.None;
+                bool extension = IsExtensionData(f, f.Type, true, fieldWhere);
+                if (f.IsReadOnly && !bound && !extension)
                 {
                     continue;
                 }
@@ -793,7 +1019,7 @@ internal sealed class Parser
                     continue;
                 }
 
-                MemberSpec member = NewMember(f, f.Name, memberType, f.IsRequired);
+                MemberSpec member = NewMember(f, f.Name, memberType, f.IsRequired, extension, where);
                 member.CanRead = true;
                 member.Setter = f.IsReadOnly || bound ? SetterKind.None : SetterKind.Plain;
                 obj.Members.Add(member);
@@ -821,7 +1047,7 @@ internal sealed class Parser
     private static bool IsRootType(INamedTypeSymbol t) =>
         t.SpecialType is SpecialType.System_Object or SpecialType.System_ValueType or SpecialType.System_Enum;
 
-    private MemberSpec NewMember(ISymbol symbol, string name, TypeSpec spec, bool isRequiredKeyword)
+    private MemberSpec NewMember(ISymbol symbol, string name, TypeSpec spec, bool isRequiredKeyword, bool isExtension, Location where)
     {
         string? explicitName = StringArgument(FindAttribute(symbol, _yamlName)) ?? StringArgument(FindAttribute(symbol, _jsonName));
         bool required = isRequiredKeyword
@@ -829,8 +1055,11 @@ internal sealed class Parser
             || FindAttribute(symbol, _jsonRequired) is not null;
         int order = IntArgument(FindAttribute(symbol, _yamlOrder)) ?? IntArgument(FindAttribute(symbol, _jsonOrder)) ?? 0;
         int? condition = IgnoreConditionOf(symbol);
+        string? converter = ConverterText(symbol, spec.Symbol, where, out _);
         return new MemberSpec(name, spec.Name, spec)
         {
+            IsExtensionData = isExtension,
+            ConverterText = converter,
             SerializedName = explicitName,
             IsRequired = required,
             Order = order,

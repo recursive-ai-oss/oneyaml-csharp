@@ -132,6 +132,24 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             p.Write(writer, value);
         }
 
+        info.Extension?.WriteExtension(writer, value);
+        writer.WriteEndMapping();
+    }
+
+    // Writes the value as the derived type of a polymorphic base whose discriminator is a key: the key comes first.
+    internal void WriteDiscriminated(Utf8YamlEmitter writer, T value, string key, string discriminator)
+    {
+        YamlTypeInfo<T> info = _info;
+        info.EnsureConfigured();
+        writer.Begin(isMapping: true, typeof(T).IsValueType ? null : value);
+        writer.WritePropertyName(key);
+        writer.WriteStringValue(discriminator);
+        foreach (YamlPropertyInfo<T> p in info.WriteProps)
+        {
+            p.Write(writer, value);
+        }
+
+        info.Extension?.WriteExtension(writer, value);
         writer.WriteEndMapping();
     }
 
@@ -142,6 +160,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             throw ConverterGuards.Expected(in reader, "a mapping", typeof(T));
         }
 
+        // The common case is spelled out here, not shared with ReadBody: a frame fewer for every level of a nested document.
         ConverterGuards.EnsureStack(in reader);
         YamlTypeInfo<T> info = _info;
         if (!info.CanCreate)
@@ -153,11 +172,85 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         int start = reader.Start;
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);
+        if (info.UsesConstructor)
+        {
+            return ReadThroughConstructor(ref reader, options, info, start, ReadNormal, ref seen, ref merged);
+        }
+
         T instance = info.CreateInstance();
-        ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, merging: false);
+        if (info.Extension is null)
+        {
+            ReadMembers(ref reader, options, ref instance, null, ref seen, ref merged, merging: false);
+        }
+        else
+        {
+            ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, ReadNormal);
+        }
+
         if (info.RequiredCount > 0)
         {
             CheckRequired(in reader, start, ref seen, ref merged);
+        }
+
+        return instance;
+    }
+
+    // The mapping start is behind the reader, which is on the first key (or the end of an empty mapping). A polymorphic
+    // base that is read as itself looked at the first key to see whether it names a derived type, and found it did not.
+    internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
+        ReadBody(ref reader, options, start, ReadResume);
+
+    // The mapping start and the discriminator key are behind the reader, which is on the discriminator's value.
+    internal T? ReadAfterDiscriminator(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
+        ReadBody(ref reader, options, start, ReadNormal);
+
+    private T? ReadBody(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, int mode)
+    {
+        ConverterGuards.EnsureStack(in reader);
+        YamlTypeInfo<T> info = _info;
+        if (!info.CanCreate)
+        {
+            throw NotCreatable(in reader);
+        }
+
+        info.EnsureConfigured();
+        var seen = new MemberSet(info.Props.Length);
+        var merged = new MemberSet(info.Props.Length);
+        if (info.UsesConstructor)
+        {
+            return ReadThroughConstructor(ref reader, options, info, start, mode, ref seen, ref merged);
+        }
+
+        T instance = info.CreateInstance();
+        ReadMembersGeneral(ref reader, options, ref instance, null, ref seen, ref merged, mode);
+        if (info.RequiredCount > 0)
+        {
+            CheckRequired(in reader, start, ref seen, ref merged);
+        }
+
+        return instance;
+    }
+
+    // Kept apart from Read so that the frame of the common case, which every level of a nested document passes through,
+    // holds only what that case needs.
+    private T? ReadThroughConstructor(ref Utf8YamlReader reader, YamlSerializerOptions options, YamlTypeInfo<T> info, int start, int mode, ref MemberSet seen, ref MemberSet merged)
+    {
+        object?[] slots = info.NewArguments();
+        T instance = default!;
+        ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, mode);
+        CheckRequired(in reader, start, ref seen, ref merged);
+        instance = info.CreateWith(slots);
+        if (info.Extension is { ParameterIndex: < 0 } extension && slots[extension.Slot] is { } collected)
+        {
+            extension.Assign(ref instance, collected);
+        }
+
+        foreach (YamlPropertyInfo<T> p in info.Props)
+        {
+            if (p.ParameterIndex < 0 && (seen.Contains(p.Index) || merged.Contains(p.Index)))
+            {
+                p.Assign(ref instance, slots[p.Slot]);
+            }
         }
 
         return instance;
@@ -186,6 +279,9 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
         return instance;
     }
+    private const int ReadNormal = 0;
+    private const int ReadMerging = 1;
+    private const int ReadResume = 2;
 
     // The loop of the constructor path: it hands each value to its member and does nothing else.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -259,6 +355,8 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         return null;
     }
 
+    // The loop of the common case, with nothing for extension data or a resumed first key: it is on the stack once for every
+    // level of a nested document, so it holds only what the plain case needs.
     private void ReadMembers(
         ref Utf8YamlReader reader,
         YamlSerializerOptions options,
@@ -320,6 +418,120 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         skipped.Release();
     }
 
+    // The same walk for the less common cases: extension data, a first key that was read already, or a merged mapping of such a type.
+    private void ReadMembersGeneral(
+        ref Utf8YamlReader reader,
+        YamlSerializerOptions options,
+        ref T instance,
+        object?[]? slots,
+        ref MemberSet seen,
+        ref MemberSet merged,
+        int mode)
+    {
+        YamlTypeInfo<T> info = _info;
+        bool merging = mode == ReadMerging;
+        var skipped = default(SkippedKeys);
+        Dictionary<string, object?>? extra = null;
+        while ((mode != ReadResume ? reader.Read() : Resumed(ref mode)) && reader.Type != YamlTokenType.MappingEnd)
+        {
+            if (reader.Type != YamlTokenType.Scalar)
+            {
+                throw CollectionKey(in reader);
+            }
+
+            if (ConverterGuards.IsMergeKey(in reader))
+            {
+                if (!reader.Read())
+                {
+                    throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+                }
+
+                ReadMerge(ref reader, options, ref instance, slots, ref seen, ref merged);
+                continue;
+            }
+
+            int keyStart = reader.Start;
+            int index = FindMember(ref reader, info);
+            if (index < 0)
+            {
+                if (info.Extension is not null)
+                {
+                    ReadExtra(ref reader, options, ref skipped, ref extra, keyStart);
+                }
+                else
+                {
+                    SkipUnmapped(ref reader, options, ref skipped, keyStart);
+                }
+
+                continue;
+            }
+
+            if (!reader.Read())
+            {
+                throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+            }
+
+            if (!Claim(ref reader, ref seen, ref merged, index, merging, keyStart))
+            {
+                continue;
+            }
+
+            YamlPropertyInfo<T> p = info.Props[index];
+            if (slots is null)
+            {
+                p.Read(ref reader, ref instance);
+            }
+            else
+            {
+                p.ReadBoxed(ref reader, slots);
+            }
+        }
+
+        if (extra is not null)
+        {
+            FlushExtra(ref instance, slots, extra, merging);
+        }
+
+        skipped.Release();
+    }
+
+    // The first key was read already: the loop starts on it instead of reading one.
+    private static bool Resumed(ref int mode)
+    {
+        mode = ReadNormal;
+        return true;
+    }
+
+    // A key no member takes goes to the extension member. Like a skipped key it is remembered, so a repeat is still an error.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ReadExtra(ref Utf8YamlReader reader, YamlSerializerOptions options, ref SkippedKeys skipped, ref Dictionary<string, object?>? extra, int keyStart)
+    {
+        SkipKey key = SkippedKeys.Capture(ref reader);
+        if (!reader.Read())
+        {
+            throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+        }
+
+        if (!skipped.Add(key, reader.Source))
+        {
+            throw DuplicateKey(in reader, keyStart);
+        }
+
+        string name = Encoding.UTF8.GetString(key.Bytes(reader.Source));
+        object? value = _info.Extension!.ReadExtensionValue(ref reader, options);
+        (extra ??= new Dictionary<string, object?>(StringComparer.Ordinal))[name] = value;
+    }
+
+    // Hands the collected keys to the member. Entries from a merged mapping give way to a key the mapping has itself.
+    private void FlushExtra(ref T instance, object?[]? slots, Dictionary<string, object?> collected, bool merging)
+    {
+        YamlPropertyInfo<T> extension = _info.Extension!;
+        foreach (KeyValuePair<string, object?> entry in collected)
+        {
+            extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: !merging);
+        }
+    }
+
     // The bookkeeping of a key no member takes, out of line like the other rare cases of ReadMembers: its frame is
     // there once for every level of a nested document.
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -370,6 +582,24 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         return true;
     }
 
+    private void ReadMergedMapping(
+        ref Utf8YamlReader reader,
+        YamlSerializerOptions options,
+        ref T instance,
+        object?[]? slots,
+        ref MemberSet seen,
+        ref MemberSet merged)
+    {
+        if (_info.Extension is null)
+        {
+            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);
+        }
+        else
+        {
+            ReadMembersGeneral(ref reader, options, ref instance, slots, ref seen, ref merged, ReadMerging);
+        }
+    }
+
     private void ReadMerge(
         ref Utf8YamlReader reader,
         YamlSerializerOptions options,
@@ -382,7 +612,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         ConverterGuards.EnsureStack(in reader);
         if (reader.Type == YamlTokenType.MappingStart)
         {
-            ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);
+            ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged);
         }
         else if (reader.Type == YamlTokenType.SequenceStart)
         {
@@ -393,7 +623,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
                     throw reader.CreateException("A merge key needs a mapping or a sequence of mappings.");
                 }
 
-                ReadMembers(ref reader, options, ref instance, slots, ref seen, ref merged, merging: true);
+                ReadMergedMapping(ref reader, options, ref instance, slots, ref seen, ref merged);
             }
         }
         else
@@ -471,6 +701,8 @@ internal sealed class ConstructedObjectConverter<T> : YamlConverter<T>
         _plain = new ObjectConverter<T>(info);
     }
 
+    internal ObjectConverter<T> Plain => _plain;
+
     public override void Write(Utf8YamlEmitter writer, T value, YamlSerializerOptions options) => _plain.Write(writer, value, options);
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -489,6 +721,12 @@ internal sealed class ConstructedObjectConverter<T> : YamlConverter<T>
         }
 
         info.EnsureConfigured();
+        if (info.Extension is not null)
+        {
+            // Collecting unmapped keys is the general path; the lean loop below has no room for it.
+            return _plain.Read(ref reader, typeToConvert, options);
+        }
+
         int start = reader.Start;
         var seen = new MemberSet(info.Props.Length);
         var merged = new MemberSet(info.Props.Length);

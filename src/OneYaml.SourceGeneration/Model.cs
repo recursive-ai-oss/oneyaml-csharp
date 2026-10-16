@@ -19,6 +19,7 @@ internal enum TypeShape
     CustomCollection,
     ImmutableCollection,
     ImmutableDictionary,
+    Converter,
     Object,
 }
 
@@ -51,6 +52,9 @@ internal sealed class TypeSpec
 
     public ObjectSpec? Object { get; set; }
 
+    // For a type with its own converter: the code that makes it.
+    public string? ConverterText { get; set; }
+
     // 3 public, 2 internal, 1 private: how far the type can be seen.
     public int Visibility { get; set; } = 3;
 
@@ -69,6 +73,19 @@ internal sealed class ObjectSpec
     public List<ParameterSpec> Parameters { get; } = [];
 
     public List<MemberSpec> Members { get; } = [];
+
+    // Set when the type is the base of derived types that are told apart by a discriminator.
+    public PolymorphismSpec? Polymorphism { get; set; }
+}
+
+internal sealed class PolymorphismSpec
+{
+    // 0 key, 1 tag: the values of YamlDiscriminatorKind.
+    public int Kind { get; set; }
+
+    public string Key { get; set; } = "$type";
+
+    public List<(TypeSpec Type, string Discriminator)> Derived { get; } = [];
 }
 
 internal enum CreatorKind
@@ -143,6 +160,12 @@ internal sealed class MemberSpec
     public string? DeclaringTypeName { get; set; }
 
     public bool DeclaringIsGeneric { get; set; }
+
+    // Collects the keys no other member takes.
+    public bool IsExtensionData { get; set; }
+
+    // The code that makes the converter a YamlConverter attribute names for this member.
+    public string? ConverterText { get; set; }
 }
 
 // A diagnostic that can be compared, so the pipeline can tell when nothing changed.

@@ -94,6 +94,16 @@ internal static class ReflectionTypeInfoFactory
             return Call(nameof(FromConverter), [type], options, chosen);
         }
 
+        if (type.GetCustomAttribute<YamlConverterAttribute>(false) is { } converterAttribute)
+        {
+            return Call(nameof(MakeFromAttribute), [type], options, Instantiate(converterAttribute.ConverterType, type));
+        }
+
+        if (FindPolymorphism(type) is { } polymorphism)
+        {
+            return Call(nameof(MakePolymorphic), [type], options, polymorphism);
+        }
+
         if (BuiltInConverters.CreateLeaf(type) is { } leaf)
         {
             return Call(nameof(FromConverter), [type], options, leaf);
@@ -250,6 +260,100 @@ internal static class ReflectionTypeInfoFactory
             ? new YamlTypeInfo<T>(options, typed)
             : throw new InvalidOperationException($"The converter {converter.GetType()} cannot convert '{typeof(T)}' because it does not derive from YamlConverter<{typeof(T).Name}>.");
 
+    private static YamlTypeInfo<T> MakeFromAttribute<T>(YamlSerializerOptions options, object converter) =>
+        new YamlTypeInfo<T>(options, YamlMetadataServices.GetAttributeConverter<T>(options, (YamlConverter)converter));
+
+    // Makes the converter a YamlConverter attribute names. An open generic converter type is closed over the type arguments of the
+    // type it is applied to.
+    private static YamlConverter Instantiate(Type converterType, Type target)
+    {
+        if (converterType.IsGenericTypeDefinition)
+        {
+            if (!target.IsGenericType || target.GetGenericArguments().Length != converterType.GetGenericArguments().Length)
+            {
+                throw new InvalidOperationException($"The open generic converter {converterType} named by YamlConverter does not fit '{target}': it needs the same number of type arguments.");
+            }
+
+            converterType = converterType.MakeGenericType(target.GetGenericArguments());
+        }
+
+        if (!typeof(YamlConverter).IsAssignableFrom(converterType) || converterType.IsAbstract || converterType.GetConstructor(Type.EmptyTypes) is null)
+        {
+            throw new InvalidOperationException($"The type {converterType} named by YamlConverter must be a converter with a public parameterless constructor.");
+        }
+
+        return (YamlConverter)Activator.CreateInstance(converterType)!;
+    }
+
+    private sealed class Polymorphism(YamlDiscriminatorKind kind, string key, List<(Type Type, string Discriminator)> derived)
+    {
+        public YamlDiscriminatorKind Kind { get; } = kind;
+
+        public string Key { get; } = key;
+
+        public List<(Type Type, string Discriminator)> Derived { get; } = derived;
+    }
+
+    // The polymorphism of a type, from its own attributes (a derived type does not inherit it). The YAML attributes win
+    // over the System.Text.Json ones.
+    private static Polymorphism? FindPolymorphism(Type type)
+    {
+        YamlPolymorphicAttribute? yaml = type.GetCustomAttribute<YamlPolymorphicAttribute>(false);
+        JsonPolymorphicAttribute? json = type.GetCustomAttribute<JsonPolymorphicAttribute>(false);
+        var derived = new List<(Type, string)>();
+        foreach (YamlDerivedTypeAttribute a in type.GetCustomAttributes<YamlDerivedTypeAttribute>(false))
+        {
+            derived.Add((a.DerivedType, a.Discriminator));
+        }
+
+        if (derived.Count == 0)
+        {
+            foreach (JsonDerivedTypeAttribute a in type.GetCustomAttributes<JsonDerivedTypeAttribute>(false))
+            {
+                // A derived type with no discriminator cannot be told apart, so it is not listed.
+                if (a.TypeDiscriminator?.ToString() is { } text)
+                {
+                    derived.Add((a.DerivedType, text));
+                }
+            }
+        }
+
+        if (yaml is null && json is null && derived.Count == 0)
+        {
+            return null;
+        }
+
+        return new Polymorphism(
+            yaml?.Discriminator ?? YamlDiscriminatorKind.Key,
+            yaml?.TypeDiscriminatorPropertyName ?? json?.TypeDiscriminatorPropertyName ?? "$type",
+            derived);
+    }
+
+    private static YamlTypeInfo<T> MakePolymorphic<T>(YamlSerializerOptions options, object setup)
+    {
+        var polymorphism = (Polymorphism)setup;
+        var derived = new YamlDerivedTypeInfo<T>[polymorphism.Derived.Count];
+        MethodInfo make = typeof(ReflectionTypeInfoFactory).GetMethod(nameof(MakeDerived), Any)!;
+        for (int i = 0; i < derived.Length; i++)
+        {
+            (Type derivedType, string discriminator) = polymorphism.Derived[i];
+            if (derivedType == typeof(T) || !typeof(T).IsAssignableFrom(derivedType))
+            {
+                throw new NotSupportedException($"The derived type '{derivedType}' listed for '{typeof(T)}' must derive from it, or implement it, and must not be the type itself.");
+            }
+
+            derived[i] = (YamlDerivedTypeInfo<T>)make.MakeGenericMethod(typeof(T), derivedType).Invoke(null, [options, discriminator])!;
+        }
+
+        // A base that can be created is read as itself when the value names no derived type.
+        YamlTypeInfo<T>? baseInfo = typeof(T).IsInterface || typeof(T).IsAbstract ? null : MakeObject<T>(options);
+        return YamlMetadataServices.CreatePolymorphicInfo(options, baseInfo, polymorphism.Kind, polymorphism.Key, derived);
+    }
+
+    private static YamlDerivedTypeInfo<TBase> MakeDerived<TBase, TDerived>(YamlSerializerOptions options, string discriminator)
+        where TDerived : TBase =>
+        YamlMetadataServices.CreateDerivedTypeInfo<TBase, TDerived>(discriminator, () => options.GetTypeInfo<TDerived>());
+
     private static YamlTypeInfo<T?> MakeNullable<T>(YamlSerializerOptions options)
         where T : struct =>
         new YamlTypeInfo<T?>(options, new NullableConverter<T>(options.GetTypeInfo<T>().Converter));
@@ -382,7 +486,7 @@ internal static class ReflectionTypeInfoFactory
             ObjectCreator = creator,
             ConstructorCreator = ctorCreator,
             ConstructorParameterMetadataInitializer = () => parameterInfos,
-            PropertyMetadataInitializer = _ => BuildProperties<T>(parameters),
+            PropertyMetadataInitializer = o => BuildProperties<T>(o, parameters),
         };
         return YamlMetadataServices.CreateObjectInfo(options, values);
     }
@@ -422,7 +526,7 @@ internal static class ReflectionTypeInfoFactory
         return ctors.Length == 1 ? ctors[0] : null;
     }
 
-    private static YamlPropertyInfo[] BuildProperties<T>(ParameterInfo[] parameters)
+    private static YamlPropertyInfo[] BuildProperties<T>(YamlSerializerOptions options, ParameterInfo[] parameters)
     {
         var result = new List<YamlPropertyInfo>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -442,7 +546,8 @@ internal static class ReflectionTypeInfoFactory
 
             bool boundByConstructor = BoundByConstructor(parameters, p.Name, p.PropertyType, typeof(T));
             MethodInfo? setter = p.SetMethod is { IsPublic: true } ? p.SetMethod : null;
-            if (setter is null && !boundByConstructor)
+            bool extension = IsExtensionData(p, p.PropertyType, p.GetMethod is { IsPublic: true });
+            if (setter is null && !boundByConstructor && !extension)
             {
                 continue;
             }
@@ -452,7 +557,7 @@ internal static class ReflectionTypeInfoFactory
                 continue;
             }
 
-            result.Add(Make<T>(p.PropertyType, p, null, setter, p.Name, p));
+            result.Add(Make<T>(options, p.PropertyType, p, null, setter, p.Name, p, extension));
         }
 
         foreach (FieldInfo f in typeof(T).GetFields(BindingFlags.Public | BindingFlags.Instance))
@@ -463,13 +568,14 @@ internal static class ReflectionTypeInfoFactory
             }
 
             bool boundByConstructor = BoundByConstructor(parameters, f.Name, f.FieldType, typeof(T));
-            if ((f.IsInitOnly || f.IsLiteral) && !boundByConstructor)
+            bool extension = IsExtensionData(f, f.FieldType, true);
+            if ((f.IsInitOnly || f.IsLiteral) && !boundByConstructor && !extension)
             {
                 continue;
             }
 
             names.Add(f.Name);
-            result.Add(Make<T>(f.FieldType, null, f, null, f.Name, f));
+            result.Add(Make<T>(options, f.FieldType, null, f, null, f.Name, f, extension));
         }
 
         return [.. result];
@@ -543,8 +649,29 @@ internal static class ReflectionTypeInfoFactory
         };
     }
 
-    private static YamlPropertyInfo Make<T>(Type propertyType, PropertyInfo? property, FieldInfo? field, MethodInfo? setter, string name, MemberInfo member)
+    // The member that collects unmapped keys: marked with YamlExtensionData, or with the System.Text.Json attribute when its type
+    // is one that can hold them (a model shared with System.Text.Json may use another type, which is then an ordinary member).
+    private static bool IsExtensionData(MemberInfo member, Type memberType, bool hasGetter)
     {
+        bool fits = memberType == typeof(Dictionary<string, object>) || memberType == typeof(IDictionary<string, object>);
+        if (member.IsDefined(typeof(YamlExtensionDataAttribute), false))
+        {
+            if (!fits || !hasGetter)
+            {
+                throw new NotSupportedException($"The extension data member '{member.DeclaringType?.Name}.{member.Name}' must be a readable Dictionary<string, object> or IDictionary<string, object>.");
+            }
+
+            return true;
+        }
+
+        return fits && hasGetter && member.IsDefined(typeof(JsonExtensionDataAttribute), false);
+    }
+
+    private static YamlPropertyInfo Make<T>(YamlSerializerOptions options, Type propertyType, PropertyInfo? property, FieldInfo? field, MethodInfo? setter, string name, MemberInfo member, bool extension)
+    {
+        YamlConverter? memberConverter = member.GetCustomAttribute<YamlConverterAttribute>(false) is { } converterAttribute
+            ? Instantiate(converterAttribute.ConverterType, propertyType)
+            : null;
         string? explicitName = member.GetCustomAttribute<YamlPropertyNameAttribute>(false)?.Name
             ?? member.GetCustomAttribute<JsonPropertyNameAttribute>(false)?.Name;
         bool required = member.IsDefined(typeof(YamlRequiredAttribute), false)
@@ -557,7 +684,7 @@ internal static class ReflectionTypeInfoFactory
         try
         {
             MethodInfo? getter = property?.GetMethod is { IsPublic: true } g ? g : null;
-            return (YamlPropertyInfo)make.Invoke(null, [name, explicitName, required, order, setter, field, getter, IgnoreConditionOf(member)])!;
+            return (YamlPropertyInfo)make.Invoke(null, [options, name, explicitName, required, order, setter, field, getter, IgnoreConditionOf(member), memberConverter, extension])!;
         }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
@@ -572,7 +699,7 @@ internal static class ReflectionTypeInfoFactory
         }
     }
 
-    private static YamlPropertyInfo MakeProperty<TDeclaring, TProperty>(string name, string? explicitName, bool required, int order, MethodInfo? setter, FieldInfo? field, MethodInfo? getMethod, YamlIgnoreCondition? ignore)
+    private static YamlPropertyInfo MakeProperty<TDeclaring, TProperty>(YamlSerializerOptions options, string name, string? explicitName, bool required, int order, MethodInfo? setter, FieldInfo? field, MethodInfo? getMethod, YamlIgnoreCondition? ignore, YamlConverter? converter, bool extension)
     {
         Func<TDeclaring, TProperty>? getter = field is not null ? FieldGetter<TDeclaring, TProperty>(field) : getMethod is not null ? PropertyGetter<TDeclaring, TProperty>(getMethod) : null;
         Action<TDeclaring, TProperty>? classSetter = null;
@@ -611,6 +738,8 @@ internal static class ReflectionTypeInfoFactory
             IsRequired = required,
             Order = order,
             Getter = getter,
+            Converter = converter is null ? null : YamlMetadataServices.GetAttributeConverter<TProperty>(options, converter),
+            IsExtensionData = extension,
             IgnoreCondition = ignore,
             Setter = classSetter,
             RefSetter = refSetter,
