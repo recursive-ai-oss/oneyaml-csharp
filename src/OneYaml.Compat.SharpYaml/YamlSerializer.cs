@@ -224,6 +224,7 @@ public static class YamlSerializer
 
     private static string Write<T>(T value, Oy.YamlTypeInfo<T> info)
     {
+        YamlSerializerOptions.RefuseReferenceHandlingWrite(info);
         try
         {
             return Oy.YamlSerializer.Serialize(value, info);
@@ -236,6 +237,7 @@ public static class YamlSerializer
 
     private static string WriteBoxed(object? value, Oy.YamlTypeInfo info)
     {
+        YamlSerializerOptions.RefuseReferenceHandlingWrite(info);
         try
         {
             return Oy.YamlSerializer.Serialize(value, info);

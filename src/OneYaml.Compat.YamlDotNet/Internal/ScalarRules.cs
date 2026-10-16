@@ -10,6 +10,8 @@ namespace OneYaml.Compat.YamlDotNet.Internal;
 // base-60 forms, and the target type decides the reading rather than the text.
 internal static class ScalarRules
 {
+    public const int DefaultDigits = 4_300;
+
     public static bool IsNullText(string value) => value.Length == 0 || value is "~" or "null" or "Null" or "NULL";
 
     public static bool ParseBool(string value)
@@ -33,17 +35,17 @@ internal static class ScalarRules
 
     // Converting a long integer costs more than its length, so a literal past the library's digit limit is refused
     // before any work is done on it. It is an overflow, the failure YamlDotNet gives for a number that does not fit.
-    private static void CheckIntegerLength(string text)
+    private static void CheckIntegerLength(string text, int maxDigits)
     {
-        if (text.Length > global::OneYaml.YamlLimits.Default.MaxIntegerDigits + 2)
+        if (text.Length > (long)maxDigits + 2)
         {
             throw new OverflowException("The integer has more digits than the configured limit.");
         }
     }
 
-    public static BigInteger ParseInteger(string text)
+    public static BigInteger ParseInteger(string text, int maxDigits = DefaultDigits)
     {
-        CheckIntegerLength(text);
+        CheckIntegerLength(text, maxDigits);
         if (text.Length > 0 && text.Length < 19 && text[0] != '0' && text[0] != '+' && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long quick) && !(text.Length > 1 && text[0] == '-' && text[1] == '0'))
         {
             return quick;
@@ -144,7 +146,7 @@ internal static class ScalarRules
     }
 
     // Reads the text as a value of a scalar type. Throws FormatException or OverflowException when it does not fit.
-    public static object? Convert(string text, Type type)
+    public static object? Convert(string text, Type type, int maxDigits = DefaultDigits)
     {
         switch (Type.GetTypeCode(type))
         {
@@ -153,21 +155,21 @@ internal static class ScalarRules
             case TypeCode.Boolean:
                 return ParseBool(text);
             case TypeCode.Int32:
-                return (int)ParseInteger(text);
+                return (int)ParseInteger(text, maxDigits);
             case TypeCode.Int64:
-                return (long)ParseInteger(text);
+                return (long)ParseInteger(text, maxDigits);
             case TypeCode.Int16:
-                return (short)ParseInteger(text);
+                return (short)ParseInteger(text, maxDigits);
             case TypeCode.SByte:
-                return (sbyte)ParseInteger(text);
+                return (sbyte)ParseInteger(text, maxDigits);
             case TypeCode.Byte:
-                return (byte)ParseInteger(text);
+                return (byte)ParseInteger(text, maxDigits);
             case TypeCode.UInt16:
-                return (ushort)ParseInteger(text);
+                return (ushort)ParseInteger(text, maxDigits);
             case TypeCode.UInt32:
-                return (uint)ParseInteger(text);
+                return (uint)ParseInteger(text, maxDigits);
             case TypeCode.UInt64:
-                return (ulong)ParseInteger(text);
+                return (ulong)ParseInteger(text, maxDigits);
             case TypeCode.Double:
                 return ParseDouble(text);
             case TypeCode.Single:
@@ -217,7 +219,7 @@ internal static class ScalarRules
 
         if (type == typeof(BigInteger))
         {
-            return ParseInteger(text);
+            return ParseInteger(text, maxDigits);
         }
 
         if (type == typeof(byte[]))
@@ -229,7 +231,7 @@ internal static class ScalarRules
     }
 
     // The type a scalar takes when it is read with no target type (or as object) and carries an explicit core tag.
-    public static object? FromCoreTag(string tag, string text)
+    public static object? FromCoreTag(string tag, string text, int maxDigits = DefaultDigits)
     {
         switch (tag)
         {
@@ -239,7 +241,7 @@ internal static class ScalarRules
                 return ParseBool(text);
             case Tags.Int:
                 {
-                    BigInteger v = ParseInteger(text);
+                    BigInteger v = ParseInteger(text, maxDigits);
                     return v >= int.MinValue && v <= int.MaxValue ? (int)v : v >= long.MinValue && v <= long.MaxValue ? (long)v : (object)v;
                 }
 
@@ -255,7 +257,7 @@ internal static class ScalarRules
     // With unquoted-string type deserialization on, a plain scalar read as object takes the type its text suggests: the
     // smallest integer type that holds it, a boolean for true/false, a floating-point number, else the string. Floating
     // point is a double here; YamlDotNet picks a single first, which loses digits (123456789.123 becomes 123456790).
-    public static object? Detect(string text)
+    public static object? Detect(string text, int maxDigits = DefaultDigits)
     {
         if (IsNullText(text))
         {
@@ -278,13 +280,13 @@ internal static class ScalarRules
 
         if (IsDecimalInteger(text) || (text.StartsWith("0x", StringComparison.Ordinal) && text.Length > 2 && IsHex(text.AsSpan(2))))
         {
-            if (text.Length > global::OneYaml.YamlLimits.Default.MaxIntegerDigits + 2)
+            if (text.Length > (long)maxDigits + 2)
             {
                 // Too long to read as a number; it stays text rather than failing a load that asked for no type.
                 return text;
             }
 
-            BigInteger v = text.StartsWith("0x", StringComparison.Ordinal) ? ParseInteger(text) : BigInteger.Parse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+            BigInteger v = text.StartsWith("0x", StringComparison.Ordinal) ? ParseInteger(text, maxDigits) : BigInteger.Parse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
             if (v >= byte.MinValue && v <= byte.MaxValue)
             {
                 return (byte)v;

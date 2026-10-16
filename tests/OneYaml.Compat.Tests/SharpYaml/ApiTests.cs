@@ -222,11 +222,12 @@ public class SharpYamlApiTests
         Assert.Throws<NotSupportedException>(() => Cs.YamlSerializer.Serialize(1, new Cs.YamlSerializerOptions { UnsafeAllowDeserializeFromTagTypeName = true }));
         Assert.Throws<NotSupportedException>(() => Cs.YamlSerializer.Serialize(1, new Cs.YamlSerializerOptions { DefaultIgnoreCondition = Cs.YamlIgnoreCondition.Always }));
 
-        // Options that only change layout are accepted.
+        // Options at their defaults, and the ones that change nothing here, are accepted.
         _ = Cs.YamlSerializer.Serialize(1, new Cs.YamlSerializerOptions
         {
-            BlockSequenceMappingStyle = Cs.YamlSequenceItemStyle.Expanded,
-            ScalarStylePreferences = new Cs.YamlScalarStylePreferences { PreferPlainStyle = true },
+            BlockSequenceMappingStyle = Cs.YamlSequenceItemStyle.Compact,
+            BlockSequenceSequenceStyle = Cs.YamlSequenceItemStyle.Expanded,
+            ScalarStylePreferences = new Cs.YamlScalarStylePreferences(),
             ReferenceHandling = Cs.YamlReferenceHandling.None,
             TypeInfoResolver = Cs.ReflectionYamlTypeInfoResolver.Default,
             SourceName = "x.yaml",

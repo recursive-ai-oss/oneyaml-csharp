@@ -13,8 +13,9 @@ internal sealed class Loaded : IDisposable
 {
     private LineMap? _lines;
 
-    private Loaded(Oy.YamlDocument document, string text)
+    private Loaded(Oy.YamlDocument document, string text, Oy.YamlLimits limits)
     {
+        Limits = limits;
         Document = document;
         State = document.State;
         Text = text;
@@ -23,6 +24,9 @@ internal sealed class Loaded : IDisposable
     // The text as given. Marks are computed from it, so they stay available after the tree has been released.
     public string Text { get; }
 
+    // The limits the text was parsed under; later work on the same text (binding, parsing again) keeps to them.
+    public Oy.YamlLimits Limits { get; }
+
     public Oy.YamlDocument Document { get; }
 
     public DocState State { get; }
@@ -30,13 +34,13 @@ internal sealed class Loaded : IDisposable
     public LineMap Lines => _lines ??= new LineMap(Text);
 
     // YamlDotNet accepts a repeated key (the last one wins), so the tree is built with duplicates allowed.
-    private static readonly Oy.YamlDocumentOptions s_options = new() { AllowDuplicateKeys = true };
-
-    public static Loaded Parse(string text)
+    public static Loaded Parse(string text, Oy.YamlLimits? limits = null)
     {
+        limits ??= Oy.YamlLimits.Default;
         try
         {
-            return new Loaded(Oy.YamlDocument.Parse(text, s_options), text);
+            var options = new Oy.YamlDocumentOptions { AllowDuplicateKeys = true, Limits = limits };
+            return new Loaded(Oy.YamlDocument.Parse(text, options), text, limits);
         }
         catch (Oy.YamlException ex)
         {
@@ -44,10 +48,26 @@ internal sealed class Loaded : IDisposable
         }
     }
 
-    public static Loaded Parse(TextReader reader)
+    public static Loaded Parse(TextReader reader, Oy.YamlLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        return Parse(reader.ReadToEnd());
+        long max = (limits ?? Oy.YamlLimits.Default).MaxInputBytes;
+        if (max == long.MaxValue)
+        {
+            return Parse(reader.ReadToEnd(), limits);
+        }
+
+        // A character is at least one byte, so more characters than the byte limit is over the limit; stop reading there
+        // and let the parser report it, instead of buffering an endless reader.
+        var sb = new StringBuilder();
+        char[] chunk = new char[4096];
+        int n;
+        while (sb.Length <= max && (n = reader.Read(chunk, 0, chunk.Length)) > 0)
+        {
+            sb.Append(chunk, 0, n);
+        }
+
+        return Parse(sb.ToString(), limits);
     }
 
     public Mark MarkAt(int offset) => Lines.MarkAt(offset);

@@ -813,7 +813,7 @@ internal ref partial struct YamlReader
             case (byte)':':
                 if (IsBlankZ(next) || (_flowLevel > 0 && (IsFlowIndicator(next) || prevJson)))
                 {
-                    FetchValue(column);
+                    FetchValue(column, prevJson);
                     return;
                 }
 
@@ -1008,10 +1008,17 @@ internal ref partial struct YamlReader
         _pos++;
     }
 
-    private void FetchValue(int column)
+    private void FetchValue(int column, bool afterJsonLike)
     {
         if (_keyHead != _keyTail && _keys[_keyTail - 1].Level == _flowLevel && !_keys[_keyTail - 1].Dead)
         {
+            // Only a quoted key or a flow collection may run straight into its value; after any other key the ':' needs
+            // white space before a collection value ("{a:{}}" is an error, "{a: {}}" and a quoted key before the colon are not).
+            if (_flowLevel > 0 && !afterJsonLike && At(_pos + 1) is (byte)'{' or (byte)'[')
+            {
+                throw Error("A ':' after a plain key must be followed by white space before a collection.", _pos + 1);
+            }
+
             SimpleKey key = _keys[_keyTail - 1];
             PopKey();
 
@@ -1119,10 +1126,10 @@ internal ref partial struct YamlReader
                 throw Error("A verbatim tag cannot be empty.", p);
             }
 
-            // A verbatim tag is taken as it stands, so the bare '!' it would name is not a tag.
+            // A verbatim tag is taken as it stands, so the bare '!' it would name is not a tag. The error is at the '>': "!<!x>" is valid, so the first character that cannot belong is the one that closes the tag.
             if (p == start + 3 && s[start + 2] == (byte)'!')
             {
-                throw Error("A verbatim tag cannot be just '!'.", start + 2);
+                throw Error("A verbatim tag cannot be just '!'.", p);
             }
 
             CheckTagText(start + 2, p);

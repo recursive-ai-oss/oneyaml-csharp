@@ -42,9 +42,12 @@ internal sealed class Settings
 
     public int MaxRecursion { get; set; }
 
+    // The limits every read keeps to; the default is the library's own default.
+    public global::OneYaml.YamlLimits Limits { get; set; } = global::OneYaml.YamlLimits.Default;
+
     // The nesting a call really allows: what was asked for, never more than the library's own depth limit, so a
     // large setting cannot walk past what the stack can hold.
-    public int EffectiveMaxRecursion => Math.Min(MaxRecursion, global::OneYaml.YamlLimits.Default.MaxDepth);
+    public int EffectiveMaxRecursion => Math.Min(MaxRecursion, Limits.MaxDepth);
 
     // Writing.
     public bool IndentedSequences { get; set; }

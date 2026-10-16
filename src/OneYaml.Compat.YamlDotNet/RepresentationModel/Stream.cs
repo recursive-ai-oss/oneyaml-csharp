@@ -54,6 +54,7 @@ public class YamlDocument
 public class YamlStream : IEnumerable<YamlDocument>
 {
     private string? _loadedText;
+    private global::OneYaml.YamlLimits _loadedLimits = global::OneYaml.YamlLimits.Default;
 
     /// <summary>Creates an empty stream.</summary>
     public YamlStream()
@@ -97,10 +98,16 @@ public class YamlStream : IEnumerable<YamlDocument>
 
     /// <summary>Reads the documents of a text, adding them to the stream.</summary>
     /// <param name="input">The reader.</param>
-    public void Load(TextReader input)
+    public void Load(TextReader input) => Load(input, global::OneYaml.YamlLimits.Default);
+
+    /// <summary>Reads the documents of a text, adding them to the stream, within the given limits. Not in YamlDotNet.</summary>
+    /// <param name="input">The reader.</param>
+    /// <param name="limits">The limits; <see cref="global::OneYaml.YamlLimits.Untrusted"/> suits input you do not control.</param>
+    public void Load(TextReader input, global::OneYaml.YamlLimits limits)
     {
         ArgumentNullException.ThrowIfNull(input);
-        Loaded source = Loaded.Parse(input);
+        ArgumentNullException.ThrowIfNull(limits);
+        Loaded source = Loaded.Parse(input, limits);
         var documents = new List<YamlDocument>();
         try
         {
@@ -120,6 +127,7 @@ public class YamlStream : IEnumerable<YamlDocument>
         bool wasEmpty = Documents.Count == 0;
         Documents.AddRange(documents);
         _loadedText = wasEmpty ? source.Text : null;
+        _loadedLimits = limits;
     }
 
     /// <summary>Reads the documents from a parser, adding them to the stream.</summary>
@@ -172,7 +180,7 @@ public class YamlStream : IEnumerable<YamlDocument>
         if (_loadedText is not null)
         {
             // The tree was released after loading; parse again to learn whether the model still equals the text.
-            using Loaded again = Loaded.Parse(_loadedText);
+            using Loaded again = Loaded.Parse(_loadedText, _loadedLimits);
             if (ModelMatcher.Matches(this, again))
             {
                 return _loadedText;

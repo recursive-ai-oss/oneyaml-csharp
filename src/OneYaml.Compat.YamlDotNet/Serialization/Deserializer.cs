@@ -73,7 +73,9 @@ public sealed class Deserializer : IDeserializer
     private object? ReadReader(TextReader input, Type type)
     {
         ArgumentNullException.ThrowIfNull(input);
-        return ReadText(input.ReadToEnd(), type);
+        ArgumentNullException.ThrowIfNull(type);
+        using Loaded source = Loaded.Parse(input, _settings.Limits);
+        return ReadLoaded(source, type);
     }
 
     /// <inheritdoc/>
@@ -87,7 +89,14 @@ public sealed class Deserializer : IDeserializer
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(type);
-        using Loaded source = Loaded.Parse(input);
+        using Loaded source = Loaded.Parse(input, _settings.Limits);
+        return ReadLoaded(source, type);
+    }
+
+    [RequiresUnreferencedCode(Messages.Reflection)]
+    [RequiresDynamicCode(Messages.Reflection)]
+    private object? ReadLoaded(Loaded source, Type type)
+    {
         var state = source.State;
         int documents = state.NoRealDocument ? 0 : state.DocCount;
         if (documents == 0)
@@ -107,7 +116,7 @@ public sealed class Deserializer : IDeserializer
             return Nullable.GetUnderlyingType(type) is not null || !type.IsValueType ? null : Activator.CreateInstance(type);
         }
 
-        return GetBinder().Bind(new BindContext(source), root, type);
+        return GetBinder().Bind(new BindContext(source, _settings.Limits), root, type);
     }
 
     /// <inheritdoc/>

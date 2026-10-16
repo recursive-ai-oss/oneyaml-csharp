@@ -98,11 +98,11 @@ public class ReplaceEmptyBlockScalarTests
 public class FlowValueSpacingTests
 {
     [Theory]
-    [InlineData("{a:{}}", "{\"a\":5}", "{a: 5}")]
-    [InlineData("{a:[1]}", "{\"a\":\"s\"}", "{a: s}")]
-    [InlineData("{a:{b: 1}, c: 2}", "{\"a\":true}", "{a: true, c: 2}")]
-    [InlineData("{a:{}}", "{\"a\":[2]}", "{a:[2]}")]
-    [InlineData("{\"a\":{}}", "{\"a\":2}", "{\"a\":2}")]
+    // A plain key now needs white space before a collection value, so only a quoted key can have the old value touch its colon.
+    [InlineData("{\"a\":{}}", "{\"a\":5}", "{\"a\":5}")]
+    [InlineData("{\"a\":[1]}", "{\"a\":\"s\"}", "{\"a\":s}")]
+    [InlineData("{\"a\":{b: 1}, c: 2}", "{\"a\":true}", "{\"a\":true, c: 2}")]
+    [InlineData("{\"a\":{}}", "{\"a\":[2]}", "{\"a\":[2]}")]
     public void A_replaced_value_does_not_join_the_key(string text, string mergePatch, string expected)
     {
         var doc = YamlDocument.Parse(text);
@@ -113,7 +113,7 @@ public class FlowValueSpacingTests
     [Fact]
     public void A_patch_replace_keeps_the_key_apart_from_its_value()
     {
-        var doc = YamlDocument.Parse("{a:{}}");
+        var doc = YamlDocument.Parse("{\"a\":{}}");
         doc.ApplyPatch("[{\"op\":\"replace\",\"path\":\"/a\",\"value\":5}]");
         Assert.Equal(5L, doc.Get<long>("/a"));
     }

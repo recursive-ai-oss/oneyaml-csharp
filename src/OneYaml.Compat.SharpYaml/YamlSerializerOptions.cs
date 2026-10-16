@@ -9,7 +9,7 @@ using Oy = global::OneYaml;
 
 namespace OneYaml.Compat.SharpYaml;
 
-/// <summary>Hints about the style of scalars in the output. They change layout only and have no effect here.</summary>
+/// <summary>Hints about the style of scalars in the output. This package cannot follow them: setting either to true is an error when the options are first used.</summary>
 public sealed class YamlScalarStylePreferences
 {
     /// <summary>Prefer plain scalars where they are valid.</summary>
@@ -36,6 +36,10 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
 
     // SharpYaml stops at this depth unless the options say otherwise.
     private const int DefaultDepth = 64;
+
+    // Engine options made for a ReferenceHandling other than None. Reading honours it (aliases are followed), writing
+    // cannot, so a write through such options is refused instead of leaving out the anchors the program asked for.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Oy.YamlSerializerOptions, object> s_noWrite = new();
 
     private readonly object _gate = new();
     private Oy.YamlSerializerOptions? _engine;
@@ -70,6 +74,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
         ScalarStylePreferences = options.ScalarStylePreferences;
         ReferenceHandling = options.ReferenceHandling;
         MaxDepth = options.MaxDepth;
+        Limits = options.Limits;
         TypeInfoResolver = options.TypeInfoResolver;
     }
 
@@ -110,10 +115,10 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>The order in which members are written.</summary>
     public YamlMappingOrderPolicy MappingOrder { get; init; }
 
-    /// <summary>The layout of mappings in block sequences. It changes layout only and has no effect here.</summary>
+    /// <summary>The layout of mappings in block sequences. Output always starts such a mapping on the line of the dash, so any other value is an error when the options are first used.</summary>
     public YamlSequenceItemStyle BlockSequenceMappingStyle { get; init; } = YamlSequenceItemStyle.Compact;
 
-    /// <summary>The layout of sequences in block sequences. It changes layout only and has no effect here.</summary>
+    /// <summary>The layout of sequences in block sequences. Output always puts a sequence inside a sequence in the layout described by <see cref="YamlSequenceItemStyle.Expanded"/>, so any other value is an error when the options are first used.</summary>
     public YamlSequenceItemStyle BlockSequenceSequenceStyle { get; init; } = YamlSequenceItemStyle.Expanded;
 
     /// <summary>The schema used when <see cref="UseSchema"/> is set. Only <see cref="YamlSchemaKind.Core"/> is supported.</summary>
@@ -128,14 +133,21 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>Allows types to be named by tags. Not supported by this package: true is an error.</summary>
     public bool UnsafeAllowDeserializeFromTagTypeName { get; init; }
 
-    /// <summary>Hints about the style of scalars. They have no effect here.</summary>
+    /// <summary>Hints about the style of scalars. This package cannot follow them: setting either to true is an error when the options are first used.</summary>
     public YamlScalarStylePreferences ScalarStylePreferences { get; init; } = new();
 
-    /// <summary>How shared objects are read and written. Aliases are always followed when reading, within the limits; sharing is not kept when writing.</summary>
+    /// <summary>How shared objects are read and written. Aliases are always followed when reading, within the limits. Writing cannot keep sharing, so a value other than <see cref="YamlReferenceHandling.None"/> is an error when writing.</summary>
     public YamlReferenceHandling ReferenceHandling { get; init; }
 
     /// <summary>The greatest nesting depth; 0 means 64. A value above the limit of the OneYaml library is lowered to it.</summary>
     public int MaxDepth { get; init; }
+
+    /// <summary>
+    /// The limits reading keeps to: input size, nesting depth, alias expansion, integer length. <see langword="null"/> means
+    /// <see cref="global::OneYaml.YamlLimits.Default"/>. Not in SharpYaml; set <see cref="global::OneYaml.YamlLimits.Untrusted"/> for input you do not control.
+    /// <see cref="MaxDepth"/> can lower the depth further, never raise it above these limits.
+    /// </summary>
+    public global::OneYaml.YamlLimits? Limits { get; init; }
 
     /// <summary>The resolver of type metadata. Only the reflection resolver is supported.</summary>
     public IYamlTypeInfoResolver? TypeInfoResolver { get; init; }
@@ -179,14 +191,14 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     private Oy.YamlSerializerOptions Build(Oy.IYamlTypeInfoResolver resolver)
     {
         Validate();
-        Oy.YamlLimits limits = Oy.YamlLimits.Default;
+        Oy.YamlLimits limits = Limits ?? Oy.YamlLimits.Default;
         int depth = MaxDepth > 0 ? MaxDepth : DefaultDepth;
         if (depth < limits.MaxDepth)
         {
             limits = limits with { MaxDepth = depth };
         }
 
-        return new Oy.YamlSerializerOptions
+        var made = new Oy.YamlSerializerOptions
         {
             PropertyNamingPolicy = PropertyNamingPolicy,
             PropertyNameCaseInsensitive = PropertyNameCaseInsensitive,
@@ -201,6 +213,20 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
             Limits = limits,
             TypeInfoResolver = resolver,
         };
+        if (ReferenceHandling != YamlReferenceHandling.None)
+        {
+            s_noWrite.Add(made, this);
+        }
+
+        return made;
+    }
+
+    internal static void RefuseReferenceHandlingWrite(Oy.YamlTypeInfo info)
+    {
+        if (s_noWrite.TryGetValue(info.Options, out _))
+        {
+            throw new NotSupportedException("ReferenceHandling other than None is not supported when writing with OneYaml.Compat.SharpYaml: shared objects are written in full each time and no anchors are written. Set ReferenceHandling to None to write (reading follows aliases with either value). See docs/compat/sharpyaml.md for what is and what is not covered.");
+        }
     }
 
     // An option the engine cannot honour is refused loudly: silently ignoring it would change what the program means.
@@ -240,10 +266,27 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
         {
             throw Unsupported(nameof(TypeInfoResolver));
         }
+
+        // These only choose a layout, and the writer has one layout. Taking them and writing something else would hide
+        // that the output differs from what the program asked for.
+        if (BlockSequenceMappingStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Compact))
+        {
+            throw Unsupported(nameof(BlockSequenceMappingStyle));
+        }
+
+        if (BlockSequenceSequenceStyle is not (YamlSequenceItemStyle.Default or YamlSequenceItemStyle.Expanded))
+        {
+            throw Unsupported(nameof(BlockSequenceSequenceStyle));
+        }
+
+        if (ScalarStylePreferences is { PreferPlainStyle: true } or { PreferQuotedForAmbiguousScalars: true })
+        {
+            throw Unsupported(nameof(ScalarStylePreferences));
+        }
     }
 
     internal static NotSupportedException Unsupported(string what) =>
-        new($"{what} is not supported by OneYaml.Compat.SharpYaml. See docs/compat/sharpyaml.md for what is and what is not covered.");
+        new($"{what} is not supported by OneYaml.Compat.SharpYaml. Leave it at its default value. See docs/compat/sharpyaml.md for what is and what is not covered.");
 
     internal YamlMappingOrderPolicy Order => MappingOrder;
 }

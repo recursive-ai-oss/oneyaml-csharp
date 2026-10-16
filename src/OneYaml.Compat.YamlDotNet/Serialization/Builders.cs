@@ -200,6 +200,15 @@ public sealed class DeserializerBuilder : BuilderSkeleton<DeserializerBuilder>
         return this;
     }
 
+    /// <summary>Sets the limits reading keeps to: input size, nesting depth, alias expansion and integer length. Not in YamlDotNet; use <see cref="global::OneYaml.YamlLimits.Untrusted"/> for input you do not control.</summary>
+    /// <param name="limits">The limits. The default is <see cref="global::OneYaml.YamlLimits.Default"/>. <see cref="WithMaximumRecursion"/> can lower the depth further, never raise it above these limits.</param>
+    /// <returns>This builder.</returns>
+    public DeserializerBuilder WithLimits(global::OneYaml.YamlLimits limits)
+    {
+        Settings.Limits = limits ?? throw new ArgumentNullException(nameof(limits));
+        return this;
+    }
+
     /// <summary>Reads an interface or base type as a concrete type.</summary>
     /// <typeparam name="TInterface">The interface or base type.</typeparam>
     /// <typeparam name="TConcrete">The type to create.</typeparam>
