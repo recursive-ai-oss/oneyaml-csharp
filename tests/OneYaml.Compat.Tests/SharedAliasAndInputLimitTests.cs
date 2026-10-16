@@ -56,7 +56,7 @@ public class SharedAliasAndInputLimitTests
         })
         {
             Exception ex = Assert.ThrowsAny<YdnCore.YamlException>(() => deserializer.Deserialize<object>(yaml));
-            Assert.Contains("expands to more than the configured limit", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("exceeds the budget set by YamlLimits", ex.Message, StringComparison.Ordinal);
             Assert.ThrowsAny<YdnCore.YamlException>(() => deserializer.Deserialize<Dictionary<string, List<object>>>(yaml));
             Assert.ThrowsAny<YdnCore.YamlException>(() => deserializer.Deserialize<Chain>(yaml));
         }

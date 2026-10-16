@@ -139,7 +139,7 @@ public sealed class YamlSerializerOptions : IEquatable<YamlSerializerOptions>
     /// <summary>How shared objects are read and written. Aliases are always followed when reading, within the limits. Writing cannot keep sharing, so a value other than <see cref="YamlReferenceHandling.None"/> is an error when writing.</summary>
     public YamlReferenceHandling ReferenceHandling { get; init; }
 
-    /// <summary>The greatest nesting depth; 0 means 64. A value above the limit of the OneYaml library is lowered to it.</summary>
+    /// <summary>The greatest nesting depth; 0 means 64. The property reads back the value that was set. Reading stops at the lower of it and <see cref="global::OneYaml.YamlLimits.MaxDepth"/> of <see cref="Limits"/>, so a value above that limit has no effect.</summary>
     public int MaxDepth { get; init; }
 
     /// <summary>

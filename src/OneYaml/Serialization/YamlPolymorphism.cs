@@ -357,7 +357,7 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
             return baseObject.ReadFromFirstKey(ref reader, options, start);
         }
 
-        throw MustHaveKey(in reader);
+        throw MustHaveKey(in reader, start);
     }
 
     // The value is compared with the listed discriminators out of line, so its scratch space is not in the frame that recurses.
@@ -397,8 +397,8 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
         reader.CreateException($"{reader.DescribeValue()} is not a known value of '{_keyName}' for {ConverterGuards.DescribeType(typeof(TBase))}.");
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private YamlException MustHaveKey(in Utf8YamlReader reader) =>
-        reader.CreateException($"The mapping of {ConverterGuards.DescribeType(typeof(TBase))} has no key '{_keyName}', which names the derived type.");
+    private YamlException MustHaveKey(in Utf8YamlReader reader, int mappingStart) =>
+        reader.ErrorAt(YamlErrorCategory.Binding, $"The mapping of {ConverterGuards.DescribeType(typeof(TBase))} has no key '{_keyName}', which names the derived type.", mappingStart, atCollection: true);
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private TBase? ReadBase(ref Utf8YamlReader reader, YamlSerializerOptions options, string why)

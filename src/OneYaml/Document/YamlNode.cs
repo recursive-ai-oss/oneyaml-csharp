@@ -337,14 +337,14 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     // ---- Reading values ----
 
-    /// <summary>Reads a scalar as a CLR value.</summary>
-    /// <typeparam name="T">A string, boolean, integer, floating-point, big integer, character, date or time, or GUID type, or <see cref="object"/>.</typeparam>
+    /// <summary>Reads the node as a CLR value: a scalar type, an enum, a class or a collection. <see cref="object"/> gives what <see cref="YamlSerializer"/> gives for <c>object</c>: a string, boolean, number or null for a scalar, a <see cref="System.Collections.Generic.Dictionary{TKey, TValue}"/> for a mapping and a <see cref="System.Collections.Generic.List{T}"/> for a sequence.</summary>
+    /// <typeparam name="T">The type to read.</typeparam>
     /// <returns>The value.</returns>
-    /// <exception cref="YamlException">The node is not a scalar of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
+    /// <exception cref="YamlException">The node does not fit the type (<see cref="YamlErrorCategory.Binding"/>).</exception>
     public T GetValue<T>()
     {
         DocState s = State();
-        if (!NodeValues.IsLeafType(typeof(T)))
+        if (!NodeValues.IsLeafType(typeof(T)) || IsCollectionAsObject<T>(s))
         {
             return BindAny<T>();
         }
@@ -366,6 +366,17 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
     public T GetValue<T>(YamlTypeInfo<T> typeInfo) => Deserialize(typeInfo)!;
+
+    // Asking for object on a mapping or sequence reads the generic shapes, as Deserialize<object> does.
+    private bool IsCollectionAsObject<T>(DocState s)
+    {
+        if (typeof(T) != typeof(object))
+        {
+            return false;
+        }
+
+        return s.Node(Followed(s, out _)).Kind != NodeKind.Scalar;
+    }
 
     // A type that is not a plain scalar (an enum, a class, a collection) is read by the binder, as Set<T> writes it.
     // This needs reflection unless the caller passes a YamlTypeInfo, so it is open only while the switch is on.
@@ -410,7 +421,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public bool TryGetValue<T>(out T value)
     {
         DocState s = State();
-        if (!NodeValues.IsLeafType(typeof(T)))
+        if (!NodeValues.IsLeafType(typeof(T)) || IsCollectionAsObject<T>(s))
         {
             return TryBindAny(out value);
         }

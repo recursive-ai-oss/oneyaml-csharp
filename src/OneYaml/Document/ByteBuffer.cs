@@ -137,9 +137,9 @@ internal struct AliasBudget
         _bytes -= Math.Max(bytes, 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(
+            throw YamlException.Located(
                 YamlErrorCategory.Limit,
-                (viaAlias ? "Following aliases expands to more than the configured limit." : "The patch copies more than the configured limit.") + Named(),
+                viaAlias ? _limits.AliasBudgetMessage("Expanding the aliases") : "The patch copies more than the configured limit." + Named(),
                 state.Text,
                 state.Node(node).Start);
         }
@@ -161,7 +161,7 @@ internal struct AliasBudget
         _bytes -= bytes;
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(node).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(node).Start);
         }
     }
 
@@ -183,7 +183,7 @@ internal struct AliasBudget
         _bytes -= Math.Max(sizes.Bytes[target], 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(alias).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(alias).Start);
         }
     }
 
@@ -198,7 +198,7 @@ internal struct AliasBudget
         _bytes -= Math.Max(t.End - t.Start, 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.At(YamlErrorCategory.Limit, "Following aliases expands to more than the configured limit." + Named(), state.Text, state.Node(alias).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(alias).Start);
         }
     }
 }

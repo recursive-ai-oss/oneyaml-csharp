@@ -714,12 +714,12 @@ public sealed class YamlDocument : IDisposable
         return new YamlNode(this, node, Track(), false);
     }
 
-    /// <summary>Reads a scalar a pointer names as a CLR value.</summary>
-    /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
+    /// <summary>Reads the node a pointer names as a CLR value. <see cref="object"/> gives the generic shapes of <see cref="YamlSerializer"/>: a mapping reads as a dictionary and a sequence as a list.</summary>
+    /// <typeparam name="T">The type to read: a scalar type, an enum, a class, a collection or <see cref="object"/>.</typeparam>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
     /// <returns>The value.</returns>
-    /// <exception cref="YamlException">The pointer names nothing, or the scalar is not of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
+    /// <exception cref="YamlException">The pointer names nothing, or the node is not of that type (<see cref="YamlErrorCategory.Binding"/>).</exception>
     /// <example>
     /// <code language="csharp">
     /// using var doc = YamlDocument.Parse("spec:\n  replicas: 2\n  ports: [80, 443]\n");
@@ -739,19 +739,19 @@ public sealed class YamlDocument : IDisposable
     /// <exception cref="YamlException">The pointer names nothing, or the node does not fit the type.</exception>
     public T Get<T>(string path, YamlTypeInfo<T> typeInfo, int document = 0) => GetNode(path, document).GetValue(typeInfo);
 
-    /// <summary>Reads a scalar a pointer names as a CLR value, if it is there and has that type.</summary>
-    /// <typeparam name="T">A string, boolean, integer, floating-point or big integer type, or <see cref="object"/>.</typeparam>
+    /// <summary>Reads the node a pointer names as a CLR value, if it is there and has that type; <see cref="object"/> reads a mapping or sequence as <see cref="Get{T}(string, int)"/> does.</summary>
+    /// <typeparam name="T">The type to read: a scalar type, an enum, a class, a collection or <see cref="object"/>.</typeparam>
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The value, or the default.</param>
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
-    /// <returns><see langword="true"/> if the pointer names a scalar of that type.</returns>
+    /// <returns><see langword="true"/> if the pointer names a node of that type.</returns>
     /// <exception cref="YamlException">The pointer is invalid or ambiguous.</exception>
     public bool TryGet<T>(string path, out T value, int document = 0)
     {
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
         int node = PointerOps.Find(s, _limits, document, p);
-        if (node >= 0 && !NodeValues.IsLeafType(typeof(T)))
+        if (node >= 0 && (typeof(T) == typeof(object) || !NodeValues.IsLeafType(typeof(T))))
         {
             ResetWalk();
             return new YamlNode(this, node, Track(), false).TryGetValue(out value);

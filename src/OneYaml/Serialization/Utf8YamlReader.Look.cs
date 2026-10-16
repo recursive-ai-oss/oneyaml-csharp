@@ -353,7 +353,7 @@ public ref partial struct Utf8YamlReader
             _chargedNodes = Sat(_chargedNodes + 1);
             if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes))
             {
-                throw Error(YamlErrorCategory.Limit, $"Looking ahead for the key of a derived type exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}).");
+                throw Error(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Looking ahead for the key of a derived type"));
             }
         }
 
