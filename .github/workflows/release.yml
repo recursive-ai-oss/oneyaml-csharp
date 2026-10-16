@@ -1,0 +1,86 @@
+name: release
+
+# Publishes the NuGet packages when a version tag is pushed. nuget.org trusts this
+# workflow through Trusted Publishing: the job exchanges its GitHub identity token for
+# a short-lived API key, so no key is stored in the repository or its secrets.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Keep build output out of the checkout
+        run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+          # The tests run on both target runtimes.
+          dotnet-version: |
+            8.0.x
+          cache: true
+          cache-dependency-path: '**/packages.lock.json'
+
+      - name: Restore
+        run: dotnet restore OneYaml.slnx
+
+      - name: Tag matches the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # The version is whatever the projects build; the tag has to say the same.
+          for project in src/OneYaml src/OneYaml.Compat.YamlDotNet src/OneYaml.Compat.SharpYaml; do
+            version=$(dotnet msbuild "$project" -getProperty:PackageVersion | tr -d '[:space:]')
+            if [ "v$version" != "$TAG" ]; then
+              echo "::error::tag $TAG does not match $project package version $version"
+              exit 1
+            fi
+          done
+
+      # A tag that does not build and pass its tests never publishes.
+      - name: Build
+        run: dotnet build OneYaml.slnx -c Release --no-restore
+      - name: Test
+        run: dotnet test --solution OneYaml.slnx -c Release --no-build --results-directory "$ONEYAML_ARTIFACTS/TestResults"
+
+      - name: Pack
+        # Only the three library projects are packed. The source generator is built by the
+        # OneYaml project and ships inside that package under analyzers/dotnet/cs.
+        run: |
+          for project in src/OneYaml src/OneYaml.Compat.YamlDotNet src/OneYaml.Compat.SharpYaml; do
+            dotnet pack "$project" -c Release --no-restore -o "$RUNNER_TEMP/packages" \
+              -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
+          done
+          ls -l "$RUNNER_TEMP/packages"
+
+      - name: Log in to nuget.org
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: recursiveai.org
+
+      - name: Push
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "$RUNNER_TEMP/packages/*.nupkg" --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json --skip-duplicate
+          dotnet nuget push "$RUNNER_TEMP/packages/*.snupkg" --api-key "$NUGET_API_KEY" \
+            --source https://api.nuget.org/v3/index.json --skip-duplicate
