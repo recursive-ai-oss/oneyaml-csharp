@@ -189,6 +189,38 @@ public class SharedTagTests
         Assert.True(allocated < 100_000_000, $"loading allocated {allocated:N0} bytes");
     }
 
+    // The same arithmetic as the tag hash, with the base given: what a hash with a fixed, known base would give.
+    private static int FixedBaseHash(ulong baseValue, string text)
+    {
+        const ulong Modulus = (1UL << 61) - 1;
+        System.Numerics.BigInteger h = 0;
+        foreach (char c in text)
+        {
+            h = ((h * baseValue) + c + 1) % Modulus;
+        }
+
+        long state = (long)(ulong)h;
+        return unchecked((int)state ^ (int)(state >> 32));
+    }
+
+    // A hash with a base that is the same in every process can be attacked ahead of time. The tag hash must not agree
+    // with the polynomial of any base an attacker would try first.
+    [Fact]
+    public void The_tag_hash_does_not_use_a_base_that_is_known_ahead_of_time()
+    {
+        const string Text = "tag:example.com,2000:some/long/tag/name";
+        int actual = global::OneYaml.Compat.YamlDotNet.Internal.TagText.Hash(global::OneYaml.Compat.YamlDotNet.Internal.TagText.Seed, Text);
+
+        foreach (ulong known in new ulong[] { 31, 33, 37, 131, 257, 263, 1_000_003, 16_777_619, 1_099_511_628_211 })
+        {
+            Assert.NotEqual(FixedBaseHash(known, Text), actual);
+        }
+
+        // Extending a state over split text gives the hash of the whole text.
+        long split = global::OneYaml.Compat.YamlDotNet.Internal.TagText.Extend(global::OneYaml.Compat.YamlDotNet.Internal.TagText.Seed, Text.AsSpan(0, 10));
+        Assert.Equal(actual, global::OneYaml.Compat.YamlDotNet.Internal.TagText.Hash(split, Text.AsSpan(10)));
+    }
+
     [Fact]
     public void An_unresolved_tag_is_cut_in_the_message()
     {

@@ -225,7 +225,8 @@ internal sealed partial class DocState
             i--;
         }
 
-        return i;
+        // A byte order mark at the start of a later document is not indentation.
+        return i > 0 && i + 3 <= pos && src[i] == 0xEF && src[i + 1] == 0xBB && src[i + 2] == 0xBF ? i + 3 : i;
     }
 
     /// <summary>The offset of the line break at or after <paramref name="pos"/>, or the text length.</summary>
@@ -254,15 +255,15 @@ internal sealed partial class DocState
     public bool StartsLine(int pos)
     {
         ReadOnlySpan<byte> src = Text;
-        for (int i = pos - 1; i >= 0 && !IsBreak(src[i]); i--)
+        int i = pos - 1;
+        while (i >= 0 && src[i] == (byte)' ')
         {
-            if (src[i] != (byte)' ')
-            {
-                return false;
-            }
+            i--;
         }
 
-        return true;
+        // Stops at the first blank-free byte, so a long line costs nothing. A byte order mark that starts a later
+        // document counts as the start of its line.
+        return i < 0 || IsBreak(src[i]) || (i >= 3 && src[i] == 0xBF && src[i - 1] == 0xBB && src[i - 2] == 0xEF && IsBreak(src[i - 3]));
     }
 
     /// <summary>Whether a comment (as recorded by the reader) starts at the offset.</summary>
@@ -448,6 +449,32 @@ internal sealed partial class DocState
         int from = prev >= 0 ? _nodes[prev].End : (parent >= 0 ? _nodes[parent].Start : prop);
         int at = SkipTrivia(src, from);
         if (at < prop && at < src.Length && src[at] == (byte)'?' && (at + 1 >= src.Length || src[at + 1] is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t'))
+        {
+            return at;
+        }
+
+        return prop;
+    }
+
+    /// <summary>The first offset of an entry of a flow mapping, taking an explicit-key mark into account.</summary>
+    /// <remarks>Unlike <see cref="EntryStart"/> it looks past the comma that ends the entry before, and starts behind the
+    /// opening brace for the first entry.</remarks>
+    /// <param name="key">A key node of a flow mapping.</param>
+    /// <returns>The entry's first byte: its "?" when it has one, else where its key starts.</returns>
+    public int FlowEntryStart(int key)
+    {
+        ReadOnlySpan<byte> src = Text;
+        int prop = PropStart(key);
+        int prev = PrevSibling(key);
+        int parent = _nodes[key].Parent;
+        int from = prev >= 0 ? _nodes[prev].End : _nodes[parent].Start + 1;
+        int at = SkipTrivia(src, from);
+        if (at < src.Length && src[at] == (byte)',')
+        {
+            at = SkipTrivia(src, at + 1);
+        }
+
+        if (at < prop && at < src.Length && src[at] == (byte)'?' && (at + 1 >= src.Length || src[at + 1] is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t' or (byte)',' or (byte)'}'))
         {
             return at;
         }

@@ -190,7 +190,9 @@ internal sealed class PatchTarget : FuzzTarget
 
     private static void CheckRefusal(YamlException ex, bool merge, int failAt, bool hugeNumber, YamlLimits limits, string patchText, string history)
     {
-        if (!merge && ex.OperationIndex is null)
+        // A patch text nested as deep as the depth limit is refused as a whole, before any operation is read: there is
+        // no operation to name.
+        if (!merge && ex.OperationIndex is null && JsonDepth(patchText) < limits.MaxDepth)
         {
             throw new FuzzFailure("patch-error-without-operation-index", $"{ex.Category}: {ex.Message}\n{history}");
         }
@@ -219,6 +221,43 @@ internal sealed class PatchTarget : FuzzTarget
         {
             throw new FuzzFailure("patch-unexpected-category-" + ex.Category, $"{ex.Category}: {ex.Message}\n{history}");
         }
+    }
+
+    // The deepest nesting of arrays and objects in JSON text, ignoring brackets inside strings.
+    private static int JsonDepth(string json)
+    {
+        int depth = 0;
+        int deepest = 0;
+        bool inString = false;
+        for (int i = 0; i < json.Length; i++)
+        {
+            char c = json[i];
+            if (inString)
+            {
+                if (c == '\\')
+                {
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+            }
+            else if (c == '"')
+            {
+                inString = true;
+            }
+            else if (c is '[' or '{')
+            {
+                deepest = Math.Max(deepest, ++depth);
+            }
+            else if (c is ']' or '}')
+            {
+                depth--;
+            }
+        }
+
+        return deepest;
     }
 
     private static void Apply(YamlDocument doc, Random rng, string patch, bool merge, int d)
@@ -440,7 +479,7 @@ internal sealed class PatchTarget : FuzzTarget
                         }
                 }
             }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IndexOutOfRangeException or KeyNotFoundException or NullReferenceException or FormatException)
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IndexOutOfRangeException or KeyNotFoundException or NullReferenceException or FormatException or OverflowException)
             {
                 // The model cannot follow this operation (a path an earlier one removed, say).
                 oracleOk = false;
@@ -632,6 +671,13 @@ internal sealed class PatchTarget : FuzzTarget
                     case "int": json = m.Text; return true;
                     default:
                         if (m.Text is ".nan" or "Infinity" or "-Infinity" || !double.TryParse(m.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double d) || !double.IsFinite(d))
+                        {
+                            return false;
+                        }
+
+                        // A value that underflows to zero as a double is still not zero as written; the library compares
+                        // the numbers as written, so the double the model holds is not what the document says.
+                        if (d == 0 && m.Raw.Split('e', 'E')[0].AsSpan().IndexOfAnyInRange('1', '9') >= 0)
                         {
                             return false;
                         }

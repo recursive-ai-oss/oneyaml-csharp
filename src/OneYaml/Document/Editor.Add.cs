@@ -558,7 +558,7 @@ internal static partial class Editor
         {
             int from;
             int to;
-            int entryAt = map ? s.EntryStart(first) : s.PropStart(first);
+            int entryAt = map ? s.FlowEntryStart(first) : s.PropStart(first);
             int after = end;
             while (after < src.Length && src[after] == (byte)' ')
             {
@@ -590,22 +590,10 @@ internal static partial class Editor
 
             if (prevEntry < 0)
             {
-                from = s.PropStart(first);
-                to = s.PropStart(nextEntry);
-                if (map && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0)
-                {
-                    // An empty key sits at the next token, behind its own "?", which stays with it.
-                    int back = to;
-                    while (back > from && src[back - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
-                    {
-                        back--;
-                    }
-
-                    if (back > from && src[back - 1] == (byte)'?')
-                    {
-                        to = back - 1;
-                    }
-                }
+                // Each entry's own "?" goes with it or stays with it: cutting from one entry's start to the next one's
+                // leaves exactly one indicator in front of the next key.
+                from = entryAt;
+                to = map ? s.FlowEntryStart(nextEntry) : s.PropStart(nextEntry);
             }
             else
             {
@@ -614,32 +602,64 @@ internal static partial class Editor
             }
 
             using var empty = new ByteBuffer(1);
+            if (prevEntry < 0 && (from == 0 || DocState.IsBreak(src[from - 1])) && StartsDocumentMarker(src, to))
+            {
+                // The next item would begin a line with "---" or "...", which ends the document. A space keeps it inside.
+                empty.Write((byte)' ');
+            }
+
             return Commit(s, limits, from, to, empty);
         }
 
         int entryStart = map ? s.EntryStart(first) : s.DashOf(node, prevEntry);
+        // The text that ends right before this entry. A key with no value has an empty value node after it; the
+        // key's own text is what ends there.
+        int before = first - 1;
+        if (map && before > 0 && (s.Node(before).Flags & NodeFlags.Empty) != 0 && (s.Node(before - 1).Flags & NodeFlags.IsKey) != 0)
+        {
+            before--;
+        }
+
         int start;
         int stop;
         if (s.StartsLine(entryStart))
         {
             start = s.OwnedCommentsStart(s.LineStart(entryStart));
             stop = s.PastLine(end);
-            if (first > 0 && IsKeepBlock(s.Node(first - 1)))
+            if (before >= 0 && IsKeepBlock(s.Node(before)))
             {
                 // A kept block scalar ends right before this entry. The blank lines after the entry would
                 // join it and become part of its value, so they go with the entry.
                 stop = BlankLinesEnd(src, stop);
             }
 
-            if (first > 0 && IsBlockScalar(s.Node(first - 1)))
+            if (before >= 0 && IsBlockScalar(s.Node(before)))
             {
                 // A block scalar ends right before this entry. Comment lines after the entry that are indented
                 // as deep as its lines would be read as text of the scalar, so they go with the entry.
-                stop = CommentLinesEnd(src, stop, s.Node(first - 1).Aux);
+                stop = CommentLinesEnd(src, stop, s.Node(before).Aux);
+                stop = TabLinesEnd(src, stop);
+                while (IsKeepBlock(s.Node(before)))
+                {
+                    // Blank and comment lines may alternate. Blank lines that lead up to the end of the text stay as
+                    // they are; ones that lead up to another entry would join the kept scalar.
+                    int seen = stop;
+                    int blanksEnd = BlankLinesEnd(src, stop);
+                    if (blanksEnd < src.Length)
+                    {
+                        stop = blanksEnd;
+                    }
+
+                    stop = CommentLinesEnd(src, stop, s.Node(before).Aux);
+                    if (stop == seen)
+                    {
+                        break;
+                    }
+                }
             }
 
             if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0
-                && !(first > 0 && IsBlockScalar(s.Node(first - 1)) && (Chomping)s.Node(first - 1).Chomp != Chomping.Strip))
+                && !(before >= 0 && IsBlockScalar(s.Node(before)) && (Chomping)s.Node(before).Chomp != Chomping.Strip))
             {
                 // The text had no final line break; the new last line should not gain one.
                 start -= start >= 2 && src[start - 1] == (byte)'\n' && src[start - 2] == (byte)'\r' ? 2 : 1;
@@ -664,6 +684,40 @@ internal static partial class Editor
 
         return Commit(s, limits, start, stop, none);
     }
+
+    // The end of a run of blank lines after an offset when a tab is among them, else the offset. After a block scalar a
+    // line with a tab in it is not allowed (a tab cannot indent there), so it must not be left next to the scalar; the
+    // blank lines in front of it go with it.
+    private static int TabLinesEnd(ReadOnlySpan<byte> src, int pos)
+    {
+        int p = pos;
+        bool tab = false;
+        while (p < src.Length)
+        {
+            int q = p;
+            bool lineTab = false;
+            while (q < src.Length && src[q] is (byte)' ' or (byte)'\t')
+            {
+                lineTab |= src[q] == (byte)'\t';
+                q++;
+            }
+
+            if (q < src.Length && !DocState.IsBreak(src[q]))
+            {
+                break;
+            }
+
+            tab |= lineTab;
+            p = q >= src.Length ? q : q + (src[q] == (byte)'\r' && q + 1 < src.Length && src[q + 1] == (byte)'\n' ? 2 : 1);
+        }
+
+        return tab ? p : pos;
+    }
+
+    // Whether a document start or end marker begins at an offset.
+    private static bool StartsDocumentMarker(ReadOnlySpan<byte> src, int at)
+        => at + 3 <= src.Length && (src.Slice(at, 3).SequenceEqual("---"u8) || src.Slice(at, 3).SequenceEqual("..."u8))
+            && (at + 3 == src.Length || src[at + 3] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r');
 
     // Whether the entry that follows the text up to an offset is a colon with no key before it.
     private static bool IsColonOnlyEntry(ReadOnlySpan<byte> src, int from)

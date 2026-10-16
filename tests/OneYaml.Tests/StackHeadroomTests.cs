@@ -64,6 +64,15 @@ internal abstract record TagRecordBase;
 
 internal sealed record TagRecNode(TagRecordBase? C, string? S) : TagRecordBase;
 
+// A typed graph nested through extension data: the write of each level sits on the stack under the one before.
+internal sealed class ExtensionNode
+{
+    public int V { get; set; }
+
+    [YamlExtensionData]
+    public Dictionary<string, object?> Extra { get; set; } = [];
+}
+
 [YamlSerializable(typeof(KeyBase))]
 [YamlSerializable(typeof(KeyRecordBase))]
 [YamlSerializable(typeof(TagBase))]
@@ -359,5 +368,21 @@ public class StackHeadroomTests
             Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, info)));
             Assert.Equal(Levels, Depth(YamlDocument.Parse(yaml).Root.Deserialize<TagRecordBase>()));
         });
+    }
+
+    [Fact]
+    public void Writing_through_extension_data_reaches_the_depth_limit()
+    {
+        SkipWhenUnoptimised();
+        var root = new ExtensionNode();
+        ExtensionNode current = root;
+        for (int i = 1; i < Levels; i++)
+        {
+            var next = new ExtensionNode { V = i };
+            current.Extra["c"] = next;
+            current = next;
+        }
+
+        OnMegabyteStack(() => Assert.Contains("c:", YamlSerializer.Serialize(root)));
     }
 }
