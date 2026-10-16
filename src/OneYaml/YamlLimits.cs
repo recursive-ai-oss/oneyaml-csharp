@@ -100,6 +100,21 @@ public sealed record YamlLimits
     /// <returns>The budget, never less than <see cref="AliasByteFloor"/>.</returns>
     public long AliasByteBudget(long inputBytes) => Budget(inputBytes, AliasByteFactor, AliasByteFloor);
 
+    // Each limit at the lower of the two: what a reader that must honour both has to use.
+    internal static YamlLimits Stricter(YamlLimits a, YamlLimits b) =>
+        a.Equals(b) ? b : new YamlLimits
+        {
+            MaxDepth = Math.Min(a.MaxDepth, b.MaxDepth),
+            MaxInputBytes = Math.Min(a.MaxInputBytes, b.MaxInputBytes),
+            MaxScalarBytes = Math.Min(a.MaxScalarBytes, b.MaxScalarBytes),
+            MaxDocuments = Math.Min(a.MaxDocuments, b.MaxDocuments),
+            MaxIntegerDigits = Math.Min(a.MaxIntegerDigits, b.MaxIntegerDigits),
+            AliasNodeFactor = Math.Min(a.AliasNodeFactor, b.AliasNodeFactor),
+            AliasNodeFloor = Math.Min(a.AliasNodeFloor, b.AliasNodeFloor),
+            AliasByteFactor = Math.Min(a.AliasByteFactor, b.AliasByteFactor),
+            AliasByteFloor = Math.Min(a.AliasByteFloor, b.AliasByteFloor),
+        };
+
     private static long Budget(long own, long factor, long floor)
     {
         if (factor == long.MaxValue || floor == long.MaxValue)

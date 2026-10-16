@@ -295,6 +295,9 @@ internal sealed class AnchorBook
 /// <remarks>
 /// A converter's <c>Read</c> is called with the reader on the first token of its value and must
 /// leave it on the last token of that value: the scalar itself, or the matching end token.
+/// Unlike <c>System.Text.Json.Utf8JsonReader</c>, the reader must not be copied: a copy shares the scanner and its buffers with
+/// the original, so reading on the copy changes what the original reads next. Pass it by <see langword="ref"/>, and read ahead
+/// by reading on, never by reading a copy.
 /// </remarks>
 [StructLayout(LayoutKind.Auto)]
 public ref partial struct Utf8YamlReader

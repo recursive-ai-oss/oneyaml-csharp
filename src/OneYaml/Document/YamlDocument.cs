@@ -81,6 +81,23 @@ public sealed class YamlDocument : IDisposable
     // Options for reading scalars through the binder's converters, carrying this document's limits.
     internal YamlSerializerOptions BindOptions => _bindOptions ??= ReferenceEquals(_limits, YamlLimits.Default) ? YamlSerializerOptions.Default : new YamlSerializerOptions { Limits = _limits, SourceName = _sourceName };
 
+    // Options a caller passed, made no looser than the limits this document was opened with: a document opened for untrusted
+    // input must not be bound with limits the caller reached for without thinking. The result is kept per options object, so the
+    // type metadata made for it is made once.
+    private System.Runtime.CompilerServices.ConditionalWeakTable<YamlSerializerOptions, YamlSerializerOptions>? _strictOptions;
+
+    internal YamlSerializerOptions StricterOptions(YamlSerializerOptions options)
+    {
+        YamlLimits stricter = YamlLimits.Stricter(_limits, options.Limits);
+        if (stricter.Equals(options.Limits))
+        {
+            return options;
+        }
+
+        _strictOptions ??= new();
+        return _strictOptions.GetValue(options, o => new YamlSerializerOptions(o) { Limits = stricter });
+    }
+
     // How many edits the document has had. A view whose epoch has a lower number follows the edits made since.
     internal int EditCount => _editCount;
 

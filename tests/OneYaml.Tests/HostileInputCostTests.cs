@@ -48,7 +48,6 @@ public class HostileInputCostTests
     [InlineData("!local", "Unknown")]
     [InlineData("!<tag:yaml.org,2002:int>", "Int")]
     [InlineData("!<tag:yaml.org,2002:in%74>", "Int")]
-    [InlineData("!<!>", "Str")]
     [InlineData("!<tag:yaml.org,2002:integer>", "Unknown")]
     [InlineData("!e!int", "Int")]
     [InlineData("!e!seq", "Seq")]

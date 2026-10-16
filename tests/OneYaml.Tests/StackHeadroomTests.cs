@@ -99,7 +99,9 @@ public class StackHeadroomTests
             typeof(YamlSerializer).Assembly.GetCustomAttribute<DebuggableAttribute>() is { IsJITOptimizerDisabled: true },
             "The library is built without optimisation, whose frames are too large to reach the depth limit on a 1 MB stack.");
 
-    private static void OnMegabyteStack(Action run)
+    private static void OnMegabyteStack(Action run) => OnStack(1024 * 1024, run);
+
+    private static void OnStack(int bytes, Action run)
     {
         Exception? failure = null;
         var thread = new Thread(
@@ -114,7 +116,7 @@ public class StackHeadroomTests
                     failure = e;
                 }
             },
-            1024 * 1024);
+            bytes);
         thread.Start();
         thread.Join();
         Assert.Null(failure);
@@ -404,5 +406,31 @@ public class StackHeadroomTests
         }
 
         OnMegabyteStack(() => Assert.Contains("c:", YamlSerializer.Serialize(root)));
+    }
+
+    // Frames are larger on some platforms than on Linux, so the depth limit is checked there on 1 MB with little to spare. Linux
+    // has to manage it on 768 KB: that is the room these paths are held to, which keeps them from growing back unnoticed.
+    [Fact]
+    public void Writing_through_extension_data_and_reading_a_late_key_fit_a_smaller_stack()
+    {
+        SkipWhenUnoptimised();
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "The room is measured on Linux; the 1 MB tests above cover the other platforms.");
+        var root = new ExtensionNode();
+        ExtensionNode current = root;
+        for (int i = 1; i < Levels; i++)
+        {
+            var next = new ExtensionNode { V = i };
+            current.Extra["c"] = next;
+            current = next;
+        }
+
+        string yaml = KeyChainAfterAnotherKey(Levels);
+        YamlTypeInfo<KeyRecordBase> recordInfo = Generated<KeyRecordBase>();
+        OnStack(768 * 1024, () =>
+        {
+            Assert.Contains("c:", YamlSerializer.Serialize(root));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize<KeyBase>(yaml)));
+            Assert.Equal(Levels, Depth(YamlSerializer.Deserialize(yaml, recordInfo)));
+        });
     }
 }

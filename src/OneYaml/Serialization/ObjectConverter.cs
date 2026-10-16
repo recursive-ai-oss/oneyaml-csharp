@@ -197,15 +197,18 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
     // The mapping start is behind the reader, which is on the first key (or the end of an empty mapping). A polymorphic
     // base that is read as itself looked at the mapping and found no key that names a derived type.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal T? ReadFromFirstKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start) =>
         ReadBody(ref reader, options, start, ReadResume, null);
 
     // The mapping start and the discriminator key are behind the reader, which is on the discriminator's value.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal T? ReadAfterDiscriminator(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
         ReadBody(ref reader, options, start, ReadNormal, discriminatorKey);
 
     // The mapping start is behind the reader, which is on the first key; the discriminator key is somewhere in the
     // mapping, not first, and is skipped when it comes.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal T? ReadWithDiscriminatorAhead(ref Utf8YamlReader reader, YamlSerializerOptions options, int start, byte[] discriminatorKey) =>
         ReadBody(ref reader, options, start, ReadScouted, discriminatorKey);
 

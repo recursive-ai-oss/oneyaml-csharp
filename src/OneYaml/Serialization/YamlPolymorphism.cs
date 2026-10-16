@@ -64,7 +64,10 @@ public enum YamlDiscriminatorKind
     /// <summary>
     /// A key of the mapping, <c>$type</c> unless <see cref="YamlPolymorphicAttribute.TypeDiscriminatorPropertyName"/> says otherwise.
     /// It may be anywhere in the mapping, and the derived types must bind as mappings. When it is not the first key, the reader
-    /// looks ahead for it, and the look-ahead counts against the alias budget of <see cref="YamlLimits"/>.
+    /// looks ahead for it. Every node passed while looking counts against the alias node budget of <see cref="YamlLimits"/>,
+    /// once for each enclosing mapping that also looks ahead (the nodes an alias brought in were counted when it was read, and
+    /// the end of a collection counts for nothing). Deeply nested types that all name their type last, or a large value before
+    /// the key, can therefore end in a <see cref="YamlErrorCategory.Limit"/> error that the same document with the key first does not.
     /// </summary>
     Key = 0,
 
@@ -223,6 +226,11 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
 
     // Like the other methods that recurse once per level, this and the readers below are compiled fully optimised from the
     // start: a document read once never leaves the first, larger code, and the depth limit has to fit on a 1 MB stack.
+    //
+    // The key case is spelled out here and finds the derived type in a helper that returns before anything recurses. A call
+    // with this many arguments cannot always be turned into a jump (on Windows only four go in registers), so a frame that
+    // only passes the call on would stay on the stack for every level: this one holds an index and a flag, and the next
+    // frame is the derived type's reader.
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
     public override TBase? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
@@ -231,7 +239,25 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
             Resolve();
         }
 
-        return _kind == YamlDiscriminatorKind.Key ? ReadByKey(ref reader, options) : ReadByTag(ref reader, options);
+        if (_kind != YamlDiscriminatorKind.Key)
+        {
+            return ReadByTag(ref reader, options);
+        }
+
+        if (reader.Type != YamlTokenType.MappingStart)
+        {
+            return ReadBase(ref reader, options, "is not a mapping, which a key discriminator needs");
+        }
+
+        ConverterGuards.EnsureStack(in reader);
+        int start = reader.Start;
+        int found = FindDerived(ref reader);
+        if (found < 0)
+        {
+            return ReadBaseFromKey(ref reader, options, start);
+        }
+
+        return (found & 1) != 0 ? _derived[found >> 1].ReadKeyAhead(ref reader, options, start, _keyUtf8) : _derived[found >> 1].ReadAfterKey(ref reader, options, start, _keyUtf8);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -267,16 +293,13 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
         return derived;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private TBase? ReadByKey(ref Utf8YamlReader reader, YamlSerializerOptions options)
+    // Reads up to the value of the key that names the derived type and returns twice the index of that type, plus one when the
+    // key was found by looking ahead. The reader is left on the value when the key was the first one, and put back on the first key
+    // when it was found by looking ahead. -1: no key names a derived type; the reader is back on the first key. (A result and
+    // not an out parameter: a local whose address is taken keeps a call from becoming a jump.)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private int FindDerived(ref Utf8YamlReader reader)
     {
-        if (reader.Type != YamlTokenType.MappingStart)
-        {
-            return ReadBase(ref reader, options, "is not a mapping, which a key discriminator needs");
-        }
-
-        ConverterGuards.EnsureStack(in reader);
-        int start = reader.Start;
         if (!reader.Read())
         {
             throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
@@ -284,32 +307,21 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
 
         if (reader.Type == YamlTokenType.Scalar && ConverterGuards.KeyEquals(ref reader, _keyUtf8))
         {
-            return ReadDerived(ref reader, options, start);
+            if (!reader.Read())
+            {
+                throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
+            }
+
+            return MatchValue(ref reader) << 1;
         }
 
-        return ReadKeyElsewhere(ref reader, options, start);
-    }
-
-    // The discriminator is not the first key. Looking ahead costs nothing for the common case, where it is first.
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private TBase? ReadKeyElsewhere(ref Utf8YamlReader reader, YamlSerializerOptions options, int start)
-    {
+        // The discriminator is not the first key. Looking ahead costs nothing for the common case, where it is first.
         bool looked = reader.Type == YamlTokenType.Scalar;
         if (looked && reader.LookForKey(_keyUtf8))
         {
-            if (reader.Type != YamlTokenType.Scalar)
-            {
-                throw NeedsText(in reader);
-            }
-
-            int index = Match(ref reader);
-            if (index < 0)
-            {
-                throw UnknownValue(in reader);
-            }
-
+            int index = MatchValue(ref reader);
             reader.RewindLook();
-            return _derived[index].ReadKeyAhead(ref reader, options, start, _keyUtf8);
+            return (index << 1) | 1;
         }
 
         if (looked)
@@ -317,23 +329,11 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
             reader.RewindLook();
         }
 
-        // No key that names a derived type: the base is read as itself, from the key already reached.
-        if (_baseInfo?.ObjectBinder is { } baseObject)
-        {
-            return baseObject.ReadFromFirstKey(ref reader, options, start);
-        }
-
-        throw MustHaveKey(in reader);
+        return -1;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
-    private TBase? ReadDerived(ref Utf8YamlReader reader, YamlSerializerOptions options, int start)
+    private int MatchValue(ref Utf8YamlReader reader)
     {
-        if (!reader.Read())
-        {
-            throw reader.Error(YamlErrorCategory.Syntax, "The mapping ends without a value.");
-        }
-
         if (reader.Type != YamlTokenType.Scalar)
         {
             throw NeedsText(in reader);
@@ -345,7 +345,19 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
             throw UnknownValue(in reader);
         }
 
-        return _derived[index].ReadAfterKey(ref reader, options, start, _keyUtf8);
+        return index;
+    }
+
+    // No key that names a derived type: the base is read as itself, from the key already reached.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private TBase? ReadBaseFromKey(ref Utf8YamlReader reader, YamlSerializerOptions options, int start)
+    {
+        if (_baseInfo?.ObjectBinder is { } baseObject)
+        {
+            return baseObject.ReadFromFirstKey(ref reader, options, start);
+        }
+
+        throw MustHaveKey(in reader);
     }
 
     // The value is compared with the listed discriminators out of line, so its scratch space is not in the frame that recurses.
@@ -388,6 +400,7 @@ internal sealed class PolymorphicConverter<TBase> : YamlConverter<TBase>
     private YamlException MustHaveKey(in Utf8YamlReader reader) =>
         reader.CreateException($"The mapping of {ConverterGuards.DescribeType(typeof(TBase))} has no key '{_keyName}', which names the derived type.");
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private TBase? ReadBase(ref Utf8YamlReader reader, YamlSerializerOptions options, string why)
     {
         if (_baseInfo is not null && _baseInfo.CanReadAsBase)
