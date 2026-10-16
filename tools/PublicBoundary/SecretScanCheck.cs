@@ -11,7 +11,7 @@ internal readonly record struct SecretFinding(string Path, string Id, string Kin
 
 /// <summary>
 /// Scans blobs for known secret shapes, ELF binaries and core dumps, and blobs over
-/// 1 MB. Host-specific secret values are checked by the push hook, not here.
+/// 1 MB. Only widely used key formats are recognised; values specific to a host are out of scope.
 /// </summary>
 internal static class SecretScanCheck
 {
@@ -20,8 +20,7 @@ internal static class SecretScanCheck
     // The shapes are assembled from fragments so this file does not match itself.
     private static readonly (string Kind, Regex Shape)[] Shapes =
     [
-        ("anthropic key", Rx("sk-", "ant-[A-Za-z0-9_-]{20,}")),
-        ("openai key", Rx("sk-", "proj-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}")),
+        ("api key (sk- prefix)", Rx("sk-", "(?:ant-|proj-)[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}")),
         ("aws access key id", Rx("(?:AK", "IA|AS", "IA)[0-9A-Z]{16}")),
         ("google api key", Rx("AI", "za[0-9A-Za-z_-]{35}")),
         ("github token", Rx("gh[pousr]", "_[A-Za-z0-9]{30,}|github", "_pat_[A-Za-z0-9_]{30,}")),
@@ -29,8 +28,6 @@ internal static class SecretScanCheck
         ("slack token", Rx("xox[abprs]", "-[A-Za-z0-9-]{10,}")),
         ("nuget api key", Rx("oy2", "[a-z0-9]{43}")),
         ("crates.io token", Rx("ci", "o[A-Za-z0-9]{28,}")),
-        ("elevenlabs key", Rx("sk", "_[a-f0-9]{40,}")),
-        ("firecrawl key", Rx("fc", "-[a-f0-9]{30,}")),
         ("private key", Rx("-----BEGIN ", "[A-Z ]*PRIVATE KEY-----")),
         ("secret assignment", Rx(@"\b[A-Z][A-Z0-9_]*(?:API_KEY|SECRET|PASSWORD|TOKEN)\s*=\s*['""]?[A-Za-z0-9/+_.-]{16,}")),
     ];

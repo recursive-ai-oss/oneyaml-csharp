@@ -21,6 +21,7 @@
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnablePackageValidation>true</EnablePackageValidation>
     <PackageTags>yaml;yamldotnet;compat;serializer</PackageTags>
   </PropertyGroup>
 
@@ -30,5 +31,13 @@
     <InternalsVisibleTo Include="OneYaml.Compat.Tests" />
     <InternalsVisibleTo Include="OneYaml.Benchmarks" />
   </ItemGroup>
+
+  <!-- The compat package uses internals of OneYaml, so it works only with the exact version it was built against.
+       Packing writes the OneYaml dependency as [version] instead of the open range >= version. -->
+  <Target Name="PinOneYamlDependency" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Condition="'%(Filename)' == 'OneYaml'" ProjectVersion="[$(PackageVersion)]" />
+    </ItemGroup>
+  </Target>
 
 </Project>

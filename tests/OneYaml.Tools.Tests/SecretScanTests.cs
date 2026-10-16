@@ -11,7 +11,7 @@ public class SecretScanTests
 
     public static TheoryData<string, string> Secrets => new()
     {
-        { "anthropic key", "sk-" + "ant-" + new string('a', 30) },
+        { "api key (sk- prefix)", "sk-" + "ant-" + new string('a', 30) },
         { "aws access key id", "AK" + "IA" + "ABCDEFGHIJKLMNOP" },
         { "github token", "gh" + "p_" + new string('x', 36) },
         { "private key", "-----BEGIN " + "RSA PRIVATE KEY-----" },

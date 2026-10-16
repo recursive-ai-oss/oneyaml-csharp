@@ -22,6 +22,7 @@
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <EnablePackageValidation>true</EnablePackageValidation>
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>yaml;yaml-1.2;serializer;parser</PackageTags>

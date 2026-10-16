@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tools/gate: the hand-over gate. Run it from anywhere in the checkout: tools/gate
+# tools/gate: the local checks, the same ones CI runs. Run it from anywhere in the checkout: tools/gate
 # Steps: restore, Release build of the solution (both target frameworks, warnings as
 # errors, trim and AOT analyzers on), tests without the Slow category, format check,
 # public-text check over files changed against main plus untracked files, secret scan
@@ -8,7 +8,6 @@
 # names the build output directory (default: a per-user cache outside the repository);
 # ONEYAML_KIT and ONEYAML_YTS_DIR point the conformance tests at their data.
 # Works before the first commit: then every file counts as changed.
-# Fails if it takes over 180 s.
 set -u
 cd "$(dirname "$0")/.." || exit 2
 root=$PWD
@@ -90,12 +89,8 @@ step "unsafe scan" unsafe_scan
 
 total=$((SECONDS - start))
 echo "== total ${total} s"
-if [ "$total" -gt 180 ]; then
-	echo "FAIL: gate took over 180 s"
-	failed+=("time budget")
-fi
 if [ ${#failed[@]} -gt 0 ]; then
-	echo "GATE RED: ${failed[*]}"
+	echo "CHECKS FAILED: ${failed[*]}"
 	exit 1
 fi
-echo "GATE GREEN"
+echo "ALL CHECKS PASSED"

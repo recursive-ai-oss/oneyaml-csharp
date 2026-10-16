@@ -21,16 +21,16 @@ env:
   DOTNET_NOLOGO: '1'
 
 jobs:
-  # Formatting and the public-repository guards.
+  # Formatting and the checks every public repository needs: text, secrets, unsafe code.
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
       - name: Keep build output out of the checkout
         run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: |
             8.0.x
@@ -92,19 +92,19 @@ jobs:
     env:
       # The kit commit the conformance tests run against. To move it, put the full SHA of a
       # commit of recursive-ai-oss/oneyaml-kit here, run the tests, and fix what changed.
-      KIT_REF: 78b0e816de26dc22c33519c95258976260edc49d
+      KIT_REF: 38acec388e68e7b7e46035c6278ce4cba519d482
     steps:
       # Windows runners check out with line-ending conversion on by default. The kit cases and
       # the YAML under test need their exact bytes, so conversion is off before any checkout.
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: recursive-ai-oss/oneyaml-kit
           ref: ${{ env.KIT_REF }}
           path: kit
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - name: Point the tests at the kit
@@ -118,7 +118,7 @@ jobs:
         # The kit's launcher imports a POSIX-only module, so the workload writer is called directly.
         run: |
           python -c "import sys; from pathlib import Path; sys.path.insert(0, 'kit/bench'); from oneyaml_bench import workloads; workloads.prepare(Path(sys.argv[1]), ('quick',))" "$ONEYAML_WORKLOADS"
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
         with:
           dotnet-version: |
             8.0.x
@@ -131,3 +131,62 @@ jobs:
         run: dotnet build OneYaml.slnx -c Release --no-restore
       - name: Test
         run: dotnet test --solution OneYaml.slnx -c Release --no-build --results-directory "$ONEYAML_ARTIFACTS/TestResults"
+
+  # Packs the three packages and checks what a user would receive: a readme in each, and the exact
+  # OneYaml dependency in both compat packages (they use internals of OneYaml).
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Keep build output out of the checkout
+        run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.4xx
+      - name: Pack
+        run: |
+          for project in src/OneYaml src/OneYaml.Compat.YamlDotNet src/OneYaml.Compat.SharpYaml; do
+            dotnet pack "$project" -c Release -o "$RUNNER_TEMP/packages" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
+          done
+          ls -l "$RUNNER_TEMP/packages"
+      - name: Check the packages
+        run: |
+          cd "$RUNNER_TEMP/packages"
+          version=$(dotnet msbuild "$GITHUB_WORKSPACE/src/OneYaml" -getProperty:PackageVersion | tr -d '[:space:]')
+          for id in OneYaml OneYaml.Compat.YamlDotNet OneYaml.Compat.SharpYaml; do
+            pkg="$id.$version.nupkg"
+            test -f "$pkg" || { echo "::error::$pkg was not produced"; exit 1; }
+            test -f "$id.$version.snupkg" || { echo "::error::$id.$version.snupkg was not produced"; exit 1; }
+            unzip -p "$pkg" "$id.nuspec" | grep -q "<readme>README.md</readme>" || { echo "::error::$pkg declares no readme"; exit 1; }
+            unzip -l "$pkg" | grep -q " README.md$" || { echo "::error::$pkg does not contain README.md"; exit 1; }
+          done
+          unzip -l "OneYaml.$version.nupkg" | grep -q "analyzers/dotnet/cs/OneYaml.SourceGeneration.dll" || { echo "::error::the source generator is not in the OneYaml package"; exit 1; }
+          for id in OneYaml.Compat.YamlDotNet OneYaml.Compat.SharpYaml; do
+            deps=$(unzip -p "$id.$version.nupkg" "$id.nuspec" | grep '<dependency id="OneYaml"' || true)
+            echo "$deps"
+            exact=$(echo "$deps" | grep -cF "version=\"[$version]\"" || true)
+            total=$(echo "$deps" | wc -l)
+            [ "$exact" -eq "$total" ] && [ "$exact" -ge 1 ] || { echo "::error::$id does not depend on exactly OneYaml [$version]"; exit 1; }
+          done
+
+  # Publishes the smoke program with native AOT (warnings as errors) and runs it. The runner image
+  # carries the native toolchain; the step installs it only if it is missing.
+  aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - name: Keep build output out of the checkout
+        run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5.4.0
+        with:
+          dotnet-version: 10.0.4xx
+      - name: Native toolchain
+        run: |
+          if ! command -v clang >/dev/null || ! dpkg -s zlib1g-dev >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq clang zlib1g-dev
+          fi
+      - name: Publish and run
+        run: tests/OneYaml.AotSmoke/run.sh

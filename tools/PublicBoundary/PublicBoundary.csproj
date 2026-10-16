@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="banned-terms.txt" LogicalName="banned-terms.txt" />
     <InternalsVisibleTo Include="OneYaml.Tools.Tests" />
   </ItemGroup>
 

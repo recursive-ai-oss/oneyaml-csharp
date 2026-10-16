@@ -12,69 +12,22 @@ internal readonly record struct Finding(string Path, int Line, string Match, str
 /// <summary>
 /// Checks that files and commit messages of a public repository carry no internal
 /// process text: private names and paths, internal rule, decision and work-item
-/// identifiers, or commit hashes outside a provenance line. The patterns are built
-/// from fragments so this file does not match itself. A line that must keep a match
-/// on purpose can carry the marker "publictext:ok".
+/// identifiers, or commit hashes outside a provenance line. The terms are compared as
+/// hashes (see <see cref="BannedTerms"/>), so the list does not publish what it guards.
+/// A line that must keep a match on purpose can carry the marker "publictext:ok".
 /// </summary>
 internal static class PublicTextCheck
 {
-    // A forbidden word never appears whole in this file.
-    private static string J(params string[] parts) => string.Concat(parts);
+    // A section sign followed by a digit is a reference into a private document.
+    private static readonly Regex Section = new("\u00a7[0-9]", RegexOptions.CultureInvariant);
 
-    // Words that are a leak in any letter case.
-    private static readonly string[] Insensitive =
-    [
-        J("al", "era"),
-        @"(?:^|[^-\w])" + J("age", "nts?") + @"\b", // not the hyphenated User-Agent
-        @"\b" + J("archi", "tects?") + @"\b",
-        @"\b" + J("revi", "ewers?") + @"\b",
-        J("rul", "ing"),
-        @"\bunit[- ]?[0-9]",
-        @"\b" + J("sw", "arm") + @"\b",
-        "\u00a7[0-9]",
-        // Private file names are matched as file names, so ordinary words such as
-        // "standards" or "plan" stay free.
-        @"\b(" + J("PL", "AN") + "|" + J("RU", "LES") + "|" + J("DES", "IGN") + "|" +
-            J("HAND", "OFF") + "|" + J("LEARN", "INGS") + "|" + J("STAN", "DARDS") + "|" +
-            J("PROCE", "DURE") + "|" + J("REQUIRE", "MENTS") + @")\.md\b",
-        // Private paths.
-        J("/x/", "al", "era"),
-        J("projects/recursive-ai-", "oss"),
-        J("scratch/", "oneyaml"),
-        J("/ho", "me/"),
-    ];
-
-    // Upper case words and identifiers. Lower case forms are ordinary names in code.
-    private static readonly string[] Sensitive =
-    [
-        @"\b(" + J("PROCE", "DURE") + "|" + J("REQUIRE", "MENTS") + "|" + J("HAND", "OFF") + "|" +
-            J("STAN", "DARDS") + "|" + J("LEARN", "INGS") + @")\b",
-        // Requirement and decision ids.
-        @"\b(R[1-6]a?|" + J("P", "1") + @"|Q(10|[1-9])|NN-[0-9]+)\b",
-        // A phase named by an upper case letter or a digit.
-        @"(?i:\bphase) [A-Z0-9]",
-    ];
-
-    // Short ids that are ordinary names in code (generic parameters, locals)
-    // but a leak in prose: matched only in comments, Markdown and commit messages.
-    private static readonly string[] Prose =
-    [
-        @"\b(K(1[0-4]|[1-9])|T[0-3]|L[0-7]|D[1-8])\b",
-        @"\b(c[0-9]{1,2}k?|g[0-9]{1,2}|k(1[0-4]|[1-9]))\b",
-    ];
-
-    private static readonly Regex General = new(
-        "(?i:" + string.Join('|', Insensitive) + ")|" + string.Join('|', Sensitive),
-        RegexOptions.CultureInvariant);
-
-    private static readonly Regex ProseRe = new(string.Join('|', Prose), RegexOptions.CultureInvariant);
     private static readonly Regex HashRe = new(@"\b[0-9a-f]{40}\b", RegexOptions.CultureInvariant);
 
     // A line that states where something came from may name a commit.
     private static readonly Regex ProvenanceRe = new(
         "revision|provenance|uses:|reverts commit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private const string OkMarker = "publictext:" + "ok";
+    private const string OkMarker = "publictext:ok";
     private const long MaxFileSize = 1 << 20;
 
     // Vendored third-party trees are not ours to edit.
@@ -176,7 +129,7 @@ internal static class PublicTextCheck
         return string.Empty;
     }
 
-    private static List<Finding> CheckText(string label, string text, Style style, bool withHash)
+    private static List<Finding> CheckText(string label, string text, Style style, bool withHash, BannedTerms terms)
     {
         var result = new List<Finding>();
         bool inBlock = false;
@@ -190,17 +143,9 @@ internal static class PublicTextCheck
                 continue;
             }
 
-            string? match = null;
-            Match m = General.Match(line);
-            if (m.Success)
-            {
-                match = m.Value.Trim();
-            }
-            else if ((m = ProseRe.Match(comment)).Success)
-            {
-                match = m.Value;
-            }
-            else if (withHash && !ProvenanceRe.IsMatch(line))
+            Match section = Section.Match(line);
+            string? match = terms.FindGeneral(line) ?? (section.Success ? section.Value : null) ?? terms.FindProse(comment);
+            if (match is null && withHash && !ProvenanceRe.IsMatch(line))
             {
                 string target = style == Style.Other ? line : comment;
                 if (HashRe.IsMatch(target))
@@ -220,7 +165,7 @@ internal static class PublicTextCheck
     }
 
     /// <summary>Checks one file's content; name is the slash-separated path from the repository root.</summary>
-    public static List<Finding> CheckFile(string name, byte[] data)
+    public static List<Finding> CheckFile(string name, byte[] data, BannedTerms? terms = null)
     {
         string file = Path.GetFileName(name);
         string slashed = "/" + name;
@@ -233,12 +178,12 @@ internal static class PublicTextCheck
 
         // Test data holds arbitrary hex, so the hash rule does not apply to it.
         bool withHash = !slashed.Contains("/testdata/", StringComparison.Ordinal);
-        return CheckText(name, Encoding.UTF8.GetString(data), StyleOf(name), withHash);
+        return CheckText(name, Encoding.UTF8.GetString(data), StyleOf(name), withHash, terms ?? BannedTerms.Default);
     }
 
     /// <summary>Checks a commit message; label names the commit in findings.</summary>
-    public static List<Finding> CheckMessage(string label, string message) =>
-        CheckText(label, message, Style.Prose, true);
+    public static List<Finding> CheckMessage(string label, string message, BannedTerms? terms = null) =>
+        CheckText(label, message, Style.Prose, true, terms ?? BannedTerms.Default);
 
     public static List<Finding> CheckFiles(string root, IEnumerable<string> files)
     {
