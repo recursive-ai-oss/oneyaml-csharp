@@ -4,7 +4,7 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
-## [1.0.0] - YYYY-MM-DD
+## [1.0.0] - 2026-10-16
 
 The first release: a YAML 1.2 library for .NET 8 and .NET 10 that reads and writes .NET types, and edits a file while keeping its comments and layout. From this release the public API follows the promises under [Stability](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/README.md#stability).
 
