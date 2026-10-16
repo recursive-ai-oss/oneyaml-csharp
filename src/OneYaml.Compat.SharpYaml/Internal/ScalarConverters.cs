@@ -29,6 +29,13 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
     {
         if (reader.IsNull)
         {
+            // The real library refuses a null where a number is the whole document; inside a mapping or sequence
+            // a null is the default value.
+            if (reader.Depth == 0)
+            {
+                throw reader.CreateException($"A null cannot be read as {typeof(T).Name}.");
+            }
+
             return default;
         }
 
@@ -38,6 +45,11 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
         if (_parse is not null && reader.TokenType == Oy.YamlTokenKind.Scalar)
         {
             string text = reader.GetString();
+            if (TrySpecialFloat(text, out T special))
+            {
+                return special;
+            }
+
             if (LooksLikeNumberOrBool(text) && _parse(text, out T value) && IsFinite(value))
             {
                 return value;
@@ -48,6 +60,40 @@ internal sealed class LenientScalarConverter<T> : Oy.YamlConverter<T>
     }
 
     public override void Write(Oy.Utf8YamlEmitter writer, T value, Oy.YamlSerializerOptions options) => _inner.Write(writer, value, options);
+
+    // SharpYaml writes infinity and NaN as Infinity, -Infinity and NaN and reads them back, in any letter case and
+    // with a sign, quoted or not; these are the spellings of the .NET float parser. The YAML 1.2 forms (.inf, .nan)
+    // are the engine's own and need no help.
+    private static bool TrySpecialFloat(string text, out T value)
+    {
+        value = default;
+        if (typeof(T) != typeof(double) && typeof(T) != typeof(float) && typeof(T) != typeof(Half))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> rest = text;
+        bool negative = false;
+        if (rest.Length > 0 && rest[0] is '+' or '-')
+        {
+            negative = rest[0] == '-';
+            rest = rest[1..];
+        }
+
+        bool infinity = rest.Equals("infinity", StringComparison.OrdinalIgnoreCase);
+        if (!infinity && !rest.Equals("nan", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        object boxed = typeof(T) == typeof(double)
+            ? (infinity ? (negative ? double.NegativeInfinity : double.PositiveInfinity) : double.NaN)
+            : typeof(T) == typeof(float)
+                ? (infinity ? (negative ? float.NegativeInfinity : float.PositiveInfinity) : float.NaN)
+                : (infinity ? (negative ? Half.NegativeInfinity : Half.PositiveInfinity) : Half.NaN);
+        value = (T)boxed;
+        return true;
+    }
 
     // A finite literal that overflows the type (1e400, or 1e39 as a float) parses to infinity; that would change the
     // value, so it stays an error: the engine is asked, and it refuses.

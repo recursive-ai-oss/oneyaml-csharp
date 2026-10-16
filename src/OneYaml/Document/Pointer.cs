@@ -126,11 +126,11 @@ internal readonly struct Pointer
     {
         // Stop building once the excerpt is full: a pointer of 600 KB must not cost 600 KB per error.
         var sb = new StringBuilder();
-        for (int i = 0; i < count && i < Count && sb.Length <= MessageText.MaxChars; i++)
+        for (int i = 0; i < count && i < Count && sb.Length <= YamlException.MessageExcerpt; i++)
         {
             sb.Append('/');
             ReadOnlySpan<byte> token = this[i];
-            AppendEscaped(sb, token.Length > MessageText.MaxChars * 4 ? token[..(MessageText.MaxChars * 4)] : token);
+            AppendEscaped(sb, token.Length > YamlException.MessageExcerpt * 4 ? token[..(YamlException.MessageExcerpt * 4)] : token);
         }
 
         return MessageText.Bound(sb.ToString());
@@ -239,38 +239,19 @@ internal readonly struct Pointer
     }
 }
 
-/// <summary>Keeps text taken from input short and on one line when it goes into a message.</summary>
+/// <summary>Keeps text taken from input short and on one line when it goes into a message: the exception's own excerpt rules.</summary>
 internal static class MessageText
 {
-    public const int MaxChars = 200;
-
-    public static string Bound(string text)
-    {
-        bool cut = text.Length > MaxChars;
-        ReadOnlySpan<char> head = cut ? text.AsSpan(0, MaxChars) : text;
-        var sb = new StringBuilder(head.Length + 1);
-        foreach (char c in head)
-        {
-            if (c < ' ' || c == '\u007f' || c == '\u0085' || c == '\u2028' || c == '\u2029')
-            {
-                sb.Append("\\u").Append(((int)c).ToString("x4", System.Globalization.CultureInfo.InvariantCulture));
-            }
-            else
-            {
-                sb.Append(c);
-            }
-        }
-
-        if (cut)
-        {
-            sb.Append('…');
-        }
-
-        return sb.ToString();
-    }
+    public static string Bound(string text) => YamlException.Excerpt(text, YamlException.MessageExcerpt);
 
     public static string Bound(ReadOnlySpan<byte> utf8)
-        => Bound(Encoding.UTF8.GetString(utf8.Length > MaxChars * 4 ? utf8[..(MaxChars * 4)] : utf8) + (utf8.Length > MaxChars * 4 ? new string('…', 1) : string.Empty));
+    {
+        // Four bytes per character at most, so this many bytes always cover the characters that are kept.
+        const int MaxBytes = YamlException.MessageExcerpt * 4;
+        bool cut = utf8.Length > MaxBytes;
+        string head = Encoding.UTF8.GetString(cut ? utf8[..MaxBytes] : utf8);
+        return Bound(cut ? head + "…" : head);
+    }
 }
 
 /// <summary>Pointer resolution and the pointer-addressed edits, over one state.</summary>
