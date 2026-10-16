@@ -37,7 +37,7 @@ Compare libraries on the job they share.
 ## Where the others are the better fit
 
 - **You target .NET Framework, .NET Standard or Unity.** oneyaml-csharp runs on .NET 8 and .NET 10 only. YamlDotNet and SharpYaml target `netstandard2.0`; VYaml is built for Unity.
-- **You need YamlDotNet's extension points.** Type inspectors, node deserializers, event emitters and object-graph visitors let you change how YamlDotNet binds at a level the oneyaml-csharp serializer does not open. The YamlDotNet adapter does not provide them either.
+- **You need YamlDotNet's extension points.** Type inspectors, node deserializers, event emitters and object-graph visitors let you change how YamlDotNet binds at a level the oneyaml-csharp serializer does not open. The YamlDotNet adapter does not provide them either, and the SharpYaml adapter has no custom converters; each migration guide lists what its adapter is missing.
 - **You want maturity and an ecosystem.** YamlDotNet has years of production use, a large number of dependent packages and integrations (configuration providers, for example). oneyaml-csharp is new, and 1.0.0 is its first release.
 - **You read or write YAML 1.1 files as YAML 1.1.** YamlDotNet reads `yes` as `true` and `017` as octal in typed binding by default. In oneyaml-csharp that takes the YamlDotNet adapter.
 - **You need comments as data.** No library here gives a full comment API, but YamlDotNet's parser can report comment events and its emitter can write them. oneyaml-csharp keeps comments through edits but cannot read or add them.

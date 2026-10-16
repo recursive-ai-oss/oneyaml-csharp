@@ -14,7 +14,7 @@ namespace DocSamples;
 [Collection(nameof(DocSample))]
 public partial class DocSyncTests
 {
-    private static readonly string[] GeneratedKinds = ["bench-hero", "bench-full", "conformance-line", "conformance-deviations"];
+    private static readonly string[] GeneratedKinds = ["bench-chart", "bench-hero", "bench-full", "conformance-line", "conformance-deviations"];
 
     private static string DocsRoot => Path.Combine(DocSample.Root, "repo");
 

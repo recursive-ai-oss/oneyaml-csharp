@@ -80,17 +80,18 @@ Read [the full list of differences](compat/sharpyaml.md), each with a repro. The
 
 ### Input you do not control
 
-`YamlSerializerOptions.Limits` is not in SharpYaml. It sets the [limits](limits.md) of the `OneYaml` library for every read through those options, and when it is `null`, the default, reading uses `YamlLimits.Default`. For uploads, request bodies and files from other systems, set it to `YamlLimits.Untrusted`, which also bounds the input size and the size of a scalar, and bounds alias expansion more tightly. `MaxDepth` can lower the depth further, never raise it. `YamlLimits` is in the `OneYaml` namespace.
+`YamlSerializerOptions.Limits` is not in SharpYaml. It sets the [limits](limits.md) of the `OneYaml` library for every read through those options, and when it is `null`, the default, reading uses `YamlLimits.Default`. For uploads, request bodies and files from other systems, set it to `YamlLimits.Untrusted`, which also bounds the input size and the size of a scalar, and bounds alias expansion more tightly. `MaxDepth` can lower the depth further, never raise it. `YamlLimits` is in the `OneYaml` namespace; import it with `using YamlLimits = OneYaml.YamlLimits;`, not `using OneYaml;`, because that namespace has its own `YamlSerializer`, `YamlSerializerOptions` and `YamlException`, and importing it beside `OneYaml.Compat.SharpYaml` makes those names ambiguous (error CS0104).
 
 <!-- sample: SharpYamlLimits -->
 ```csharp
 using OneYaml.Compat.SharpYaml;
+using YamlLimits = OneYaml.YamlLimits;
 
 // 17 short lines whose aliases double at each level: a small text that stands for a very large value.
 string upload = "a0: &a0 [x, x]\n" + string.Concat(Enumerable.Range(1, 16).Select(i => $"a{i}: &a{i} [*a{i - 1}, *a{i - 1}]\n"));
 
 // Limits is not in SharpYaml. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
-var options = new YamlSerializerOptions { Limits = OneYaml.YamlLimits.Untrusted };
+var options = new YamlSerializerOptions { Limits = YamlLimits.Untrusted };
 try
 {
     YamlSerializer.Deserialize<object>(upload, options);

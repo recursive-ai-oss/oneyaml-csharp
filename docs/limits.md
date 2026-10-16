@@ -95,7 +95,7 @@ The adapters read with `YamlLimits.Default` unless you give them limits. Neither
 | `OneYaml.Compat.YamlDotNet` | `DeserializerBuilder.WithLimits(YamlLimits)`, `YamlStream.Load(TextReader, YamlLimits)`, `new Parser(TextReader, YamlLimits)` |
 | `OneYaml.Compat.SharpYaml` | `YamlSerializerOptions.Limits` (`null` means `YamlLimits.Default`) |
 
-Pass `YamlLimits.Untrusted` for input you do not control. The adapters' own depth settings, `WithMaximumRecursion` and `MaxDepth`, can lower the depth further, never raise it above these limits. The migration guides show each one ([from YamlDotNet](migrate-yamldotnet.md#input-you-do-not-control), [from SharpYaml](migrate-sharpyaml.md#input-you-do-not-control)).
+Pass `YamlLimits.Untrusted` for input you do not control. The adapters' own depth settings, `WithMaximumRecursion` and `MaxDepth`, can lower the depth further, never raise it above these limits. In a file that imports an adapter namespace, import the type with `using YamlLimits = OneYaml.YamlLimits;` rather than `using OneYaml;`: the `OneYaml` namespace has types with the same names as the adapters' (`YamlSerializer`, `YamlSerializerOptions`, `YamlException`, `YamlDocument`, `YamlNode`), and importing both makes those names ambiguous (error CS0104). The migration guides show each one ([from YamlDotNet](migrate-yamldotnet.md#input-you-do-not-control), [from SharpYaml](migrate-sharpyaml.md#input-you-do-not-control)).
 
 ## What the limits do not cover
 

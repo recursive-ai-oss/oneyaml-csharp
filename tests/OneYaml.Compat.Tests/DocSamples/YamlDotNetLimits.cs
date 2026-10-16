@@ -1,6 +1,7 @@
 #region YamlDotNetLimits
 using OneYaml.Compat.YamlDotNet.Core;
 using OneYaml.Compat.YamlDotNet.Serialization;
+using YamlLimits = OneYaml.YamlLimits;
 #endregion
 using Xunit;
 
@@ -17,7 +18,7 @@ public class YamlDotNetLimitsSamples
 
         // WithLimits is not in YamlDotNet. It takes the limits of the OneYaml library; Untrusted is its preset for outside input.
         IDeserializer deserializer = new DeserializerBuilder()
-            .WithLimits(OneYaml.YamlLimits.Untrusted)
+            .WithLimits(YamlLimits.Untrusted)
             .Build();
         try
         {

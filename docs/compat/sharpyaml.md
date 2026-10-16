@@ -47,7 +47,9 @@ follows aliases with any value.
 
 - `YamlSerializerOptions.Limits` (`OneYaml.YamlLimits?`): the limits every read through the options keeps to. `null`, the
   default, means `YamlLimits.Default`; set `YamlLimits.Untrusted` for input you do not control. `MaxDepth` can lower the
-  depth further, never raise it. Code that sets it does not compile against SharpYaml.
+  depth further, never raise it. Code that sets it does not compile against SharpYaml. Import the type with
+  `using YamlLimits = OneYaml.YamlLimits;`, not `using OneYaml;`: that namespace has its own `YamlSerializer`,
+  `YamlSerializerOptions` and `YamlException`, so importing it beside `OneYaml.Compat.SharpYaml` makes those names ambiguous (error CS0104).
 
 ## Fixes
 

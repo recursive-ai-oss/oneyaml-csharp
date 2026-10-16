@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes are listed here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). A change that can break your code is marked **Breaking** and says what to write instead. What a release promises, and the supported .NET versions, are under [Stability](README.md#stability).
+All notable changes are listed here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/). A change that can break your code is marked **Breaking** and says what to write instead. What a release promises, and the supported .NET versions, are under [Stability](docs/stability.md).
 
 ## [Unreleased]
 

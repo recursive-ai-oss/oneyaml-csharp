@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes go into the latest release. Older releases are not patched; upgrade to the latest. The supported .NET versions are listed under [Stability](README.md#stability).
+Security fixes go into the latest release. Older releases are not patched; upgrade to the latest. The supported .NET versions are listed under [Stability](docs/stability.md#supported-net-versions).
 
 ## Reporting a vulnerability
 

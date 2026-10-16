@@ -1,45 +1,61 @@
 # oneyaml-csharp
 
-**Pure C# YAML 1.2 that edits a file and keeps its comments, with a System.Text.Json-style serializer.**
+**Lossless, comment-preserving editing and a System.Text.Json-style
+serializer for YAML 1.2, in one .NET package.** Both run on one parser,
+so a typed read and an edit never disagree about what a file means.
+Pure C#, correct YAML 1.2 by default, bounded on any input.
 
 [![NuGet](https://img.shields.io/nuget/v/OneYaml)](https://www.nuget.org/packages/OneYaml)
 [![CI](https://github.com/recursive-ai-oss/oneyaml-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/recursive-ai-oss/oneyaml-csharp/actions/workflows/ci.yml)
-[![.NET 8 and 10](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4)](#stability)
+[![.NET 8 and 10](https://img.shields.io/badge/.NET-8.0%20%7C%2010.0-512BD4)](docs/stability.md)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-Spec-correct YAML 1.2 by default. An edit changes only the value you set, in its own style; comments and formatting elsewhere are kept byte for byte. Typed reading and writing use the options, attributes and source generation you know from System.Text.Json. Nesting, alias expansion and number size are bounded by default.
+How many times faster oneyaml-csharp is than the strongest other .NET
+YAML library on each task, on real configuration files (wall-clock
+time, log scale, higher is better; a task where oneyaml-csharp is
+slower shows as a slower bar):
 
-<!-- generated:bench-hero -->
+<!-- generated:bench-chart -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/img/oneyaml-csharp-hero-dark.svg">
-  <img alt="Bar chart of the table below: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable." src="docs/img/oneyaml-csharp-hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.0.0/docs/img/oneyaml-csharp-hero-dark.svg">
+  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.0.0/docs/img/oneyaml-csharp-hero-light.svg">
 </picture>
 
-| Task | `oneyaml-csharp` time (geometric mean) | Strongest competitor | Its time (geometric mean) | Speed against it (its time ÷ ours; higher is better) | Verdict |
-|---|---|---|---|---|---|
-| typed load | 51.1 µs | `vyaml 1.4.1` | 63.5 µs | 1.24× faster | ▲ win |
-| generic load | 26.5 µs | `vyaml 1.4.1` (6 of 7), `sharpyaml 3.16.0` (1 of 7) | 38.3 µs | 1.45× faster | ▲ win |
-| dump | 7.92 µs | `vyaml 1.4.1` (4 of 6), `sharpyaml 3.16.0` (2 of 6) | 21.2 µs | 2.67× faster | ▲ win |
-| document parse | 19.1 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: bytes-only) | 234 µs | 12.2× faster | ▲ win |
-| unchanged emit (write-back of an unedited document; not a rendering speed) | 1.35 µs | `sharpyaml-syntax 3.16.0` | 814 ns | 1.66× slower | ◆ mixed |
-| edit script | 12.1 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: harness-rendered) | 620 µs | 51.3× faster | ▲ win |
-| patch (RFC 6902) | — | — | — | — | no rival |
-
-Not in a row's mean: patch (RFC 6902): no competitor answer: `compose-wordpress`, `gha-workflow`.
-
-Each row is the geometric mean, over the real-world workloads the task has, of our time and of the time of the strongest competitor in each workload. Speed is the competitor's time divided by ours: 2× faster means half the time, and a loss is stated as slower. Where several competitors were strongest the column names them all, with how often. A † marks a cell measured differently from the task as specified; the note beside each mark says how. A marked competitor still counts. A workload where our library has no number is listed and the row is marked as partial, never counted as a win. The verdict is never better than the per-workload verdicts allow: a row with a losing workload is marked mixed or loss, and a row with no winning workload is never marked a win. Memory and the count of better, level and worse workloads in each row are on the full page.
-
-Method: **full run** of 2026-10-16T20:11:01Z. Kit 0.1.0 (revision 0abba1d8b4f2). `oneyaml-csharp 43fb628198a2`; competitors `yamldotnet 18.1.0`, `sharpyaml 3.16.0`, `sharpyaml-model 3.16.0`, `sharpyaml-syntax 3.16.0`, `vyaml 1.4.1`, `yaml2jsonnode 3.0.1`, `oneyaml-csharp-gen 43fb628198a2`. Runtime .NET 10.0.11 (target linux-x64), measured with BenchmarkDotNet 0.15.8: mean time per task from BenchmarkDotNet's ShortRun job (3 warm-up and 3 measured iterations) run in process; one invocation per iteration runs a batch of prepared tasks and the time is divided by the batch size. Memory: bytes allocated per task from BenchmarkDotNet's MemoryDiagnoser; allocation calls are not available. AMD Ryzen 9 7950X3D 16-Core Processor (125.0 GiB), Linux 7.0.0-34-generic (x86_64), measured on a shared workstation (32 logical CPUs; load 7.34 before, 3.86 after, at most 10.43 during).
+[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/performance.md)
 <!-- end generated -->
 
-Results for every task and workload, memory use, and how to reproduce the run are in [Performance](docs/performance.md).
+## Why oneyaml-csharp
 
-- **Spec-correct YAML 1.2 by default.** Plain scalars follow the Core schema, so plain `yes` is a string, `0755` is the integer 755 and quoted `"0755"` is a string. YAML 1.1 forms come only from an option (`MergeKeys`) or the [compatibility adapters](#compatibility-adapters-for-yamldotnet-and-sharpyaml). Results against the yaml-test-suite, and every known deviation, are in [Conformance](docs/conformance.md).
-- **Minimal-diff edits.** `YamlDocument` keeps every byte you do not change. Indexers (`doc.Root["spec"]["replicas"] = 3`) and RFC 6901 pointer methods (`doc.Set("/spec/replicas", 3)`) write the new value in the style of the old one, and fall back to the nearest style that can hold it. Writes through an alias are refused instead of changing every place that shares the anchor. See [Editing](docs/editing.md).
-- **Patches.** JSON Patch operations and pointers (RFC 6902, RFC 6901) with YAML value equality for `test`, so `1` and `1.0` [differ](docs/patches.md#differences-from-rfc-6902), and JSON Merge Patch (RFC 7396). They apply to a YAML file atomically and keep its layout. See [Patches](docs/patches.md).
-- **A serializer in the System.Text.Json shape.** `YamlSerializer`, `YamlSerializerOptions`, `JsonNamingPolicy`, custom converters, polymorphism by key or by tag, extension data, and the System.Text.Json attributes where no YAML attribute is present. The source generator ships in the package, for trimmed and native AOT applications. See [Serializer](docs/serializer.md).
-- **Bounded by default.** Nesting depth, alias expansion and the digits of an integer are bounded unless you pass `YamlLimits.None`. Input size, scalar size and documents per stream are bounded only with `YamlLimits.Untrusted`; use it for input you do not control. A tag never names a .NET type to create: polymorphism chooses only among the types you list. No `unsafe` code and no dependencies outside the .NET libraries. See [Limits](docs/limits.md) and [Security](SECURITY.md).
-- **Compatibility adapters for YamlDotNet and SharpYaml.** For the API each migration guide lists, a package and `using` change keeps your call sites; every known difference is listed. See [Migrating from YamlDotNet](docs/migrate-yamldotnet.md) and [from SharpYaml](docs/migrate-sharpyaml.md).
+- **Edits that keep your file.** `YamlDocument` changes only what you
+  touch, in the old value's style; comments and layout elsewhere stay
+  byte for byte. JSON Patch and Merge Patch apply the same way
+  ([editing](docs/editing.md), [patches](docs/patches.md)).
+- **A serializer you already know.** Options, naming policies,
+  converters, polymorphism and the System.Text.Json attributes, with a
+  source generator in the package for trimmed and native AOT apps
+  ([serializer](docs/serializer.md)).
+- **Correct YAML 1.2 by default.** `yes` is a string and `0755` the
+  integer 755; YAML 1.1 forms come only from `MergeKeys` or the
+  compatibility packages. Checked against the full yaml-test-suite,
+  with every deviation listed ([conformance](docs/conformance.md)).
+- **Safe on outside input.** Depth, alias expansion and integer size
+  are bounded by default, and `YamlLimits.Untrusted` bounds the rest
+  ([limits](docs/limits.md)). No unsafe code, no dependencies outside
+  .NET, and fuzzed ([fuzzing](tests/OneYaml.Fuzz/README.md)).
+- **Fast, with the losses shown.** Ahead of every other .NET YAML
+  library at typed load, generic load, dump, document parse and
+  editing, through reflection and generated metadata alike, and level
+  or lower on memory throughout. Not everywhere: writing back an
+  unedited document is slower than SharpYaml's syntax tree on most
+  small and mid-sized files, and level or faster from 1 MiB up
+  ([every loss](docs/performance.md#results-at-a-glance)).
+
+<!-- generated:conformance-line -->
+yaml-test-suite data-2022-01-17: 680/681 loose, 586/681 strict. Against the kit's corrected expectations for 12 of them: 12/12 loose, 1/12 strict. Kit's own cases, all of them including the slow ones: 605/605 loose, 605/605 strict. [Details](docs/conformance.md)
+<!-- end generated -->
+
+[How oneyaml-csharp compares](docs/comparison.md) with YamlDotNet,
+SharpYaml and VYaml, including when one of them is the better choice.
 
 ## Install
 
@@ -47,11 +63,13 @@ Results for every task and workload, memory use, and how to reproduce the run ar
 dotnet add package OneYaml
 ```
 
-The package targets .NET 8 and .NET 10. The compatibility adapters are separate packages: `dotnet add package OneYaml.Compat.YamlDotNet` or `dotnet add package OneYaml.Compat.SharpYaml` ([below](#compatibility-adapters-for-yamldotnet-and-sharpyaml)). Each brings in the `OneYaml` package of the same version.
+Moving from YamlDotNet or SharpYaml? A [compatibility package](#packages)
+keeps most call sites as they are; its guide lists what differs.
 
 ## Quick start
 
-Change two values in a file. The comment, its alignment, the block scalar and every other byte stay as they were. Then bind the original text, `src`, to a record.
+Change two values in a file, keeping the comment, the block scalar and
+every other byte as they were; then bind the original text to a record.
 
 <!-- sample: QuickStart -->
 ```csharp
@@ -80,84 +98,42 @@ Console.WriteLine($"{cfg.Replicas} replicas"); // 2 replicas
 record Config(int Replicas, string Script);
 ```
 
-> **What an edit keeps.** Text you do not touch is kept byte for byte. Removing an entry also removes the comment lines just above it, replacing a whole mapping or sequence discards the comments inside it, and comments do not move with a moved value. There is no API to read or write comments. `ToString()` gives text; `ToBytes()` and `WriteTo` keep the input's encoding and byte order mark. Plain or quoted is judged by the YAML 1.2 Core schema; set `QuoteYaml11Lookalikes` when a YAML 1.1 reader also reads the file. Details in [Editing](docs/editing.md#what-an-edit-keeps-and-what-it-does-not).
+Keys bind in camel case by default. Read [what an edit keeps, and what
+it does not](docs/editing.md#what-an-edit-keeps-and-what-it-does-not);
+for native AOT, use [generated metadata](docs/serializer.md#source-generation-and-native-aot).
 
-Keys bind in camel case by default, so `Replicas` reads `replicas`. In a trimmed or native AOT application, pass generated metadata instead of relying on reflection: `YamlSerializer.Deserialize(src, AppYamlContext.Default.Config)`, where `AppYamlContext` is a `partial class` with `[YamlSerializable(typeof(Config))]` ([Source generation](docs/serializer.md#source-generation-and-native-aot)).
+## Where to go
 
-Every C# sample in this README and in `docs/` is compiled and run by the tests, which check the output shown in its comments.
+- **Using it:** [serializer](docs/serializer.md),
+  [editing](docs/editing.md), [patches](docs/patches.md),
+  [limits](docs/limits.md), [reader and emitter](docs/reader-emitter.md).
+  The API reference is the XML documentation your IDE shows.
+- **Migrating:** [from YamlDotNet](docs/migrate-yamldotnet.md),
+  [from SharpYaml](docs/migrate-sharpyaml.md).
+- **Choosing a library:** [how oneyaml-csharp compares](docs/comparison.md),
+  including where the others win.
+- **Evidence:** [benchmark tables](docs/performance.md#results-at-a-glance)
+  (the numbers behind the chart, every loss and the method),
+  [yaml-test-suite conformance](docs/conformance.md),
+  [fuzzing](tests/OneYaml.Fuzz/README.md).
+- **What changed, and what stays stable:** [CHANGELOG.md](CHANGELOG.md),
+  [stability and supported .NET versions](docs/stability.md).
+- **Contributing and security:** [CONTRIBUTING.md](CONTRIBUTING.md),
+  [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- **Other languages:**
+  [oneyaml-go](https://github.com/recursive-ai-oss/oneyaml-go) and
+  [oneyaml-rust](https://github.com/recursive-ai-oss/oneyaml-rust), all
+  measured by [oneyaml-kit](https://github.com/recursive-ai-oss/oneyaml-kit).
 
-## When to use it, and when not to
+## Packages
 
-Use it when you change YAML files that people also edit by hand and the diff must hold only your change, when you apply a JSON Patch to a YAML file, when you want YAML 1.2 read as the specification says, or when you read YAML you do not control and need bounds on it.
-
-Think twice when:
-
-- **You target .NET Framework, .NET Standard or Unity.** The packages target .NET 8 and .NET 10 only. YamlDotNet and SharpYaml run on `netstandard2.0`, and VYaml is built for Unity.
-- **You need to read or write comments.** Comments are kept byte for byte through edits, but there is no API to read them, add them or move them.
-- **You need a streaming parser for your own code.** `Utf8YamlReader` is available only inside a custom converter; there is no public event parser to drive over a whole file.
-- **You rely on YAML 1.1 behaviour in the primary API.** `yes` is a string, `<<` merges only with `MergeKeys`, and repeated keys are an error. The [compatibility adapters](#compatibility-adapters-for-yamldotnet-and-sharpyaml) bring back the forms their targets document.
-- **You depend on YamlDotNet or SharpYaml extension points** that the adapters do not provide, such as type inspectors, node deserializers or SharpYaml's custom converters. Each migration guide lists what is missing.
-- **The package is new.** 1.0.0 is its first release. YamlDotNet has years of production use behind it.
-
-[Comparison](docs/comparison.md) says where other libraries are the better choice.
-
-## Correctness
-
-Conformance is measured with [oneyaml-kit](https://github.com/recursive-ai-oss/oneyaml-kit), the conformance kit shared by the oneyaml libraries, against a pinned release of the yaml-test-suite and the kit's own cases. The line below, which names that release, is generated from the kit's result file. [Conformance](docs/conformance.md) explains what each count means and lists every known deviation.
-
-<!-- generated:conformance-line -->
-yaml-test-suite data-2022-01-17: 680/681 loose, 586/681 strict. Against the kit's corrected expectations for 12 of them: 12/12 loose, 1/12 strict. Kit's own cases, all of them including the slow ones: 605/605 loose, 605/605 strict. [Details](docs/conformance.md)
-<!-- end generated -->
-
-The parser, the document, typed binding and patches are fuzzed (`tests/OneYaml.Fuzz`), and the compatibility adapters are checked against the real YamlDotNet and SharpYaml by differential tests (`tests/OneYaml.Compat.Tests`).
-
-## Compatibility adapters for YamlDotNet and SharpYaml
-
-Two opt-in packages put a familiar API on top of OneYaml:
-
-| Package | For code written against | Change |
-|---|---|---|
-| `OneYaml.Compat.YamlDotNet` | YamlDotNet 18: `DeserializerBuilder`, `SerializerBuilder`, `YamlStream` and the representation model | `using YamlDotNet.Serialization;` becomes `using OneYaml.Compat.YamlDotNet.Serialization;` |
-| `OneYaml.Compat.SharpYaml` | SharpYaml 3: `YamlSerializer`, `YamlSerializerOptions` and the attributes | `using SharpYaml;` becomes `using OneYaml.Compat.SharpYaml;` |
-
-They read the YAML 1.1 forms their targets document. Where a target writes output that does not read back, or has no bound on depth or on alias walks, the adapter does not reproduce that. They read with the default limits unless you give them limits, through settings their targets do not have (`WithLimits` for YamlDotNet code, `YamlSerializerOptions.Limits` for SharpYaml code); for input you do not control, pass `YamlLimits.Untrusted` ([Limits](docs/limits.md#the-compatibility-adapters)). Options an adapter cannot follow, such as SharpYaml's layout options and YamlDotNet's `EnsureRoundtrip`, throw `NotSupportedException` instead of being ignored. Every difference is listed, with a repro, in [YamlDotNet differences](docs/compat/yamldotnet.md) and [SharpYaml differences](docs/compat/sharpyaml.md). New code should use the `OneYaml` package.
-
-## Documentation
-
-| You want to | Read |
+| Package | What it is |
 |---|---|
-| Look up a type or member | The XML documentation, shown by your IDE; it ships in the package. You can also browse the package, assemblies and XML documentation included, in [NuGet Package Explorer](https://nuget.info/packages/OneYaml) |
-| Read and write .NET types, choose naming, write a converter, use polymorphism or source generation | [Serializer](docs/serializer.md) |
-| Change values in a file and keep its comments and style | [Editing](docs/editing.md) |
-| Apply a JSON Patch or a merge patch | [Patches](docs/patches.md) |
-| Read input you do not control | [Limits](docs/limits.md), [Security](SECURITY.md) |
-| Read tokens in a converter, or write YAML token by token | [Reader and emitter](docs/reader-emitter.md) |
-| Move from YamlDotNet | [Migrating from YamlDotNet](docs/migrate-yamldotnet.md) |
-| Move from SharpYaml | [Migrating from SharpYaml](docs/migrate-sharpyaml.md) |
-| Know what is and is not conformant | [Conformance](docs/conformance.md) |
-| See speed and memory against other .NET libraries | [Performance](docs/performance.md) |
-| Compare with other .NET libraries | [Comparison](docs/comparison.md) |
-| See what changed | [Changelog](CHANGELOG.md) |
-| Know what is stable and which .NET versions are supported | [Stability](#stability) |
-| Contribute | [Contributing](CONTRIBUTING.md) |
-
-## The oneyaml family
-
-oneyaml-csharp is one of a family of YAML 1.2 libraries, each written from scratch in its own language with an API in that language's idiom, and all measured by the same conformance kit, [oneyaml-kit](https://github.com/recursive-ai-oss/oneyaml-kit). The Go library is [oneyaml-go](https://github.com/recursive-ai-oss/oneyaml-go) and the Rust library is [oneyaml-rust](https://github.com/recursive-ai-oss/oneyaml-rust).
-
-## Stability
-
-From 1.0.0 the packages follow [Semantic Versioning](https://semver.org/). Within a major version:
-
-- No change breaks code that compiles against the public API of `OneYaml`, `OneYaml.Compat.YamlDotNet` or `OneYaml.Compat.SharpYaml`. That covers `YamlException` and its `Category`; the text of messages is written for people and may change in any release.
-- The text that `YamlSerializer.Serialize` writes with default options does not change, and neither do the bytes an edit leaves untouched, except to fix output that is incorrect. Such a fix is listed in the changelog.
-
-A change that can break your code comes only in a new major version, and the [changelog](CHANGELOG.md) marks it **Breaking**, with what to write instead.
-
-The packages target `net8.0` and `net10.0`. CI builds and tests both on Linux, macOS and Windows. Dropping a target framework takes a new major version.
-
-This is the only place this policy is stated; other pages link here.
+| [`OneYaml`](https://www.nuget.org/packages/OneYaml) | The library: `YamlSerializer`, `YamlDocument`, patches, limits. Start here. |
+| [`OneYaml.Compat.YamlDotNet`](https://www.nuget.org/packages/OneYaml.Compat.YamlDotNet) | YamlDotNet 18's builders and representation model on top of `OneYaml`, with [every difference](docs/compat/yamldotnet.md) listed. |
+| [`OneYaml.Compat.SharpYaml`](https://www.nuget.org/packages/OneYaml.Compat.SharpYaml) | SharpYaml 3's serializer API on top of `OneYaml`, with [every difference](docs/compat/sharpyaml.md) listed. |
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT), at your option. Unless you state otherwise, any contribution you submit for inclusion is dual licensed as above, without additional terms or conditions.
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.

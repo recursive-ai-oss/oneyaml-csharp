@@ -1,13 +1,28 @@
 # OneYaml
 
-**Pure C# YAML 1.2 that edits a file and keeps its comments, with a System.Text.Json-style serializer.**
+**Lossless, comment-preserving editing and a System.Text.Json-style
+serializer for YAML 1.2, in one .NET package.** Both run on one parser,
+so a typed read and an edit never disagree about what a file means.
+Pure C#, correct YAML 1.2 by default, bounded on any input.
 
-- `YamlDocument` keeps every byte you do not change. Indexers and RFC 6901 pointer methods write a new value in the style of the old one; JSON Patch (RFC 6902) and JSON Merge Patch (RFC 7396) apply atomically.
-- `YamlSerializer` reads and writes .NET types with `YamlSerializerOptions`, naming policies, converters, polymorphism and extension data. The System.Text.Json attributes are honoured where no YAML attribute is present. A source generator in this package covers trimmed and native AOT applications.
-- YAML 1.2 Core schema by default. Nesting, alias expansion and integer size are bounded by default; `YamlLimits.Untrusted` adds bounds for input you do not control.
-- No dependencies outside the .NET libraries. Targets .NET 8 and .NET 10.
+How many times faster OneYaml is than the strongest other .NET YAML
+library on each task (wall-clock time, log scale, higher is better; a
+task where OneYaml is slower shows as a slower bar):
+
+![Bar chart: how many times faster OneYaml is than the strongest other .NET YAML library on each task, wall-clock time, log scale, higher is better. The numbers are in the linked results.](https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.0.0/docs/img/oneyaml-csharp-hero-light.svg)
+
+[Full results, with every loss and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/performance.md)
+
+## Install
+
+```sh
+dotnet add package OneYaml
+```
 
 ## Quick start
+
+Change two values in a file, keeping the comment, the block scalar and
+every other byte as they were; then bind the original text to a record.
 
 <!-- sample: QuickStart -->
 ```csharp
@@ -38,9 +53,14 @@ record Config(int Replicas, string Script);
 
 ## Documentation
 
-- [README](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/README.md): benchmarks, conformance, when to use it and when not to
-- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/editing.md), [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/limits.md)
-- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-yamldotnet.md) or [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-sharpyaml.md)
+- [README](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/README.md): why OneYaml, conformance, and when another
+  library is the better choice
+- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/editing.md),
+  [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/limits.md)
+- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-yamldotnet.md) or
+  [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-sharpyaml.md);
+  [how OneYaml compares](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/comparison.md)
 - [Changelog](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/CHANGELOG.md) and [security policy](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/SECURITY.md)
 
-Report problems at [GitHub issues](https://github.com/recursive-ai-oss/oneyaml-csharp/issues). Licensed under MIT or Apache-2.0, at your option.
+Report problems at [GitHub issues](https://github.com/recursive-ai-oss/oneyaml-csharp/issues).
+Licensed under MIT or Apache-2.0, at your option.
