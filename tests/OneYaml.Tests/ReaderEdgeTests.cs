@@ -448,4 +448,38 @@ public class ReaderEdgeTests
     {
         Events("- !<!x> foo\n");
     }
+
+    [Theory]
+    [InlineData("- !<$:?> bar\n", 5)]
+    [InlineData("- !<tag:a b> bar\n", 10)]
+    [InlineData("- !<tag:caf\u00e9> bar\n", 12)]
+    [InlineData("- !<tag:a{b}> bar\n", 10)]
+    [InlineData("- !<tag:a%2> bar\n", 12)]
+    [InlineData("%TAG !e! tag:caf\u00e9\n--- a\n", 17)]
+    [InlineData("%TAG !e! tag:a\"b\n--- a\n", 15)]
+    public void A_verbatim_tag_or_tag_prefix_with_characters_a_URI_cannot_hold_is_a_syntax_error(string yaml, int column)
+    {
+        YamlException ex = Fails(yaml);
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Equal(column, ex.Column);
+    }
+
+    [Theory]
+    [InlineData("- !<tag:yaml.org,2002:str> a\n")]
+    [InlineData("- !<!local> a\n")]
+    [InlineData("- !<tag:a%C3%A9[b],c> a\n")]
+    [InlineData("%TAG !e! tag:example.com,2000:app/\n--- !e!foo a\n")]
+    [InlineData("%TAG !m! !my-\n--- !m!x a\n")]
+    public void A_well_formed_verbatim_tag_or_tag_prefix_is_still_read(string yaml)
+    {
+        Events(yaml);
+    }
+
+    [Fact]
+    public void A_document_refuses_a_verbatim_tag_that_is_not_a_URI()
+    {
+        YamlException ex = Assert.Throws<YamlException>(() => YamlDocument.Parse("- !<$:?> bar\n"));
+        Assert.Equal(YamlErrorCategory.Syntax, ex.Category);
+        Assert.Equal(5, ex.Column);
+    }
 }

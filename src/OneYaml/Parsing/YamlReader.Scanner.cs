@@ -1133,7 +1133,13 @@ internal ref partial struct YamlReader
                 throw Error("A verbatim tag cannot be just '!'.", p);
             }
 
-            CheckTagText(start + 2, p);
+            // No URI starts with anything but a letter, and "!<!x>" is a local tag, so the first character decides.
+            if (s[start + 2] != (byte)'!' && !IsAsciiLetter(s[start + 2]))
+            {
+                throw Error("A verbatim tag must be a local tag or a URI.", start + 2);
+            }
+
+            CheckUriText(start + 2, p);
             CheckChars(start + 2, p);
             t.Flags = 1;
             t.ContentStart = start + 2;
@@ -1212,13 +1218,27 @@ internal ref partial struct YamlReader
     private readonly int BadPercentAt(int percent)
         => IsHex(At(percent + 1)) ? percent + 2 : percent + 1;
 
-    private void CheckTagText(int from, int to)
+    private static bool IsAsciiLetter(byte b) => (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z');
+
+    // ns-uri-char: URI characters and well-formed percent escapes only. Non-ASCII text must be
+    // percent-encoded, so any other byte is refused where it stands.
+    private void CheckUriText(int from, int to)
     {
         for (int i = from; i < to; i++)
         {
-            if (_src[i] == (byte)'%' && (!IsHex(At(i + 1)) || !IsHex(At(i + 2))))
+            byte b = _src[i];
+            if (b == (byte)'%')
             {
-                throw Error("A '%' in a tag must be followed by two hexadecimal digits.", BadPercentAt(i));
+                if (!IsHex(At(i + 1)) || !IsHex(At(i + 2)))
+                {
+                    throw Error("A '%' in a tag must be followed by two hexadecimal digits.", BadPercentAt(i));
+                }
+
+                i += 2;
+            }
+            else if (!IsTagChar(b) && b is not ((byte)'!' or (byte)',' or (byte)'[' or (byte)']'))
+            {
+                throw Error("A tag can only hold URI characters; percent-encode anything else.", i);
             }
         }
     }
@@ -1323,7 +1343,13 @@ internal ref partial struct YamlReader
                 throw Error("A %TAG directive needs a prefix.", p);
             }
 
-            CheckTagText(prefixStart, p);
+            // A global prefix starts with a tag character; a local prefix is '!' followed by URI characters.
+            if (s[prefixStart] != (byte)'!' && !IsTagChar(s[prefixStart]))
+            {
+                throw Error("A tag prefix must be a URI.", prefixStart);
+            }
+
+            CheckUriText(prefixStart, p);
             CheckChars(prefixStart, p);
             t.X = prefixStart;
             t.Y = p;
