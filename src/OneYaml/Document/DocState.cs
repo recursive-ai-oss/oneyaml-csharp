@@ -776,7 +776,9 @@ internal sealed partial class DocState : IDisposable
             lineStart--;
         }
 
-        if (lineStart <= _nodes[key].End)
+        // A block scalar key ends with its last line break, so a colon at the start of the next line is not on the key's line.
+        bool blockKey = _nodes[key].Kind == NodeKind.Scalar && (ScalarStyle)_nodes[key].Style is ScalarStyle.Literal or ScalarStyle.Folded;
+        if (blockKey ? lineStart < _nodes[key].End : lineStart <= _nodes[key].End)
         {
             return true;
         }
@@ -830,7 +832,8 @@ internal sealed partial class DocState : IDisposable
     {
         private int[]? _table;
         private int _tableSize; // a power of two; the rented array may be longer
-        private int[]? _entries; // per entry: hash, start, length, node
+        private const int Stride = 5;
+        private int[]? _entries; // per entry: hash, start, length, node, start of the defining name
         private int _count;
 
         public void Clear()
@@ -859,7 +862,7 @@ internal sealed partial class DocState : IDisposable
                     return -1;
                 }
 
-                int at = (e - 1) * 4;
+                int at = (e - 1) * Stride;
                 if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
                 {
                     return _entries[at + 3];
@@ -875,7 +878,7 @@ internal sealed partial class DocState : IDisposable
                 _tableSize = 16;
                 _table = ArrayPool<int>.Shared.Rent(_tableSize);
                 Array.Clear(_table, 0, _tableSize);
-                _entries = ArrayPool<int>.Shared.Rent(16 * 4);
+                _entries = ArrayPool<int>.Shared.Rent(16 * Stride);
             }
 
             int hash = Hash(name);
@@ -888,11 +891,18 @@ internal sealed partial class DocState : IDisposable
                     break;
                 }
 
-                int at = (e - 1) * 4;
+                int at = (e - 1) * Stride;
                 if (_entries![at] == hash && src.Slice(_entries[at + 1], _entries[at + 2]).SequenceEqual(name))
                 {
                     // An anchor may be redefined; aliases after this point mean the new node.
-                    _entries[at + 3] = node;
+                    // The definition whose name appears last in the text wins, even when a node that started earlier
+                    // completes after it.
+                    if (start > _entries[at + 4])
+                    {
+                        _entries[at + 3] = node;
+                        _entries[at + 4] = start;
+                    }
+
                     return;
                 }
             }
@@ -903,19 +913,20 @@ internal sealed partial class DocState : IDisposable
                 mask = _tableSize - 1;
             }
 
-            if ((_count + 1) * 4 > _entries!.Length)
+            if ((_count + 1) * Stride > _entries!.Length)
             {
                 int[] bigger = ArrayPool<int>.Shared.Rent(_entries.Length * 2);
-                Array.Copy(_entries, bigger, _count * 4);
+                Array.Copy(_entries, bigger, _count * Stride);
                 ArrayPool<int>.Shared.Return(_entries);
                 _entries = bigger;
             }
 
-            int w = _count * 4;
+            int w = _count * Stride;
             _entries[w] = hash;
             _entries[w + 1] = start;
             _entries[w + 2] = length;
             _entries[w + 3] = node;
+            _entries[w + 4] = start;
             _count++;
             for (int slot = hash & mask; ; slot = (slot + 1) & mask)
             {
@@ -935,7 +946,7 @@ internal sealed partial class DocState : IDisposable
             int mask = size - 1;
             for (int i = 0; i < _count; i++)
             {
-                for (int slot = _entries![i * 4] & mask; ; slot = (slot + 1) & mask)
+                for (int slot = _entries![i * Stride] & mask; ; slot = (slot + 1) & mask)
                 {
                     if (bigger[slot] == 0)
                     {

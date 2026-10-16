@@ -466,9 +466,8 @@ public class ReaderBehaviorTests
     {
         byte[] bytes = Encoding.UTF8.GetBytes(
             "# config\nname: x\nitems:\n  - {a: 1, b: [1, 2]}\n  - \"q\\n\"\n  - |\n    text\n  - &r y\n  - *r\n---\nother: 1\n");
-        long Run()
+        void Run()
         {
-            long before = GC.GetAllocatedBytesForCurrentThread();
             using YamlInput input = YamlInput.FromBytes(bytes, YamlLimits.Default);
             var reader = new YamlReader(input.Utf8Text);
             try
@@ -485,15 +484,9 @@ public class ReaderBehaviorTests
             {
                 reader.Dispose();
             }
-
-            return GC.GetAllocatedBytesForCurrentThread() - before;
         }
 
-        for (int i = 0; i < 5; i++)
-        {
-            Run();
-        }
-
-        Assert.Equal(0, Run());
+        // Tiered compilation may still be swapping in optimised code: the helper repeats rounds until two in a row are clean.
+        SteadyState.AssertAllocatesNothing(Run, 1);
     }
 }
