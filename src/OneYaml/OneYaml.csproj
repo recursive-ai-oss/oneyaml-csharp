@@ -35,7 +35,9 @@
   </ItemGroup>
 
   <Target Name="IncludeGeneratorInPackage" BeforeTargets="_GetPackageFiles">
-    <MSBuild Projects="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" Targets="Build" />
+    <!-- Packing with no build ships the generator the earlier build produced; building it again here would
+         fail, because the no-build setting reaches this project too. -->
+    <MSBuild Projects="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" Targets="Build" Condition="'$(NoBuild)' != 'true'" />
     <MSBuild Projects="../OneYaml.SourceGeneration/OneYaml.SourceGeneration.csproj" Targets="GetTargetPath">
       <Output TaskParameter="TargetOutputs" ItemName="_GeneratorAssembly" />
     </MSBuild>

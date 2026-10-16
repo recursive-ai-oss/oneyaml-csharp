@@ -145,10 +145,13 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.4xx
+      # Build once and pack the built binaries, the same way the release workflow does.
+      - name: Build
+        run: dotnet build OneYaml.slnx -c Release
       - name: Pack
         run: |
           for project in src/OneYaml src/OneYaml.Compat.YamlDotNet src/OneYaml.Compat.SharpYaml; do
-            dotnet pack "$project" -c Release -o "$RUNNER_TEMP/packages" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
+            dotnet pack "$project" -c Release --no-build -o "$RUNNER_TEMP/packages" -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
           done
           ls -l "$RUNNER_TEMP/packages"
       - name: Check the packages
