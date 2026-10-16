@@ -17,6 +17,8 @@ defaults:
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: '1'
   DOTNET_NOLOGO: '1'
+  # Deterministic paths in the published binaries and symbols.
+  ContinuousIntegrationBuild: 'true'
 
 jobs:
   publish:
@@ -61,11 +63,11 @@ jobs:
         run: dotnet test --solution OneYaml.slnx -c Release --no-build --results-directory "$ONEYAML_ARTIFACTS/TestResults"
 
       - name: Pack
-        # Only the three library projects are packed. The source generator is built by the
+        # Only the three library projects are packed, from the binaries the tests ran on. The source generator is built by the
         # OneYaml project and ships inside that package under analyzers/dotnet/cs.
         run: |
           for project in src/OneYaml src/OneYaml.Compat.YamlDotNet src/OneYaml.Compat.SharpYaml; do
-            dotnet pack "$project" -c Release --no-restore -o "$RUNNER_TEMP/packages" \
+            dotnet pack "$project" -c Release --no-build -o "$RUNNER_TEMP/packages" \
               -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg
           done
           ls -l "$RUNNER_TEMP/packages"
