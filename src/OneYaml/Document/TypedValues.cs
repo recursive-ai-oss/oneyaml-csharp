@@ -22,6 +22,10 @@ internal static class TypedValues
         {
             throw NoForm(typeof(T), ex, nameof(value));
         }
+        catch (YamlException ex)
+        {
+            throw InWrittenValue(ex);
+        }
     }
 
     [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
@@ -36,6 +40,24 @@ internal static class TypedValues
         {
             throw NoForm(typeof(T), ex, nameof(value));
         }
+        catch (YamlException ex)
+        {
+            throw InWrittenValue(ex);
+        }
+    }
+
+    // The value is written to text nobody sees and read back, so a line and column in an error would point into
+    // that text. Keep the category and what went wrong, say where it was, and drop the position and the path.
+    private static YamlException InWrittenValue(YamlException ex)
+    {
+        string message = ex.Message;
+        int at = message.LastIndexOf(" (line ", StringComparison.Ordinal);
+        if (at >= 0 && message.EndsWith(')'))
+        {
+            message = message[..at];
+        }
+
+        return new YamlException("In the written value: " + message, ex.Category, 0, 0, -1, innerException: ex);
     }
 
     // The serializer reports a type it cannot describe with NotSupportedException; a document method reports
@@ -46,15 +68,22 @@ internal static class TypedValues
     /// <summary>Writes a value of a type found only at run time, with reflection.</summary>
     /// <remarks>
     /// This is the way for <c>Set(path, object)</c>, whose callers cannot carry trimming annotations for every
-    /// value they pass. It uses the same reflection metadata as the annotated overloads and says so in its
-    /// error when reflection is switched off; programs that trim or compile ahead of time use the overloads
-    /// that take a <see cref="YamlTypeInfo{T}"/>.
+    /// value they pass. It is open only while the reflection switch is on; programs that trim or compile ahead
+    /// of time have it off and use the overloads that take a <see cref="YamlTypeInfo{T}"/>.
     /// </remarks>
-    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "A value of a type outside the plain value model is written by reflection, as the reflection-based serializer overloads do; the typed overloads take generated metadata instead, and a program with reflection switched off gets an ArgumentException that says so.")]
-    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Same as above: the typed overloads are the ahead-of-time route.")]
-    public static ValueTree OfObject(object value, YamlLimits limits)
+    public static ValueTree OfObject(object value, YamlLimits limits) => OfObject(value, limits, YamlSerializer.IsReflectionEnabledByDefault);
+
+    // The switch is a parameter so a test can run the switched-off branch in a process where it is on.
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "Values outside the plain value model are written with reflection only while YamlSerializer.IsReflectionEnabledByDefault is true. That switch is false when trimming or compiling ahead of time, the trimmer folds the check, and this method then throws ArgumentException naming the overloads that take a YamlTypeInfo.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Same switch as above: with it off, this method throws before any reflection runs.")]
+    internal static ValueTree OfObject(object value, YamlLimits limits, bool reflectionEnabled)
     {
         Type type = value.GetType();
+        if (!reflectionEnabled)
+        {
+            throw new ArgumentException($"A value of type {type.Name} is not in the plain value model (strings, numbers, booleans, dictionaries and sequences of these), and reflection is turned off in this application. Use the overload that takes a YamlTypeInfo for this type, or turn the OneYaml.YamlSerializer.IsReflectionEnabledByDefault switch on.", nameof(value));
+        }
+
         try
         {
             YamlTypeInfo info = YamlSerializerOptions.Default.GetReflectiveTypeInfo(type);
@@ -63,6 +92,10 @@ internal static class TypedValues
         catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
         {
             throw new ArgumentException($"A value of type {type.Name} has no YAML form: {ex.Message} Use the overload that takes a YamlTypeInfo for this type.", nameof(value), ex);
+        }
+        catch (YamlException ex)
+        {
+            throw InWrittenValue(ex);
         }
     }
 

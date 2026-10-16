@@ -39,24 +39,25 @@ internal static class NodeValues
     /// <param name="node">A node (aliases already followed).</param>
     /// <param name="options">Options carrying the limits.</param>
     /// <param name="value">The value.</param>
-    /// <param name="error">Why the node cannot be that type.</param>
+    /// <param name="error">Why the node cannot be that type. Built only when <paramref name="wantError"/> is set: an error costs a line and column lookup, and a caller that only asks "is it?" must not pay it per miss.</param>
+    /// <param name="wantError">Whether the caller reads <paramref name="error"/>.</param>
     /// <returns>Whether the node holds a value of the type.</returns>
     /// <exception cref="YamlException">A limit is exceeded (<see cref="YamlErrorCategory.Limit"/>).</exception>
-    public static bool TryGet<T>(DocState s, int node, YamlSerializerOptions options, out T value, out YamlException? error)
+    public static bool TryGet<T>(DocState s, int node, YamlSerializerOptions options, out T value, out YamlException? error, bool wantError = true)
     {
         value = default!;
         error = null;
         ref readonly CstNode n = ref s.Node(node);
         if (n.Kind != NodeKind.Scalar)
         {
-            error = YamlException.At(YamlErrorCategory.Binding, "The node is not a scalar.", s.Text, n.Start);
+            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The node is not a scalar.", s.Text, n.Start) : null;
             return false;
         }
 
         ScalarKind kind = s.KindOf(node, out bool valid);
         if (!valid)
         {
-            error = YamlException.At(YamlErrorCategory.Binding, "The scalar's tag does not fit its text.", s.Text, n.Start);
+            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The scalar's tag does not fit its text.", s.Text, n.Start) : null;
             return false;
         }
 
@@ -68,7 +69,14 @@ internal static class NodeValues
                 return true;
             }
 
-            error = YamlException.At(YamlErrorCategory.Binding, "The scalar is null.", s.Text, n.Start);
+            error = wantError ? YamlException.At(YamlErrorCategory.Binding, "The scalar is null.", s.Text, n.Start) : null;
+            return false;
+        }
+
+        // A try-read of a number or boolean from text of another kind is the common miss. Answer it from the
+        // resolved kind instead of replaying the node into a converter that throws and is caught.
+        if (!wantError && !KindMayFit(typeof(T), kind))
+        {
             return false;
         }
 
@@ -83,6 +91,24 @@ internal static class NodeValues
         {
             reader.Dispose();
         }
+    }
+
+    private static bool KindMayFit(Type type, ScalarKind kind)
+    {
+        Type u = Nullable.GetUnderlyingType(type) ?? type;
+        if (u == typeof(bool))
+        {
+            return kind == ScalarKind.Bool;
+        }
+
+        if (u == typeof(int) || u == typeof(long) || u == typeof(short) || u == typeof(sbyte) || u == typeof(byte)
+            || u == typeof(ushort) || u == typeof(uint) || u == typeof(ulong) || u == typeof(BigInteger)
+            || u == typeof(double) || u == typeof(float) || u == typeof(decimal))
+        {
+            return kind is ScalarKind.Int or ScalarKind.Float;
+        }
+
+        return true;
     }
 
     private static bool TryLeaf<T>(ref Utf8YamlReader r, YamlSerializerOptions o, out T value, out YamlException? error)

@@ -64,7 +64,7 @@ internal sealed partial class DocState
 
                     if (hashes[e - 1] == h && SameKey(keys[e - 1], key))
                     {
-                        throw YamlException.At(YamlErrorCategory.DuplicateKey, "The mapping has the same key twice.", Text, _nodes[key].Start);
+                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", Text, _nodes[key].Start);
                     }
 
                     slot = (slot + 1) & mask;
@@ -125,7 +125,7 @@ internal sealed partial class DocState
                     h.Add(CoreSchema.TryParseBool(text, out bool b) && b);
                     break;
                 case ScalarKind.Int:
-                    RefuseLongInteger(text, _maxIntegerDigits);
+                    RefuseLongInteger(text, _maxIntegerDigits, this, key);
                     if (CoreSchema.TryParseInt64(text, out long l))
                     {
                         h.Add(l);
@@ -167,12 +167,16 @@ internal sealed partial class DocState
     }
 
     // Comparing big integers costs more than their length, so a literal past the limit is refused, as the
-    // readers refuse it. The error has no position: the callers hold decoded text, not source offsets.
-    private static void RefuseLongInteger(ReadOnlySpan<byte> text, int maxDigits)
+    // readers refuse it. When the caller knows the key node, the error points at it; the patch test compares
+    // against a value that has no place in the text, so it gets none.
+    private static void RefuseLongInteger(ReadOnlySpan<byte> text, int maxDigits, DocState? where = null, int node = -1)
     {
         if (!CoreSchema.IsWithinIntegerDigits(text, maxDigits))
         {
-            throw new YamlException("The integer has more digits than the configured limit.", YamlErrorCategory.Limit, 0, 0, 0);
+            const string Message = "The integer has more digits than the configured limit.";
+            throw where is not null && node >= 0
+                ? YamlException.At(YamlErrorCategory.Limit, Message, where.Text, where._nodes[node].Start)
+                : new YamlException(Message, YamlErrorCategory.Limit, 0, 0, 0);
         }
     }
 
@@ -196,7 +200,7 @@ internal sealed partial class DocState
             ReadOnlySpan<byte> tb = DecodedScalar(b, out byte[]? rb);
             try
             {
-                return SameValue(ka, ta, tb, _maxIntegerDigits);
+                return SameValue(ka, ta, tb, _maxIntegerDigits, this, a, b);
             }
             finally
             {
@@ -214,8 +218,11 @@ internal sealed partial class DocState
     /// <param name="a">The first text.</param>
     /// <param name="b">The second text.</param>
     /// <param name="maxIntegerDigits">The most digits an integer text may have before the comparison is refused.</param>
+    /// <param name="where">The document the texts come from, so a refusal can point at the key; or <see langword="null"/>.</param>
+    /// <param name="nodeA">The node of the first text in <paramref name="where"/>.</param>
+    /// <param name="nodeB">The node of the second text in <paramref name="where"/>.</param>
     /// <returns><see langword="true"/> if the values are equal. All NaN are equal; zero equals negative zero.</returns>
-    internal static bool SameValue(ScalarKind kind, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int maxIntegerDigits)
+    internal static bool SameValue(ScalarKind kind, ReadOnlySpan<byte> a, ReadOnlySpan<byte> b, int maxIntegerDigits, DocState? where = null, int nodeA = -1, int nodeB = -1)
     {
         switch (kind)
         {
@@ -224,8 +231,8 @@ internal sealed partial class DocState
             case ScalarKind.Bool:
                 return CoreSchema.TryParseBool(a, out bool x) && CoreSchema.TryParseBool(b, out bool y) && x == y;
             case ScalarKind.Int:
-                RefuseLongInteger(a, maxIntegerDigits);
-                RefuseLongInteger(b, maxIntegerDigits);
+                RefuseLongInteger(a, maxIntegerDigits, where, nodeA);
+                RefuseLongInteger(b, maxIntegerDigits, where, nodeB);
                 if (CoreSchema.TryParseInt64(a, out long la) && CoreSchema.TryParseInt64(b, out long lb))
                 {
                     return la == lb;

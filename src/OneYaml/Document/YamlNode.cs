@@ -60,7 +60,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <summary>Makes a detached node from a value, to assign into a document.</summary>
     /// <param name="value">null, a string, a boolean, a number, a dictionary or sequence of these, or a value of any other type the serializer can write (written as <see cref="YamlSerializer"/> writes it, with reflection).</param>
     /// <returns>The detached node.</returns>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     public static YamlNode Create(object? value) => new(value is null || value is YamlNode ? value : Typed(value));
 
     /// <summary>Makes a detached node from a value of any type <paramref name="typeInfo"/> describes, written as <see cref="YamlSerializer"/> writes it.</summary>
@@ -344,7 +344,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         DocState s = State();
         int t = Followed(s, out bool via);
         ChargeText(s, t, via, s.Node(t).End - s.Node(t).Start);
-        return NodeValues.TryGet(s, t, _doc!.BindOptions, out value, out _);
+        return NodeValues.TryGet(s, t, _doc!.BindOptions, out value, out _, wantError: false);
     }
 
     /// <summary>Binds the node to a type with the reflection binder, as <see cref="YamlSerializer"/> would bind the same text.</summary>
@@ -545,7 +545,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     /// <summary>Replaces this node's value, keeping its style where it can hold the new value.</summary>
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, a dictionary or sequence of these, or a value of any other type the serializer can write.</param>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     /// <exception cref="YamlException">The write goes through an alias, or the node holds an anchor that aliases still use inside it. The document is unchanged.</exception>
     /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
     /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
@@ -702,6 +702,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public override bool Equals(object? obj) => obj is YamlNode other && Equals(other);
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Views of one document share a hash code, because a node's place in the document changes with edits and a
+    /// hash must not. A hash set of many views of one document is therefore slow; key a dictionary by something
+    /// else (a pointer string, say).
+    /// </remarks>
     public override int GetHashCode() => _doc is null ? _value?.GetHashCode() ?? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_doc);
 
     /// <summary>Tells whether two views name the same node of the same document.</summary>

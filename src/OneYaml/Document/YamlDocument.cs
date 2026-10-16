@@ -413,7 +413,7 @@ public sealed class YamlDocument : IDisposable
     /// <param name="path">An RFC 6901 pointer. The empty pointer replaces the whole document's root.</param>
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, or a dictionary or sequence of these.</param>
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     /// <exception cref="YamlException">The pointer names nothing (<see cref="YamlErrorCategory.PatchPath"/>), matches two keys, or goes through an alias. The document is unchanged.</exception>
     public void Set(string path, object? value, int document = 0)
     {
@@ -429,7 +429,7 @@ public sealed class YamlDocument : IDisposable
     /// <param name="path">An RFC 6901 pointer.</param>
     /// <param name="value">The value, as for <see cref="Set"/>.</param>
     /// <param name="document">The index of the document in the stream. An index outside the stream throws <see cref="ArgumentOutOfRangeException"/>, as <see cref="Documents"/> does.</param>
-    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form, or one outside the plain value model while reflection is turned off (the default in trimmed and ahead-of-time applications); use the overload that takes a <see cref="YamlTypeInfo{T}"/> there.</exception>
     /// <exception cref="YamlException">The pointer is invalid or its parent does not exist, or it goes through an alias. The document is unchanged.</exception>
     public void Add(string path, object? value, int document = 0)
     {
@@ -656,7 +656,7 @@ public sealed class YamlDocument : IDisposable
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
         int node = PointerOps.Find(s, _limits, document, p);
-        if (node >= 0 && NodeValues.TryGet(s, node, BindOptions, out value, out _))
+        if (node >= 0 && NodeValues.TryGet(s, node, BindOptions, out value, out _, wantError: false))
         {
             return true;
         }
