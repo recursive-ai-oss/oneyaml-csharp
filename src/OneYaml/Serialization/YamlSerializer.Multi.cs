@@ -310,7 +310,7 @@ public static partial class YamlSerializer
 
     private static List<T?> ReadAllFromStream<T>(Stream stream, YamlTypeInfo<T> info)
     {
-        (byte[] buffer, int length) = ReadAllBytes(stream, info.Options.Limits.MaxInputBytes);
+        (byte[] buffer, int length) = ReadAllBytes(stream, info.Options.Limits.MaxInputBytes, info.Options.SourceName);
         try
         {
             using YamlInput input = InputFromBytes(buffer.AsSpan(0, length), info.Options);
@@ -326,7 +326,7 @@ public static partial class YamlSerializer
     // before the first is handed out.
     private static async IAsyncEnumerable<T?> ReadAllAsync<T>(Stream stream, YamlTypeInfo<T> info, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        (byte[] buffer, int length) = await ReadAllBytesAsync(stream, info.Options.Limits.MaxInputBytes, cancellationToken).ConfigureAwait(false);
+        (byte[] buffer, int length) = await ReadAllBytesAsync(stream, info.Options.Limits.MaxInputBytes, info.Options.SourceName, cancellationToken).ConfigureAwait(false);
         List<T?> all;
         try
         {

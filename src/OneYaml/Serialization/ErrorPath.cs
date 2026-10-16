@@ -16,6 +16,7 @@ internal static class ErrorPath
         public bool HasChild;
         public int Index;
         public string? Key;
+        public bool KeyUnnamed;
     }
 
     // atCollection: the offset is the start of a collection the caller is complaining about, so its first
@@ -106,7 +107,10 @@ internal static class ErrorPath
                             {
                                 if (top.ExpectKey)
                                 {
-                                    top.Key = reader.TokenType == YamlTokenType.Scalar ? reader.GetString() : string.Empty;
+                                    // A key that is a collection or an alias has no name to write; a segment
+                                    // made of nothing would read as an empty-string key.
+                                    top.KeyUnnamed = reader.TokenType != YamlTokenType.Scalar;
+                                    top.Key = top.KeyUnnamed ? null : reader.GetString();
                                     top.ExpectKey = false;
                                 }
                                 else
@@ -143,13 +147,18 @@ internal static class ErrorPath
         return Build(stack);
     }
 
-    private static string Build(List<Frame> stack)
+    private static string? Build(List<Frame> stack)
     {
         var sb = new StringBuilder();
         foreach (Frame f in stack)
         {
             if (f.IsMapping)
             {
+                if (f.HasChild && f.KeyUnnamed)
+                {
+                    return null;
+                }
+
                 if (!f.HasChild || f.Key is null)
                 {
                     continue;

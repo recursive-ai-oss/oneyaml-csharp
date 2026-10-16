@@ -120,8 +120,9 @@ public class HostileInputCostTests
         Assert.True(t4 < 9 * Math.Max(t1, 0.02), $"16,384 names took {t1:F3} s and 65,536 names took {t4:F3} s");
     }
 
+    // Two suffixes alternate, so a cache that remembers only the last resolved tag cannot absorb the cost.
     private static string TaggedNodes(int prefixLength, int nodes) =>
-        "%TAG !e! tag:x,2000:" + new string('a', prefixLength) + "\n---\n" + string.Concat(Enumerable.Repeat("- !e!x a\n", nodes));
+        "%TAG !e! tag:x,2000:" + new string('a', prefixLength) + "\n---\n" + string.Concat(Enumerable.Range(0, nodes).Select(i => i % 2 == 0 ? "- !e!x a\n" : "- !e!y a\n"));
 
     [Fact]
     public void A_long_tag_prefix_used_by_many_nodes_allocates_nothing_per_node()

@@ -20,7 +20,69 @@ internal static class ConverterGuards
     public static YamlException Expected(in Utf8YamlReader reader, string what, Type type) =>
         reader.CreateException($"Expected {what} to read {DescribeType(type)}.");
 
-    public static string DescribeType(Type type) => type.IsGenericType ? type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)] + "<...>" : type.Name;
+    // The type as C# writes it (ImmutableArray<int>), not as the runtime names it (ImmutableArray`1).
+    public static string DescribeType(Type type)
+    {
+        if (type.IsArray)
+        {
+            return DescribeType(type.GetElementType()!) + "[]";
+        }
+
+        if (!type.IsGenericType)
+        {
+            return Keyword(type) ?? type.Name;
+        }
+
+        string name = type.Name;
+        int tick = name.IndexOf('`', StringComparison.Ordinal);
+        Type[] args = type.GetGenericArguments();
+        if (Nullable.GetUnderlyingType(type) is Type underlying)
+        {
+            return DescribeType(underlying) + "?";
+        }
+
+        return (tick < 0 ? name : name[..tick]) + "<" + string.Join(", ", Array.ConvertAll(args, DescribeType)) + ">";
+    }
+
+    // A sorted collection orders its elements (or keys) with the default comparer, which throws for a type that
+    // cannot be compared. No input could ever work, so it is refused when the metadata is made, as a type that
+    // cannot be bound is, instead of failing on the first element read.
+    private static string? Keyword(Type type) => type.IsEnum ? null : Type.GetTypeCode(type) switch
+    {
+        TypeCode.Boolean => "bool",
+        TypeCode.Byte => "byte",
+        TypeCode.SByte => "sbyte",
+        TypeCode.Int16 => "short",
+        TypeCode.UInt16 => "ushort",
+        TypeCode.Int32 => "int",
+        TypeCode.UInt32 => "uint",
+        TypeCode.Int64 => "long",
+        TypeCode.UInt64 => "ulong",
+        TypeCode.Single => "float",
+        TypeCode.Double => "double",
+        TypeCode.Decimal => "decimal",
+        TypeCode.Char => "char",
+        TypeCode.String => "string",
+        _ => type == typeof(object) ? "object" : null,
+    };
+
+    public static void RequireComparable<TCollection, TElement>()
+    {
+        Type collection = typeof(TCollection);
+        Type element = typeof(TElement);
+        if (!collection.IsGenericType)
+        {
+            return;
+        }
+
+        Type def = collection.GetGenericTypeDefinition();
+        bool sorted = def == typeof(SortedSet<>) || def == typeof(SortedDictionary<,>) || def == typeof(SortedList<,>)
+            || def == typeof(System.Collections.Immutable.ImmutableSortedSet<>) || def == typeof(System.Collections.Immutable.ImmutableSortedDictionary<,>);
+        if (sorted && !typeof(IComparable).IsAssignableFrom(element) && !typeof(IComparable<TElement>).IsAssignableFrom(element))
+        {
+            throw new NotSupportedException($"{DescribeType(collection)} orders its {(def.Name.Contains("Set", StringComparison.Ordinal) ? "elements" : "keys")}, and {DescribeType(element)} cannot be compared.");
+        }
+    }
 
     public static bool IsMergeKey(in Utf8YamlReader reader) =>
         reader.Options.MergeKeys && reader.Type == YamlTokenType.Scalar && reader.Style == ScalarStyle.Plain && reader.RawEquals("<<"u8);
@@ -47,7 +109,7 @@ internal sealed class ListConverter<T> : YamlConverter<List<T>>
     {
         if (reader.Type != YamlTokenType.SequenceStart)
         {
-            throw ConverterGuards.Expected(in reader, "a sequence", typeof(List<T>));
+            throw ConverterGuards.Expected(in reader, "a sequence", typeToConvert);
         }
 
         ConverterGuards.EnsureStack(in reader);
@@ -107,6 +169,7 @@ internal sealed class CollectionConverter<TCollection, T> : YamlConverter<TColle
     // isDefault names a value with nothing to enumerate (an uninitialised ImmutableArray), written as an empty sequence.
     public CollectionConverter(YamlTypeInfo<T> elementInfo, Func<List<T>, TCollection> make, Func<TCollection, bool>? isDefault = null)
     {
+        ConverterGuards.RequireComparable<TCollection, T>();
         _list = new ListConverter<T>(elementInfo);
         _element = elementInfo.Converter;
         _make = make;
@@ -284,6 +347,7 @@ internal sealed class GeneralDictionaryConverter<TDictionary, TKey, TValue> : Ya
 
     public GeneralDictionaryConverter(YamlTypeInfo<TKey> keyInfo, YamlTypeInfo<TValue> valueInfo, Func<TDictionary> create)
     {
+        ConverterGuards.RequireComparable<TDictionary, TKey>();
         _inner = new DictionaryConverter<TKey, TValue>(keyInfo, valueInfo);
         _create = create;
     }
@@ -325,6 +389,7 @@ internal sealed class ConvertedDictionaryConverter<TDictionary, TKey, TValue> : 
 
     public ConvertedDictionaryConverter(YamlTypeInfo<TKey> keyInfo, YamlTypeInfo<TValue> valueInfo, Func<Dictionary<TKey, TValue>, TDictionary> make)
     {
+        ConverterGuards.RequireComparable<TDictionary, TKey>();
         _inner = new DictionaryConverter<TKey, TValue>(keyInfo, valueInfo);
         _make = make;
     }
@@ -344,7 +409,21 @@ internal sealed class ConvertedDictionaryConverter<TDictionary, TKey, TValue> : 
     public override TDictionary? Read(ref Utf8YamlReader reader, Type typeToConvert, YamlSerializerOptions options)
     {
         Dictionary<TKey, TValue>? source = _inner.Read(ref reader, typeToConvert, options);
-        return source is null ? default : _make(source);
+        if (source is null)
+        {
+            return default;
+        }
+
+        try
+        {
+            return _make(source);
+        }
+        catch (ArgumentException) when (source.Count > 1)
+        {
+            // A sorted target compares keys its own way (by culture, say), so two keys that were different in the
+            // mapping can be the same key here. The factory is the only call in the try block.
+            throw reader.ErrorAt(YamlErrorCategory.DuplicateKey, "The mapping has two keys the target treats as the same key.", reader.Start);
+        }
     }
 }
 

@@ -79,7 +79,8 @@ public class YamlException : Exception
     /// <summary>
     /// A JSON Pointer (RFC 6901) to the node the error is about, such as <c>/endpoints/1/weight</c>; the
     /// empty string is the root. It is <see langword="null"/> when the error has no node, for example a
-    /// syntax error or an unreadable encoding.
+    /// syntax error or an unreadable encoding, or when the node is under a mapping key that is a collection
+    /// or an alias, which has no name to write.
     /// </summary>
     public string? Path { get; }
 
@@ -91,7 +92,8 @@ public class YamlException : Exception
 
     /// <summary>
     /// A message that stands on its own: the source name when one is set, what went wrong, and the
-    /// line, column and path when they are known.
+    /// line, column and path when they are known. Text taken from the input (values, keys, paths) is cut
+    /// to a short excerpt with control characters escaped; <see cref="Path"/> holds the full pointer.
     /// </summary>
     public override string Message => SourceName is null ? base.Message : SourceName + ": " + base.Message;
 
@@ -167,21 +169,59 @@ public class YamlException : Exception
         string key = string.Empty;
         if (path is { Length: > 0 })
         {
-            key = path[(path.LastIndexOf('/') + 1)..].Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
-            if (key.Length > 40)
-            {
-                key = key[..40] + "...";
-            }
+            key = Excerpt(path[(path.LastIndexOf('/') + 1)..].Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal), 40);
         }
 
         return Located(category, template.Replace("{0}", key, StringComparison.Ordinal), utf8, offset, path);
+    }
+
+    // How much input text a message may carry; the full text stays in Path.
+    internal const int MessageExcerpt = 200;
+
+    // Input text as it may appear in a message: cut to max characters, with control characters (line breaks
+    // included) escaped so a hostile key cannot forge log lines.
+    internal static string Excerpt(string text, int max)
+    {
+        bool cut = text.Length > max;
+        int length = cut ? max : text.Length;
+        if (cut && length > 0 && char.IsHighSurrogate(text[length - 1]))
+        {
+            length--;
+        }
+
+        var sb = new StringBuilder(length + 8);
+        for (int i = 0; i < length; i++)
+        {
+            char c = text[i];
+            if (c < ' ' || (c >= '\u007F' && c <= '\u009F') || c is '\u2028' or '\u2029')
+            {
+                sb.Append(c switch
+                {
+                    '\n' => "\\n",
+                    '\r' => "\\r",
+                    '\t' => "\\t",
+                    _ => "\\u" + ((int)c).ToString("X4", System.Globalization.CultureInfo.InvariantCulture),
+                });
+            }
+            else
+            {
+                sb.Append(c);
+            }
+        }
+
+        if (cut)
+        {
+            sb.Append('\u2026');
+        }
+
+        return sb.ToString();
     }
 
     // Puts the position in the text so a log line that keeps only the message still says where.
     private static string Describe(string message, int line, int column, string? path)
     {
         return path is { Length: > 0 }
-            ? $"{message} (line {line}, column {column}, path {path})"
+            ? $"{message} (line {line}, column {column}, path {Excerpt(path, MessageExcerpt)})"
             : $"{message} (line {line}, column {column})";
     }
 
