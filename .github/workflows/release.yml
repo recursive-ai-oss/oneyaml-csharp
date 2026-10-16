@@ -28,17 +28,23 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      # Actions are pinned by commit because this job can obtain a publishing key.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Tag is on main
+        run: |
+          # Only commits that are already on main are published.
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::the tagged commit is not on main"; exit 1; }
       - name: Keep build output out of the checkout
         run: echo "ONEYAML_ARTIFACTS=$RUNNER_TEMP/artifacts" >> "$GITHUB_ENV"
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
           # The tests run on both target runtimes.
           dotnet-version: |
             8.0.x
-          cache: true
-          cache-dependency-path: '**/packages.lock.json'
 
       - name: Restore
         run: dotnet restore OneYaml.slnx
@@ -74,7 +80,7 @@ jobs:
 
       - name: Log in to nuget.org
         id: login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
           user: recursiveai.org
 
