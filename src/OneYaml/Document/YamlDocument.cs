@@ -289,7 +289,9 @@ public sealed class YamlDocument : IDisposable
     {
         DocState s = State;
         bool bom = s.HasByteOrderMark && s.Encoding == YamlEncoding.Utf8;
-        byte[] result = new byte[s.Length + (bom ? 3 : 0)];
+        // Every byte is written below, so the array need not be zeroed first: for a large document the
+        // clearing costs about as much as the copy.
+        byte[] result = GC.AllocateUninitializedArray<byte>(s.Length + (bom ? 3 : 0));
         if (bom)
         {
             result[0] = 0xEF;

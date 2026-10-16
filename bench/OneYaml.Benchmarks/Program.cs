@@ -15,6 +15,12 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length > 0 && args[0] == "--emit-hash")
+        {
+            UnchangedEmitBenchmarks.PrintHashes(args[1]);
+            return 0;
+        }
+
         if (args.Length > 0 && args[0] == "--dump-hash")
         {
             DumpHash.Print(args.Skip(1).ToArray());
