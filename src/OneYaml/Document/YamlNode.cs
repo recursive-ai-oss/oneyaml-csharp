@@ -11,29 +11,39 @@ namespace OneYaml;
 
 /// <summary>
 /// A lightweight view of one node of a <see cref="YamlDocument"/>. Reading follows aliases.
-/// Any edit of the document invalidates every view taken before it: using one afterwards throws
-/// <see cref="InvalidOperationException"/>. A node made from a value (a string, a number,
-/// <see langword="null"/>…) is detached and can only be assigned into a document.
+/// A view stays valid across edits, the way a <c>JsonNode</c> or an <c>XElement</c> does: edits made through it
+/// or elsewhere in the document move it along with its node, so
+/// <c>var spec = doc.Root["spec"]; spec["a"] = 1; spec["b"] = 2;</c> works. Replacing a node's value
+/// keeps the view of the node itself; views of what was inside the old value, and of nodes that were removed,
+/// throw <see cref="InvalidOperationException"/> when used. A node made from a value (a string, a number,
+/// <see langword="null"/>…) is detached and can only be assigned into a document. Using a view after
+/// its document was disposed throws <see cref="ObjectDisposedException"/>.
 /// </summary>
 /// <remarks>
-/// Reading through aliases is charged to the alias budget of the root the view was reached from, so a
-/// long-lived reader should take <see cref="YamlDocument.Root"/> again for each operation.
+/// <para>Reading through aliases is charged to the alias budget of the root the view was reached from, so a
+/// long-lived reader should take <see cref="YamlDocument.Root"/> again for each operation.</para>
+/// <para>A view reached through an alias is a read-only snapshot: it is valid only until the next edit, and then
+/// throws <see cref="InvalidOperationException"/>; take it again from the root.</para>
+/// <para>Two views are equal when they name the same node of the same document.</para>
 /// </remarks>
 public sealed class YamlNode : IEquatable<YamlNode>
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
     private readonly YamlDocument? _doc;
-    private readonly int _index;
-    private readonly int _version;
     private readonly bool _viaAlias;
     private readonly object? _value;
 
-    internal YamlNode(YamlDocument doc, int index, int version, bool viaAlias)
+    // Where the node is in the document's node array, as of the edit epoch the view last saw. A view that is
+    // behind follows the edits made since (see EditEpoch).
+    private int _index;
+    private EditEpoch? _epoch;
+
+    internal YamlNode(YamlDocument doc, int index, EditEpoch epoch, bool viaAlias)
     {
         _doc = doc;
         _index = index;
-        _version = version;
+        _epoch = epoch;
         _viaAlias = viaAlias;
         _value = null;
     }
@@ -42,15 +52,48 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         _doc = null;
         _index = -1;
-        _version = 0;
+        _epoch = null;
         _viaAlias = false;
         _value = detached;
     }
 
     /// <summary>Makes a detached node from a value, to assign into a document.</summary>
-    /// <param name="value">null, a string, a boolean, a number, or a dictionary or sequence of these.</param>
+    /// <param name="value">null, a string, a boolean, a number, a dictionary or sequence of these, or a value of any other type the serializer can write (written as <see cref="YamlSerializer"/> writes it, with reflection).</param>
     /// <returns>The detached node.</returns>
-    public static YamlNode Create(object? value) => new(value);
+    /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
+    public static YamlNode Create(object? value) => new(value is null || value is YamlNode ? value : Typed(value));
+
+    /// <summary>Makes a detached node from a value of any type <paramref name="typeInfo"/> describes, written as <see cref="YamlSerializer"/> writes it.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="value">The value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <returns>The detached node.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    public static YamlNode Create<T>(T value, YamlTypeInfo<T> typeInfo) => new(TypedValues.Of(value, typeInfo, YamlLimits.Default));
+
+    /// <summary>Makes a detached node from a value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="value">The value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>The detached node.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public static YamlNode Create<T>(T value, YamlSerializerOptions? options) => new(TypedValues.Of(value, options, YamlLimits.Default));
+
+    // A plain value stays as it is; anything else is written by the serializer now, so the node holds its tree.
+    private static object Typed(object value)
+    {
+        if (value is string or bool or char or Enum or Guid or BigInteger or double or float or Half or decimal
+            or sbyte or byte or short or ushort or int or uint or long or ulong or nint or nuint or IDictionary
+            or IEnumerable)
+        {
+            // Collections are checked when they are assigned, together with what they hold.
+            return value;
+        }
+
+        return TypedValues.OfObject(value, YamlLimits.Default);
+    }
 
     /// <summary>Makes a detached string node.</summary>
     /// <param name="value">The string, or <see langword="null"/> for a null node.</param>
@@ -89,17 +132,45 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     private DocState State()
     {
-        if (_doc is null)
+        YamlDocument? doc = _doc;
+        if (doc is null)
         {
             throw new InvalidOperationException("A detached node has no position in a document.");
         }
 
-        if (_doc.Version != _version)
+        // Disposal is reported first, as itself, whatever edits came before.
+        DocState s = doc.State;
+        if (_epoch!.Number != doc.EditCount)
         {
-            throw new InvalidOperationException("The document was edited after this node was taken; take the node again.");
+            Follow(doc);
         }
 
-        return _doc.State;
+        return s;
+    }
+
+    // The document was edited since this view last looked: find the node again by following each edit's effect
+    // on positions. A node an edit removed has no place any more.
+    private void Follow(YamlDocument doc)
+    {
+        if (_viaAlias)
+        {
+            throw new InvalidOperationException("A node reached through an alias is valid only until the document is edited; take it again from the root.");
+        }
+
+        int index = _index;
+        EditEpoch e = _epoch!;
+        while (e.Number != doc.EditCount)
+        {
+            e = e.Next!;
+            index = e.Map(index);
+            if (index < 0)
+            {
+                throw new InvalidOperationException("This node is no longer part of the document: it was removed, or a value that contained it was replaced.");
+            }
+        }
+
+        _index = index;
+        _epoch = e;
     }
 
     // Scalars up to this many bytes read through an alias at the price of reading them directly.
@@ -137,6 +208,12 @@ public sealed class YamlNode : IEquatable<YamlNode>
             {
                 return _value switch
                 {
+                    ValueTree t => t[0].Kind switch
+                    {
+                        VKind.Mapping => YamlNodeKind.Mapping,
+                        VKind.Sequence => YamlNodeKind.Sequence,
+                        _ => YamlNodeKind.Scalar,
+                    },
                     null => YamlNodeKind.Scalar,
                     string => YamlNodeKind.Scalar,
                     IDictionary => YamlNodeKind.Mapping,
@@ -156,7 +233,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         {
             DocState s = State();
             int t = Followed(s, out bool via);
-            return new YamlNode(_doc!, t, _version, via);
+            return new YamlNode(_doc!, t, _epoch!, via);
         }
     }
 
@@ -214,7 +291,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         {
             if (_doc is null)
             {
-                return _value is null;
+                return _value is null || (_value is ValueTree tree && tree[0].Kind == VKind.Scalar && tree[0].Scalar == ScalarKind.Null);
             }
 
             DocState s = State();
@@ -275,7 +352,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <param name="options">Options; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
     [RequiresUnreferencedCode("Reflection-based binding reads members and constructors that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
     [RequiresDynamicCode("Reflection-based binding makes generic types and compiles accessors at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
     public T? Deserialize<T>(YamlSerializerOptions? options = null) => NodeReplay.Bind(State(), _index, (options ?? YamlSerializerOptions.Default).GetReflectiveTypeInfo<T>());
@@ -285,7 +362,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <param name="typeInfo">The metadata for <typeparamref name="T"/>.</param>
     /// <returns>The value.</returns>
     /// <exception cref="YamlException">The node does not fit the type, or aliases expand beyond the limits.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
     public T? Deserialize<T>(YamlTypeInfo<T> typeInfo)
     {
         ArgumentNullException.ThrowIfNull(typeInfo);
@@ -322,7 +399,25 @@ public sealed class YamlNode : IEquatable<YamlNode>
             return false;
         }
 
-        value = new YamlNode(_doc!, child, _version, via);
+        value = new YamlNode(_doc!, child, _epoch!, via);
+        return true;
+    }
+
+    /// <summary>Gets an item of a sequence.</summary>
+    /// <param name="index">The item's position.</param>
+    /// <param name="value">The item's node.</param>
+    /// <returns><see langword="true"/> if the node is a sequence with an item at that position.</returns>
+    public bool TryGetValue(int index, [NotNullWhen(true)] out YamlNode? value)
+    {
+        DocState s = State();
+        int t = Followed(s, out bool via);
+        value = null;
+        if (s.Node(t).Kind != NodeKind.Sequence || (uint)index >= (uint)s.Node(t).Count)
+        {
+            return false;
+        }
+
+        value = new YamlNode(_doc!, s.ChildAt(t, index), _epoch!, via);
         return true;
     }
 
@@ -340,8 +435,10 @@ public sealed class YamlNode : IEquatable<YamlNode>
 
     /// <summary>Gets or sets the value of a mapping key. Setting an existing key replaces its value; a new key is added at the end.</summary>
     /// <param name="key">The key's text.</param>
-    /// <exception cref="YamlException">Getting: the node is not a mapping or has no such key (<see cref="YamlErrorCategory.PatchPath"/>). Setting: that, or the write goes through an alias. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="KeyNotFoundException">Getting: the node is a mapping with no such key. Use <see cref="TryGetValue(string, out YamlNode)"/> to look without throwing.</exception>
+    /// <exception cref="YamlException">Getting: the node is not a mapping (<see cref="YamlErrorCategory.PatchPath"/>). Setting: that, or the write goes through an alias. The document is unchanged.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
     [AllowNull]
     public YamlNode this[string key]
     {
@@ -353,7 +450,15 @@ public sealed class YamlNode : IEquatable<YamlNode>
             }
 
             DocState s = State();
-            throw YamlException.At(YamlErrorCategory.PatchPath, "The mapping has no such key.", s.Text, s.Node(_index).Start);
+            ref readonly CstNode n = ref s.Node(Followed(s, out _));
+            YamlPosition at = s.PositionOf(s.Node(_index).Start);
+            if (n.Kind != NodeKind.Mapping)
+            {
+                string kind = n.Kind == NodeKind.Sequence ? "a sequence" : "a scalar";
+                throw YamlException.At(YamlErrorCategory.PatchPath, $"Cannot read the key '{key}': the node at line {at.Line}, column {at.Column} is {kind}, not a mapping.", s.Text, s.Node(_index).Start);
+            }
+
+            throw new KeyNotFoundException($"The mapping at line {at.Line}, column {at.Column} has no key '{key}'.");
         }
 
         set
@@ -361,6 +466,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
             ArgumentNullException.ThrowIfNull(key);
             ValueTree v = ValueOf(value);
             DocState s = State();
+            _doc!.BeginEdit(s);
             if (IsEmptyRoot(s))
             {
                 // The root of a stream with no content becomes the mapping on its first write.
@@ -376,7 +482,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     /// <summary>Gets or sets an item of a sequence. Setting an index equal to the count appends.</summary>
     /// <param name="index">The item's position.</param>
     /// <exception cref="YamlException">The node is not a sequence or the index is outside it (<see cref="YamlErrorCategory.PatchPath"/>), or the write goes through an alias. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
     [AllowNull]
     public YamlNode this[int index]
     {
@@ -384,18 +490,24 @@ public sealed class YamlNode : IEquatable<YamlNode>
         {
             DocState s = State();
             int t = Followed(s, out bool via);
-            if (s.Node(t).Kind != NodeKind.Sequence || (uint)index >= (uint)s.Node(t).Count)
+            ref readonly CstNode n = ref s.Node(t);
+            if (n.Kind != NodeKind.Sequence || (uint)index >= (uint)n.Count)
             {
-                throw YamlException.At(YamlErrorCategory.PatchPath, "The node has no such item.", s.Text, s.Node(_index).Start);
+                YamlPosition at = s.PositionOf(s.Node(_index).Start);
+                string what = n.Kind == NodeKind.Sequence
+                    ? $"the sequence at line {at.Line}, column {at.Column} has {n.Count} {(n.Count == 1 ? "item" : "items")}"
+                    : $"the node at line {at.Line}, column {at.Column} is {(n.Kind == NodeKind.Mapping ? "a mapping" : "a scalar")}, not a sequence";
+                throw YamlException.At(YamlErrorCategory.PatchPath, $"Cannot read item {index}: {what}.", s.Text, s.Node(_index).Start);
             }
 
-            return new YamlNode(_doc!, s.ChildAt(t, index), _version, via);
+            return new YamlNode(_doc!, s.ChildAt(t, index), _epoch!, via);
         }
 
         set
         {
             ValueTree v = ValueOf(value);
             DocState s = State();
+            _doc!.BeginEdit(s);
             if (index == 0 && IsEmptyRoot(s))
             {
                 _doc!.Swap(Editor.Replace(s, _doc.Limits, _index, ValueTree.Wrap(null, v)));
@@ -432,14 +544,43 @@ public sealed class YamlNode : IEquatable<YamlNode>
     }
 
     /// <summary>Replaces this node's value, keeping its style where it can hold the new value.</summary>
-    /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, or a dictionary or sequence of these.</param>
+    /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, a dictionary or sequence of these, or a value of any other type the serializer can write.</param>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     /// <exception cref="YamlException">The write goes through an alias, or the node holds an anchor that aliases still use inside it. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
     public void Set(object? value)
     {
-        ValueTree v = ValueTree.FromObject(value, (_doc?.Limits ?? YamlLimits.Default).MaxDepth);
+        YamlLimits limits = _doc?.Limits ?? YamlLimits.Default;
+        Replace(ValueTree.FromObject(value, limits.MaxDepth, limits));
+    }
+
+    /// <summary>Replaces this node's value with a value of any type <paramref name="typeInfo"/> describes, written as <see cref="YamlSerializer"/> writes it.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="value">The value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The write goes through an alias, or the node holds an anchor that aliases still use inside it. The document is unchanged.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
+    public void Set<T>(T value, YamlTypeInfo<T> typeInfo) => Replace(TypedValues.Of(value, typeInfo, _doc?.Limits ?? YamlLimits.Default));
+
+    /// <summary>Replaces this node's value with a value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="value">The value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    /// <exception cref="YamlException">The write goes through an alias, or the node holds an anchor that aliases still use inside it. The document is unchanged.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public void Set<T>(T value, YamlSerializerOptions? options) => Replace(TypedValues.Of(value, options, _doc?.Limits ?? YamlLimits.Default));
+
+    private void Replace(ValueTree v)
+    {
         DocState s = State();
+        _doc!.BeginEdit(s);
         if (_viaAlias)
         {
             throw YamlException.At(YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", s.Text, s.Node(_index).Start);
@@ -448,18 +589,23 @@ public sealed class YamlNode : IEquatable<YamlNode>
         _doc!.Swap(Editor.Replace(s, _doc.Limits, _index, v));
     }
 
-    /// <summary>Removes this node from its mapping or sequence.</summary>
+    /// <summary>Removes this node from its mapping or sequence. Removing the view of a mapping key removes the entry.</summary>
     /// <exception cref="YamlException">The node is a root, the write goes through an alias, or it holds an anchor that aliases still use. The document is unchanged.</exception>
-    /// <exception cref="InvalidOperationException">The view is stale or detached.</exception>
+    /// <exception cref="InvalidOperationException">The node was removed, or is detached.</exception>
+    /// <exception cref="ObjectDisposedException">The document was disposed.</exception>
     public void Remove()
     {
         DocState s = State();
+        _doc!.BeginEdit(s);
         if (_viaAlias)
         {
             throw YamlException.At(YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", s.Text, s.Node(_index).Start);
         }
 
-        _doc!.Swap(Editor.Remove(s, _doc.Limits, _index));
+        // The key of an entry takes the entry with it: the edit works on the value, which names the entry.
+        ref readonly CstNode n = ref s.Node(_index);
+        int target = (n.Flags & NodeFlags.IsKey) != 0 ? _index + n.Size : _index;
+        _doc!.Swap(Editor.Remove(s, _doc.Limits, target));
     }
 
     private ValueTree ValueOf(YamlNode? value)
@@ -478,7 +624,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         if (_doc is null)
         {
-            tree.AppendTree(ValueTree.FromObject(_value, limits.MaxDepth));
+            tree.AppendTree(_value as ValueTree ?? ValueTree.FromObject(_value, limits.MaxDepth, limits));
             return;
         }
 
@@ -501,6 +647,11 @@ public sealed class YamlNode : IEquatable<YamlNode>
     {
         if (_doc is null)
         {
+            if (_value is ValueTree t)
+            {
+                return t[0].Kind == VKind.Scalar ? Encoding.UTF8.GetString(t[0].Text ?? []) : t[0].Kind.ToString();
+            }
+
             return Convert.ToString(_value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
         }
 
@@ -511,13 +662,47 @@ public sealed class YamlNode : IEquatable<YamlNode>
     }
 
     /// <inheritdoc />
-    public bool Equals(YamlNode? other) => other is not null && ReferenceEquals(_doc, other._doc) && _index == other._index && _version == other._version && _viaAlias == other._viaAlias && Equals(_value, other._value);
+    public bool Equals(YamlNode? other)
+    {
+        if (other is null)
+        {
+            return false;
+        }
+
+        if (ReferenceEquals(this, other))
+        {
+            return true;
+        }
+
+        if (_doc is null || other._doc is null)
+        {
+            return _doc is null && other._doc is null && Equals(_value, other._value);
+        }
+
+        // Both views are brought up to date first, so equal views name one node whichever edits they have seen.
+        return ReferenceEquals(_doc, other._doc) && _viaAlias == other._viaAlias && CurrentIndex() is var mine && mine >= 0 && mine == other.CurrentIndex();
+    }
+
+    // The node's place now, or -1 when the view cannot be brought up to date.
+    private int CurrentIndex()
+    {
+        try
+        {
+            State();
+            return _index;
+        }
+        catch (InvalidOperationException)
+        {
+            // Removed, stale through an alias, or disposed (a kind of InvalidOperationException).
+            return -1;
+        }
+    }
 
     /// <inheritdoc />
     public override bool Equals(object? obj) => obj is YamlNode other && Equals(other);
 
     /// <inheritdoc />
-    public override int GetHashCode() => HashCode.Combine(_doc, _index, _version, _value);
+    public override int GetHashCode() => _doc is null ? _value?.GetHashCode() ?? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(_doc);
 
     /// <summary>Tells whether two views name the same node of the same document.</summary>
     /// <param name="left">A view.</param>
@@ -550,19 +735,26 @@ public sealed class YamlNode : IEquatable<YamlNode>
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    /// <summary>Enumerates the items of a sequence or the values of a mapping.</summary>
+    /// <summary>
+    /// Enumerates the items of a sequence or the values of a mapping. Edits made while it runs (through the
+    /// items it returns, say) are followed: it carries on with the item after the one it returned last.
+    /// </summary>
     public struct ItemEnumerator : IEnumerator<YamlNode>
     {
         private readonly YamlNode _node;
         private readonly bool _via;
         private readonly int _step;
+        private EditEpoch? _seen;
         private int _next;
+        private int _position;
         private int _remaining;
 
         internal ItemEnumerator(YamlNode node)
         {
             _node = node;
             Current = default!;
+            _seen = null;
+            _position = 0;
             if (node is null)
             {
                 // default(ItemEnumerable): nothing to enumerate.
@@ -583,6 +775,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
                 node._doc!.Walk.ChargeRead(s, t, _remaining, 0);
             }
 
+            _seen = node._epoch;
             _next = t + 1;
             if (_step == 2 && _remaining > 0)
             {
@@ -598,14 +791,25 @@ public sealed class YamlNode : IEquatable<YamlNode>
         /// <inheritdoc />
         public bool MoveNext()
         {
-            if (_remaining <= 0)
+            if (_node is null)
             {
                 return false;
             }
 
             DocState s = _node.State();
-            Current = new YamlNode(_node._doc!, _next, _node._version, _via);
+            if (!ReferenceEquals(_seen, _node._epoch))
+            {
+                Relocate(s);
+            }
+
+            if (_remaining <= 0)
+            {
+                return false;
+            }
+
+            Current = new YamlNode(_node._doc!, _next, _node._epoch!, _via);
             _remaining -= _step;
+            _position += _step;
             if (_remaining > 0)
             {
                 int after = _next + s.Node(_next).Size;
@@ -613,6 +817,28 @@ public sealed class YamlNode : IEquatable<YamlNode>
             }
 
             return true;
+        }
+
+        // The container changed since the last step: find the next child again by how many were returned.
+        private void Relocate(DocState s)
+        {
+            int t = _node.Followed(s, out _);
+            ref readonly CstNode n = ref s.Node(t);
+            _seen = _node._epoch;
+            if (n.Kind is not (NodeKind.Mapping or NodeKind.Sequence) || _position >= n.Count)
+            {
+                _remaining = 0;
+                return;
+            }
+
+            _remaining = n.Count - _position;
+            int c = t + 1;
+            for (int i = 0; i < _position; i++)
+            {
+                c += s.Node(c).Size;
+            }
+
+            _next = _step == 2 ? c + s.Node(c).Size : c;
         }
 
         /// <inheritdoc />
@@ -643,18 +869,22 @@ public sealed class YamlNode : IEquatable<YamlNode>
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
-    /// <summary>Enumerates the entries of a mapping.</summary>
+    /// <summary>Enumerates the entries of a mapping. Edits made while it runs are followed, as for <see cref="ItemEnumerator"/>.</summary>
     public struct EntryEnumerator : IEnumerator<KeyValuePair<YamlNode, YamlNode>>
     {
         private readonly YamlNode _node;
         private readonly bool _via;
+        private EditEpoch? _seen;
         private int _next;
+        private int _position;
         private int _remaining;
 
         internal EntryEnumerator(YamlNode node)
         {
             _node = node;
             Current = default;
+            _seen = null;
+            _position = 0;
             if (node is null)
             {
                 // default(EntryEnumerable): nothing to enumerate.
@@ -673,6 +903,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
                 node._doc!.Walk.ChargeRead(s, t, _remaining, 0);
             }
 
+            _seen = node._epoch;
             _next = t + 1;
         }
 
@@ -684,19 +915,51 @@ public sealed class YamlNode : IEquatable<YamlNode>
         /// <inheritdoc />
         public bool MoveNext()
         {
-            if (_remaining <= 0)
+            if (_node is null)
             {
                 return false;
             }
 
             DocState s = _node.State();
+            if (!ReferenceEquals(_seen, _node._epoch))
+            {
+                Relocate(s);
+            }
+
+            if (_remaining <= 0)
+            {
+                return false;
+            }
+
             int value = _next + s.Node(_next).Size;
             Current = new KeyValuePair<YamlNode, YamlNode>(
-                new YamlNode(_node._doc!, _next, _node._version, _via),
-                new YamlNode(_node._doc!, value, _node._version, _via));
+                new YamlNode(_node._doc!, _next, _node._epoch!, _via),
+                new YamlNode(_node._doc!, value, _node._epoch!, _via));
             _remaining -= 2;
+            _position += 2;
             _next = value + s.Node(value).Size;
             return true;
+        }
+
+        private void Relocate(DocState s)
+        {
+            int t = _node.Followed(s, out _);
+            ref readonly CstNode n = ref s.Node(t);
+            _seen = _node._epoch;
+            if (n.Kind != NodeKind.Mapping || _position >= n.Count)
+            {
+                _remaining = 0;
+                return;
+            }
+
+            _remaining = n.Count - _position;
+            int c = t + 1;
+            for (int i = 0; i < _position; i++)
+            {
+                c += s.Node(c).Size;
+            }
+
+            _next = c;
         }
 
         /// <inheritdoc />

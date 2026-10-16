@@ -197,7 +197,7 @@ public class DocumentFixTests
     {
         var stream = new EndlessStream();
         var options = new YamlDocumentOptions { Limits = YamlLimits.Default with { MaxInputBytes = 100_000 } };
-        YamlException ex = await Assert.ThrowsAsync<YamlException>(() => YamlDocument.LoadAsync(stream, options, TestContext.Current.CancellationToken));
+        YamlException ex = await Assert.ThrowsAsync<YamlException>(() => YamlDocument.ParseAsync(stream, options, TestContext.Current.CancellationToken));
         Assert.Equal(YamlErrorCategory.Limit, ex.Category);
         Assert.True(stream.BytesRead < 200_000, $"read {stream.BytesRead} bytes");
     }

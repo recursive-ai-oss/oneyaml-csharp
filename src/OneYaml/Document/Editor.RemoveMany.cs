@@ -31,6 +31,7 @@ internal static partial class Editor
         int items = m.Count / 2;
         var index = new KeyIndex(keys);
         var cuts = new List<TextEdit>();
+        List<int>? gone = s.Trace is null ? null : [];
         int deleted = 0;
         int lastWanted = -1;
         int previousStop = 0;
@@ -72,6 +73,8 @@ internal static partial class Editor
                 }
 
                 deleted++;
+                gone?.Add(k);
+                gone?.Add(after);
                 lastWanted = Math.Max(lastWanted, wanted);
                 gapMatters = runBlock;
                 runKeep |= keepHere;
@@ -107,6 +110,7 @@ internal static partial class Editor
         }
 
         next = DocState.Rebuild(s, cuts.ToArray(), ReadOnlySpan<byte>.Empty, limits);
+        s.Trace?.Add(new NodeEdit(NodeEditKind.RemoveRanges, 0, 0, 0, gone!.ToArray()));
         return true;
     }
 

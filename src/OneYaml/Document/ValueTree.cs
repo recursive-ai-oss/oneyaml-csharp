@@ -110,13 +110,15 @@ internal sealed class ValueTree
     /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, a dictionary or an enumerable of these.</param>
     /// <param name="maxDepth">How deeply the value may nest.</param>
     /// <returns>The tree.</returns>
+    /// <param name="limits">The limits for values that are written with the serializer and read back.</param>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     /// <exception cref="YamlException">The value nests deeper than the limit.</exception>
-    public static ValueTree FromObject(object? value, int maxDepth)
+    public static ValueTree FromObject(object? value, int maxDepth, YamlLimits? limits = null)
     {
         var tree = new ValueTree();
+        limits ??= YamlLimits.Default;
         var stack = new List<Frame>();
-        tree.AddValue(value, stack, maxDepth);
+        tree.AddValue(value, stack, maxDepth, limits);
         while (stack.Count > 0)
         {
             Frame f = stack[^1];
@@ -131,7 +133,7 @@ internal sealed class ValueTree
 
                 tree.AddKey(f.Entries.Key);
                 tree._nodes[f.Node].Count += 2;
-                tree.AddValue(f.Entries.Value, stack, maxDepth);
+                tree.AddValue(f.Entries.Value, stack, maxDepth, limits);
             }
             else
             {
@@ -143,7 +145,7 @@ internal sealed class ValueTree
                 }
 
                 tree._nodes[f.Node].Count++;
-                tree.AddValue(f.Items.Current, stack, maxDepth);
+                tree.AddValue(f.Items.Current, stack, maxDepth, limits);
             }
         }
 
@@ -171,7 +173,7 @@ internal sealed class ValueTree
         Add(in s);
     }
 
-    private void AddValue(object? value, List<Frame> stack, int maxDepth)
+    private void AddValue(object? value, List<Frame> stack, int maxDepth, YamlLimits limits)
     {
         if (value is YamlNode yn)
         {
@@ -191,9 +193,19 @@ internal sealed class ValueTree
             return;
         }
 
+        if (value is not null && !IsPlainScalar(value))
+        {
+            // Any other type is written the way the serializer writes it.
+            AppendTree(TypedValues.OfObject(value, limits));
+            return;
+        }
+
         VNode s = ScalarOf(value);
         Add(in s);
     }
+
+    private static bool IsPlainScalar(object value) => value is string or char or bool or sbyte or byte or short or ushort or int or uint or long or ulong or nint or nuint
+        or BigInteger or double or float or Half or decimal or Enum or Guid;
 
     private void Push(List<Frame> stack, int maxDepth, Frame frame, VKind kind)
     {

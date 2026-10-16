@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Nodes;
 using OneYaml.Documents;
 
@@ -116,7 +117,7 @@ public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>
 
     /// <summary>Adds an <c>add</c> operation.</summary>
     /// <param name="path">An RFC 6901 pointer. For a mapping the member is added or replaced; for a sequence, the value is inserted before the item at the index, and <c>-</c> appends.</param>
-    /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, or a dictionary or sequence of these.</param>
+    /// <param name="value">null, a string, a boolean, a number, a <see cref="YamlNode"/>, a dictionary or sequence of these, or a value of any other type the serializer can write.</param>
     /// <returns>This patch.</returns>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     public YamlPatch Add(string path, object? value) => Append(PatchKind.Add, path, null, value, hasValue: true);
@@ -154,6 +155,73 @@ public sealed class YamlPatch : IReadOnlyList<YamlPatchOperation>
     /// <returns>This patch.</returns>
     /// <exception cref="ArgumentException">The value contains a type that has no YAML form.</exception>
     public YamlPatch Test(string path, object? value) => Append(PatchKind.Test, path, null, value, hasValue: true);
+
+    /// <summary>Adds an <c>add</c> operation with a value of any type <paramref name="typeInfo"/> describes, written as <see cref="YamlSerializer"/> writes it.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer, as for <see cref="Add(string, object?)"/>.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    public YamlPatch Add<T>(string path, T value, YamlTypeInfo<T> typeInfo) => AppendTyped(PatchKind.Add, path, TypedValues.Of(value, typeInfo, YamlLimits.Default));
+
+    /// <summary>Adds an <c>add</c> operation with a value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer, as for <see cref="Add(string, object?)"/>.</param>
+    /// <param name="value">The value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public YamlPatch Add<T>(string path, T value, YamlSerializerOptions? options) => AppendTyped(PatchKind.Add, path, TypedValues.Of(value, options, YamlLimits.Default));
+
+    /// <summary>Adds a <c>replace</c> operation with a value of any type <paramref name="typeInfo"/> describes.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer to a value that must exist.</param>
+    /// <param name="value">The new value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    public YamlPatch Replace<T>(string path, T value, YamlTypeInfo<T> typeInfo) => AppendTyped(PatchKind.Replace, path, TypedValues.Of(value, typeInfo, YamlLimits.Default));
+
+    /// <summary>Adds a <c>replace</c> operation with a value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer to a value that must exist.</param>
+    /// <param name="value">The new value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public YamlPatch Replace<T>(string path, T value, YamlSerializerOptions? options) => AppendTyped(PatchKind.Replace, path, TypedValues.Of(value, options, YamlLimits.Default));
+
+    /// <summary>Adds a <c>test</c> operation with an expected value of any type <paramref name="typeInfo"/> describes.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The expected value.</param>
+    /// <param name="typeInfo">Metadata for <typeparamref name="T"/>, usually from a generated <see cref="YamlSerializerContext"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    public YamlPatch Test<T>(string path, T value, YamlTypeInfo<T> typeInfo) => AppendTyped(PatchKind.Test, path, TypedValues.Of(value, typeInfo, YamlLimits.Default));
+
+    /// <summary>Adds a <c>test</c> operation with an expected value written by the reflection-based serializer.</summary>
+    /// <typeparam name="T">The type of the value.</typeparam>
+    /// <param name="path">An RFC 6901 pointer.</param>
+    /// <param name="value">The expected value.</param>
+    /// <param name="options">Options for writing the value; <see langword="null"/> means <see cref="YamlSerializerOptions.Default"/>.</param>
+    /// <returns>This patch.</returns>
+    /// <exception cref="ArgumentException">The value has no YAML form.</exception>
+    [RequiresUnreferencedCode("Reflection-based serialization reads members that trimming can remove. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    [RequiresDynamicCode("Reflection-based serialization makes generic types at run time. Pass a YamlTypeInfo from a YamlSerializerContext instead.")]
+    public YamlPatch Test<T>(string path, T value, YamlSerializerOptions? options) => AppendTyped(PatchKind.Test, path, TypedValues.Of(value, options, YamlLimits.Default));
+
+    private YamlPatch AppendTyped(PatchKind kind, string path, ValueTree tree)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        _steps.Add(new PatchStep(kind, path, null, tree));
+        return this;
+    }
 
     private YamlPatch Append(PatchKind kind, string path, string? from, object? value, bool hasValue)
     {

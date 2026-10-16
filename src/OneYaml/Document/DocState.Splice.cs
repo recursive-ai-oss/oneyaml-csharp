@@ -791,6 +791,7 @@ internal sealed partial class DocState
         _buf.AsSpan(0, Length).CopyTo(buf);
         var c = new DocState(buf, Length, Encoding, HasByteOrderMark, AllowDuplicateKeys)
         {
+            _maxIntegerDigits = _maxIntegerDigits,
             NodeCount = NodeCount,
             DocCount = DocCount,
             NoRealDocument = NoRealDocument,

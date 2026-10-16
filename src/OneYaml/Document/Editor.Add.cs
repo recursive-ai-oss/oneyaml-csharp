@@ -140,6 +140,25 @@ internal static partial class Editor
     /// <returns>The next state.</returns>
     public static DocState AddMember(DocState s, YamlLimits limits, int map, byte[] key, ValueTree v)
     {
+        EditTrace? trace = s.Trace;
+        if (trace is null)
+        {
+            return AddMemberCore(s, limits, map, key, v);
+        }
+
+        int oldSize = s.Node(map).Size;
+        int before = trace.Count;
+        DocState next = AddMemberCore(s, limits, map, key, v);
+        if (trace.Count == before)
+        {
+            trace.Add(new NodeEdit(NodeEditKind.Insert, map + oldSize, 0, next.Node(map).Size - oldSize));
+        }
+
+        return next;
+    }
+
+    private static DocState AddMemberCore(DocState s, YamlLimits limits, int map, byte[] key, ValueTree v)
+    {
         ref readonly CstNode m = ref s.Node(map);
         if ((m.Flags & NodeFlags.Pair) != 0)
         {
@@ -171,6 +190,26 @@ internal static partial class Editor
     /// <param name="v">The item.</param>
     /// <returns>The next state.</returns>
     public static DocState InsertItem(DocState s, YamlLimits limits, int seq, int index, ValueTree v)
+    {
+        EditTrace? trace = s.Trace;
+        if (trace is null)
+        {
+            return InsertItemCore(s, limits, seq, index, v);
+        }
+
+        int oldSize = s.Node(seq).Size;
+        int at = index >= 0 && index < s.Node(seq).Count ? s.ChildAt(seq, index) : seq + oldSize;
+        int before = trace.Count;
+        DocState next = InsertItemCore(s, limits, seq, index, v);
+        if (trace.Count == before)
+        {
+            trace.Add(new NodeEdit(NodeEditKind.Insert, at, 0, next.Node(seq).Size - oldSize));
+        }
+
+        return next;
+    }
+
+    private static DocState InsertItemCore(DocState s, YamlLimits limits, int seq, int index, ValueTree v)
     {
         ref readonly CstNode q = ref s.Node(seq);
         int count = q.Count;
@@ -383,6 +422,27 @@ internal static partial class Editor
     /// <param name="node">The value or item to remove.</param>
     /// <returns>The next state.</returns>
     public static DocState Remove(DocState s, YamlLimits limits, int node)
+    {
+        EditTrace? trace = s.Trace;
+        if (trace is null)
+        {
+            return RemoveCore(s, limits, node);
+        }
+
+        int parent = s.Node(node).Parent;
+        int first = parent >= 0 && s.Node(parent).Kind == NodeKind.Mapping ? s.PrevSibling(node) : node;
+        int after = s.After(node);
+        int before = trace.Count;
+        DocState next = RemoveCore(s, limits, node);
+        if (trace.Count == before)
+        {
+            trace.Add(new NodeEdit(NodeEditKind.Remove, first, after - first, 0));
+        }
+
+        return next;
+    }
+
+    private static DocState RemoveCore(DocState s, YamlLimits limits, int node)
     {
         int parent = s.Node(node).Parent;
         if (parent < 0)

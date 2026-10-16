@@ -401,7 +401,8 @@ public class PatchPropertyTests
                     {
                         // A copy or move writes out what an alias stands for. A value that expands past the alias
                         // budget is refused by design, and the nested-alias documents in the corpus have such values.
-                        bool expands = ops.Any(o => o?["op"]?.GetValue<string>() is "copy" or "move");
+                        // Only the operation that failed counts: a copy or a move somewhere else in the patch does not excuse it.
+                        bool expands = ex.OperationIndex is int failed && failed < ops.Count && ops[failed]?["op"]?.GetValue<string>() is "copy" or "move";
                         Assert.True(
                             ex.Category is YamlErrorCategory.RefusedAlias or YamlErrorCategory.PatchPath or YamlErrorCategory.RefusedAmbiguous or YamlErrorCategory.PatchInvalid
                             || (expands && ex.Category == YamlErrorCategory.Limit),

@@ -134,6 +134,20 @@ internal static partial class Editor
     /// <returns>The next state, or <paramref name="s"/> itself when nothing needs to change.</returns>
     public static DocState Replace(DocState s, YamlLimits limits, int node, ValueTree v)
     {
+        EditTrace? trace = s.Trace;
+        if (trace is null)
+        {
+            return ReplaceCore(s, limits, node, v);
+        }
+
+        int oldSize = s.Node(node).Size;
+        DocState next = ReplaceCore(s, limits, node, v);
+        trace.Add(new NodeEdit(NodeEditKind.Replace, node, oldSize, next.Node(node).Size));
+        return next;
+    }
+
+    private static DocState ReplaceCore(DocState s, YamlLimits limits, int node, ValueTree v)
+    {
         ref readonly CstNode n = ref s.Node(node);
         if ((n.Flags & NodeFlags.IsKey) != 0)
         {
