@@ -148,19 +148,25 @@ internal static partial class Editor
     {
         hStart = hEnd = 0;
         int n = node;
-        while (s.Node(n).Kind != NodeKind.Scalar)
+        while (true)
         {
-            if (s.Node(n).Count == 0)
+            while (s.Node(n).Kind != NodeKind.Scalar)
             {
-                return false;
+                if (s.Node(n).Count == 0)
+                {
+                    return false;
+                }
+
+                n = LastChild(s, n);
             }
 
-            n = LastChild(s, n);
-        }
+            if ((s.Node(n).Flags & NodeFlags.Bare) == 0)
+            {
+                break;
+            }
 
-        if ((s.Node(n).Flags & NodeFlags.Bare) != 0)
-        {
-            // An explicit key with no value at all: the key's text is what ends the stream.
+            // An explicit key with no value at all: the key's text is what ends the stream, and a key that is
+            // itself a collection ends in its own last value.
             n = s.PrevSibling(n);
         }
 

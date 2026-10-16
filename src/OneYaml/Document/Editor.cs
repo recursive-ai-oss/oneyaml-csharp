@@ -255,6 +255,10 @@ internal static partial class Editor
                 {
                     regionEnd = BlankLinesEnd(src, regionEnd);
                 }
+                else
+                {
+                    regionEnd = PastDeepBlankLines(src, regionEnd, contentIndent);
+                }
             }
             else
             {
@@ -285,6 +289,15 @@ internal static partial class Editor
                 // The old value began a line at or left of its key's column (a block scalar header may). Text there
                 // would be read as the next entry, so the new value is indented.
                 edit.WriteSpaces(ownerCol + lay.Step - s.Column(regionStart));
+            }
+
+            if (inFlow && regionStart > 0 && src[regionStart - 1] == (byte)':' && (n.Flags & (NodeFlags.Bare | NodeFlags.Empty)) == 0
+                && (!propsUntouched || body.Count == 0 || body.WrittenSpan[0] is not ((byte)'[' or (byte)'{'))
+                && s.PrevSibling(node) is int key && key >= 0 && s.Node(key).Kind == NodeKind.Scalar && (ScalarStyle)s.Node(key).Style == ScalarStyle.Plain)
+            {
+                // A flow collection may follow the colon directly, and so may any value after a quoted key; but a
+                // value glued to a plain key would join the key's text: in {a:5} the key is "a:5".
+                edit.Write((byte)' ');
             }
 
             if (!propsUntouched)
@@ -822,6 +835,39 @@ internal static partial class Editor
         }
 
         regionEnd = tailEnd;
+    }
+
+    // The end of the blank lines after an offset up to the last one with more spaces than the indent. The reader leaves
+    // such lines out of a block scalar that has no text of its own, but behind a new body that is indented less they
+    // would become part of its value.
+    private static int PastDeepBlankLines(ReadOnlySpan<byte> src, int pos, int indent)
+    {
+        int end = BlankLinesEnd(src, pos);
+        int result = pos;
+        int p = pos;
+        while (p < end)
+        {
+            int q = p;
+            while (q < end && src[q] == (byte)' ')
+            {
+                q++;
+            }
+
+            int next = q;
+            if (next < end && DocState.IsBreak(src[next]))
+            {
+                next += src[next] == (byte)'\r' && next + 1 < end && src[next + 1] == (byte)'\n' ? 2 : 1;
+            }
+
+            if (q - p > indent)
+            {
+                result = next;
+            }
+
+            p = next > p ? next : end;
+        }
+
+        return result;
     }
 
     /// <summary>The end of the blank lines (only spaces) that start at an offset.</summary>

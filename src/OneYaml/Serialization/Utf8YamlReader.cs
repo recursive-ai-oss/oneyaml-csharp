@@ -255,7 +255,13 @@ internal sealed class AnchorBook
             ref AnchorEntry e = ref Entries[slot - 1];
             if (e.Hash == mine.Hash && src.Slice(e.NameStart, e.NameLength).SequenceEqual(name))
             {
-                Buckets[i] = entry + 1;
+                // The definition written last in the text wins, even when an enclosing node with the same
+                // name finishes after it.
+                if (mine.NameStart > e.NameStart)
+                {
+                    Buckets[i] = entry + 1;
+                }
+
                 return;
             }
 
