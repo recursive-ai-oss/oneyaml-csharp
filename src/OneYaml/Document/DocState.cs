@@ -698,6 +698,19 @@ internal sealed partial class DocState : IDisposable
 
         if (isKey)
         {
+            // The reader reports the key where the next token starts. Right after the "?" is where the
+            // key is, so text added for it cannot land in the indentation of the line below.
+            int q = n.Start;
+            while (parent >= 0 && !_nodes[parent].IsFlow && q > 0 && src[q - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r')
+            {
+                q--;
+            }
+
+            if (q > 0 && src[q - 1] == (byte)'?' && (q == 1 || src[q - 2] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r' or (byte)'-'))
+            {
+                n.Start = n.End = q;
+            }
+
             return;
         }
 
@@ -716,7 +729,7 @@ internal sealed partial class DocState : IDisposable
         if (p.Kind == NodeKind.Mapping && prev >= 0)
         {
             int at = SkipTrivia(src, _nodes[prev].End);
-            if (at < src.Length && src[at] == (byte)':')
+            if (at < src.Length && src[at] == (byte)':' && IsValueIndicator(prev, at))
             {
                 n.Start = n.End = at + 1;
             }

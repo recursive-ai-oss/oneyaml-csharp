@@ -269,6 +269,13 @@ internal static partial class Editor
         if (inline)
         {
             regionStart = propsUntouched ? n.Start : s.PropStart(node);
+            if (ownerCol >= 0 && !inFlow && !valueEndsWithBreak && s.StartsLine(regionStart) && s.Column(regionStart) <= ownerCol)
+            {
+                // The old value began a line at or left of its key's column (a block scalar header may). Text there
+                // would be read as the next entry, so the new value is indented.
+                edit.WriteSpaces(ownerCol + lay.Step - s.Column(regionStart));
+            }
+
             if (!propsUntouched)
             {
                 WriteProps(s, node, propsUntouched, anchor, edit);
@@ -373,6 +380,7 @@ internal static partial class Editor
                     // The collection starts a line of its own; a block collection cannot share the line of a "---" marker.
                     // lineEnd is where the marker's line ends, once a tag that no longer fits is gone.
                     int lineEnd = regionStart;
+                    bool wroteComment = false;
                     if ((n.Flags & NodeFlags.Empty) != 0 || hasTag)
                     {
                         // A comment on the marker's line stays there.
@@ -388,6 +396,7 @@ internal static partial class Editor
                             // The tag goes with the text around it, so the comment is written again where the tag was.
                             edit.Write((byte)' ');
                             edit.Write(src.Slice(tagEnd, lineEnd - tagEnd).Trim(" \t"u8));
+                            wroteComment = true;
                         }
                     }
 
@@ -396,7 +405,8 @@ internal static partial class Editor
                         regionStart--;
                     }
 
-                    if (regionStart > 0 && !DocState.IsBreak(src[regionStart - 1]))
+                    // A comment written again here must end its line, even when the text starts with it.
+                    if (wroteComment || (regionStart > 0 && !DocState.IsBreak(src[regionStart - 1])))
                     {
                         edit.Write((byte)'\n');
 
@@ -607,9 +617,10 @@ internal static partial class Editor
         WriteProps(s, node, propsUntouched, anchor, props);
         bool newBlockNonEmpty = !v.IsScalar && v[0].Count > 0;
 
-        // A sequence may sit as far left as its key; anything else must be indented under it.
+        // A block sequence may sit as far left as its key; anything else (an empty one, "[]", included) must be
+        // indented under it.
         int firstCol = (propsOnValueLine ? propsStart : n.Start) - lineStart;
-        int col = v[0].Kind == VKind.Sequence ? firstCol : Math.Max(firstCol, ownerCol + lay.Step);
+        int col = v[0].Kind == VKind.Sequence && newBlockNonEmpty ? firstCol : Math.Max(firstCol, ownerCol + lay.Step);
 
         using var edit = new ByteBuffer();
         if (propsOnValueLine && newBlockNonEmpty && props.Count > 0)
@@ -719,7 +730,7 @@ internal static partial class Editor
             ValueWriter.WriteBlock(lines, v, 0, col + 2, true, lay);
         }
 
-        return AppendLines(s, limits, s.PastLine(s.Node(key).End), lines, lay.Nl);
+        return AppendLines(s, limits, s.PastLine(s.Node(key).End), lines, lay.Nl, key);
     }
 
     // Properties to write in front of the value when the old ones cannot be left in place.

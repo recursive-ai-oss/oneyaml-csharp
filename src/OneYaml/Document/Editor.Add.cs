@@ -113,7 +113,9 @@ internal static partial class Editor
     }
 
     // Text for a new last line: if the text ends without a line break, the new line starts with one instead.
-    private static DocState AppendLines(DocState s, YamlLimits limits, int pos, ByteBuffer lines, string nl)
+    // When the text ends in a block scalar whose last line had no break, the new break would become part of its
+    // value, so the scalar's header is switched to strip to keep the value as it was.
+    private static DocState AppendLines(DocState s, YamlLimits limits, int pos, ByteBuffer lines, string nl, int container = -1)
     {
         ReadOnlySpan<byte> src = s.Text;
         bool noBreak = pos == s.Length && (pos == 0 || !DocState.IsBreak(src[pos - 1]));
@@ -128,7 +130,70 @@ internal static partial class Editor
             text.Write(lines.WrittenSpan);
         }
 
+        if (noBreak && pos > 0 && container >= 0 && TrailingBlockHeader(s, container, out int hStart, out int hEnd))
+        {
+            using var final = new ByteBuffer(text.Count + 8);
+            final.Write((byte)'-');
+            ValueWriter.WriteWithBreaks(text.WrittenSpan, nl, final);
+            Span<TextEdit> two = [new TextEdit(hStart, hEnd, 0, 1), new TextEdit(pos, pos, 1, final.Count - 1)];
+            return DocState.Rebuild(s, two, final.WrittenSpan, limits);
+        }
+
         return InsertAt(s, limits, pos, text, nl);
+    }
+
+    // The last value under a node, when it is a literal or folded scalar that does not strip and whose text
+    // runs to the end of the stream without a break: where its chomping indicator is (hStart == hEnd) or goes.
+    private static bool TrailingBlockHeader(DocState s, int node, out int hStart, out int hEnd)
+    {
+        hStart = hEnd = 0;
+        int n = node;
+        while (s.Node(n).Kind != NodeKind.Scalar)
+        {
+            if (s.Node(n).Count == 0)
+            {
+                return false;
+            }
+
+            n = LastChild(s, n);
+        }
+
+        ref readonly CstNode sc = ref s.Node(n);
+        if (!IsBlockScalar(sc) || (Chomping)sc.Chomp == Chomping.Strip)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> src = s.Text;
+        int lineStart = src.LastIndexOfAny((byte)'\n', (byte)'\r') + 1;
+        if (lineStart <= sc.Start || src.Slice(lineStart).IndexOfAnyExcept((byte)' ') < 0)
+        {
+            // The header line is the last line (empty body), or the last line is only blanks.
+            return false;
+        }
+
+        int i = sc.Start + 1;
+        hStart = -1;
+        while (i < src.Length && i < sc.Start + 4 && src[i] is (byte)'+' or (byte)'-' or (>= (byte)'1' and <= (byte)'9'))
+        {
+            if (src[i] == (byte)'+')
+            {
+                hStart = i;
+            }
+
+            i++;
+        }
+
+        if (hStart >= 0)
+        {
+            hEnd = hStart + 1;
+        }
+        else
+        {
+            hStart = hEnd = i;
+        }
+
+        return true;
     }
 
     /// <summary>Adds a member at the end of a mapping.</summary>
@@ -179,7 +244,7 @@ internal static partial class Editor
         using var lines = new ByteBuffer();
         int col = s.Column(s.EntryStart(map + 1));
         ValueWriter.WriteBlock(lines, tree, 0, col, false, lay, keyPref, valPref);
-        return AppendLines(s, limits, s.PastLine(m.End), lines, lay.Nl);
+        return AppendLines(s, limits, s.PastLine(m.End), lines, lay.Nl, map);
     }
 
     /// <summary>Inserts an item into a sequence.</summary>
@@ -235,7 +300,7 @@ internal static partial class Editor
         {
             ScalarWriteStyle pref = v.IsScalar ? SiblingStyle(s, LastChild(s, seq)) : ScalarWriteStyle.Plain;
             ValueWriter.WriteBlock(lines, tree, 0, s.Column(q.Start), false, lay, ScalarWriteStyle.Plain, pref);
-            return AppendLines(s, limits, s.PastLine(q.End), lines, lay.Nl);
+            return AppendLines(s, limits, s.PastLine(q.End), lines, lay.Nl, seq);
         }
 
         int item = s.ChildAt(seq, index);
@@ -544,7 +609,8 @@ internal static partial class Editor
                 stop = CommentLinesEnd(src, stop, s.Node(first - 1).Aux);
             }
 
-            if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0)
+            if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0
+                && !(first > 0 && IsBlockScalar(s.Node(first - 1)) && (Chomping)s.Node(first - 1).Chomp != Chomping.Strip))
             {
                 // The text had no final line break; the new last line should not gain one.
                 start -= start >= 2 && src[start - 1] == (byte)'\n' && src[start - 2] == (byte)'\r' ? 2 : 1;
