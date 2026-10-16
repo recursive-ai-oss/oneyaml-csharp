@@ -162,7 +162,7 @@ record Container(string Name, PullPolicy Pull);
 
 ## Converters
 
-Derive from `YamlConverter<T>` to read and write a type yourself, as you would derive from `JsonConverter<T>`. `Read` gets a `Utf8YamlReader` on the first token of the value and must leave it on the last one; `Write` writes exactly one value to a `Utf8YamlEmitter`. Throw `reader.CreateException(message)` to report bad input: the exception carries the position and path of the value.
+Derive from `YamlConverter<T>` to read and write a type yourself, as you would derive from `JsonConverter<T>`. `Read` gets a `Utf8YamlReader` on the first token of the value and must leave it on the last one; `Write` writes exactly one value to a `Utf8YamlEmitter`. Throw `reader.CreateException(message)` to report bad input: the exception carries the position and path of the value. A `new YamlException(message)` thrown from a converter is completed the same way and reported as `YamlErrorCategory.Binding`.
 
 <!-- sample: SerializerConverter -->
 ```csharp
@@ -366,7 +366,7 @@ catch (YamlException e)
 }
 ```
 
-`Category` is the stable part to test in code: `Syntax`, `Encoding`, `Limit`, `DuplicateKey`, `UnresolvedTag` and `Binding` come from reading, the others from [editing](editing.md) and [patches](patches.md). `Line` and `Column` are 1-based and count characters; `Offset` is the byte offset in the UTF-8 text. `Path` names the value that failed to bind, in RFC 6901 pointer form. The text of a message is written for people and may change between releases.
+`Category` is the stable part to test in code: `Syntax`, `Encoding`, `Limit`, `DuplicateKey`, `UnresolvedTag` and `Binding` come from reading, the others from [editing](editing.md) and [patches](patches.md). `None` is what the public `YamlException` constructors give; the serializer reports such an exception from a converter as `Binding`. `Line` and `Column` are 1-based and count characters; `Offset` is the byte offset in the UTF-8 text. `Path` names the value that failed to bind, in RFC 6901 pointer form. The text of a message is written for people and may change between releases.
 
 ## Source generation and native AOT
 

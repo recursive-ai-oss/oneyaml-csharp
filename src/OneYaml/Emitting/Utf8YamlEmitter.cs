@@ -85,6 +85,7 @@ public sealed partial class Utf8YamlEmitter
         _depth = 0;
         ClearProperties();
         _rootDone = false;
+        WritingKey = false;
         _embedding = Embedding.None;
         _embeddedParentIndent = 0;
     }
@@ -147,7 +148,7 @@ public sealed partial class Utf8YamlEmitter
     {
         if (_depth != 0)
         {
-            throw Misuse("A collection was started and not ended.");
+            throw State("A collection was started and not ended.");
         }
 
         if (_propsLength != 0)
@@ -157,11 +158,20 @@ public sealed partial class Utf8YamlEmitter
 
         if (!_rootDone)
         {
-            throw Misuse("No value was written.");
+            throw State("No value was written.");
         }
     }
 
+    // A value the data cannot be written as: the serializer reports it as a YamlException.
     internal static YamlException Misuse(string message) => new(message, YamlErrorCategory.Binding, 0, 0, 0);
+
+    // Calls in the wrong order are the caller's bug, so they throw what Utf8JsonWriter throws.
+    internal static InvalidOperationException State(string message) => new(message);
+
+    // While the serializer writes a dictionary key, a key that is no scalar comes from the data, not from the order of calls.
+    internal bool WritingKey;
+
+    internal Exception KeyState(string message) => WritingKey ? Misuse(message) : State(message);
 
     private Span<byte> GetSpan(int size) => _output.GetSpan(size);
 
@@ -170,19 +180,21 @@ public sealed partial class Utf8YamlEmitter
     // ---- collections ----
 
     /// <summary>Starts a mapping. Every entry is a <see cref="WritePropertyName(string)"/> call followed by one value.</summary>
-    /// <exception cref="YamlException">A value is not allowed here, or the nesting is deeper than <see cref="YamlLimits.MaxDepth"/>.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
+    /// <exception cref="YamlException">The nesting is deeper than <see cref="YamlLimits.MaxDepth"/>.</exception>
     public void WriteStartMapping() => Begin(isMapping: true, reference: null);
 
     /// <summary>Ends the mapping started last.</summary>
-    /// <exception cref="YamlException">No mapping is open, or a key has no value.</exception>
+    /// <exception cref="InvalidOperationException">No mapping is open, or a key has no value.</exception>
     public void WriteEndMapping() => End(isMapping: true);
 
     /// <summary>Starts a sequence. Every item is one value.</summary>
-    /// <exception cref="YamlException">A value is not allowed here, or the nesting is deeper than <see cref="YamlLimits.MaxDepth"/>.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
+    /// <exception cref="YamlException">The nesting is deeper than <see cref="YamlLimits.MaxDepth"/>.</exception>
     public void WriteStartSequence() => Begin(isMapping: false, reference: null);
 
     /// <summary>Ends the sequence started last.</summary>
-    /// <exception cref="YamlException">No sequence is open.</exception>
+    /// <exception cref="InvalidOperationException">No sequence is open.</exception>
     public void WriteEndSequence() => End(isMapping: false);
 
     // The reference is the object being written; the emitter uses it to tell a value that contains itself from deep nesting.
@@ -201,7 +213,7 @@ public sealed partial class Utf8YamlEmitter
         {
             if (_rootDone)
             {
-                throw Misuse("A value was already written; one call writes one document.");
+                throw State("A value was already written; one call writes one document.");
             }
 
             switch (_embedding)
@@ -227,7 +239,7 @@ public sealed partial class Utf8YamlEmitter
             {
                 if (!parent.KeyPending)
                 {
-                    throw Misuse("A mapping key must be a scalar; write a property name first.");
+                    throw KeyState("A mapping key must be a scalar; write a property name first.");
                 }
 
                 parent.KeyPending = false;
@@ -293,13 +305,13 @@ public sealed partial class Utf8YamlEmitter
 
         if (_depth == 0 || _frames[_depth - 1].IsMapping != isMapping)
         {
-            throw Misuse(isMapping ? "There is no open mapping to end." : "There is no open sequence to end.");
+            throw State(isMapping ? "There is no open mapping to end." : "There is no open sequence to end.");
         }
 
         ref Frame f = ref _frames[_depth - 1];
         if (f.KeyPending)
         {
-            throw Misuse("A mapping key was written without a value.");
+            throw State("A mapping key was written without a value.");
         }
 
         if (f.Count == 0)
@@ -437,7 +449,7 @@ public sealed partial class Utf8YamlEmitter
         {
             if (_rootDone)
             {
-                throw Misuse("A value was already written; one call writes one document.");
+                throw State("A value was already written; one call writes one document.");
             }
 
             parentIndent = _embeddedParentIndent;

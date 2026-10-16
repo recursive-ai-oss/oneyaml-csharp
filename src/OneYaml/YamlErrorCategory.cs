@@ -3,8 +3,11 @@ namespace OneYaml;
 /// <summary>The kind of problem a <see cref="YamlException"/> reports.</summary>
 public enum YamlErrorCategory
 {
+    /// <summary>No category was given. The serializer reports an exception that a converter throws this way as <see cref="Binding"/>.</summary>
+    None = 0,
+
     /// <summary>The text is not valid YAML.</summary>
-    Syntax = 0,
+    Syntax,
 
     /// <summary>The input bytes or characters are not valid in their encoding.</summary>
     Encoding,

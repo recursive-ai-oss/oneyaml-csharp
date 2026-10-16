@@ -23,7 +23,8 @@ public sealed partial class Utf8YamlEmitter
     /// <summary>Writes the key of a mapping entry. The value follows as the next call.</summary>
     /// <param name="name">The key.</param>
     /// <exception cref="ArgumentNullException"><paramref name="name"/> is <see langword="null"/>.</exception>
-    /// <exception cref="YamlException">No mapping is open, the previous key has no value yet, or the text has an unpaired surrogate.</exception>
+    /// <exception cref="InvalidOperationException">No mapping is open, or the previous key has no value yet.</exception>
+    /// <exception cref="YamlException">The text has an unpaired surrogate.</exception>
     public void WritePropertyName(string name)
     {
         ArgumentNullException.ThrowIfNull(name);
@@ -32,7 +33,8 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes the key of a mapping entry. The value follows as the next call.</summary>
     /// <param name="name">The key.</param>
-    /// <exception cref="YamlException">No mapping is open, the previous key has no value yet, or the text has an unpaired surrogate.</exception>
+    /// <exception cref="InvalidOperationException">No mapping is open, or the previous key has no value yet.</exception>
+    /// <exception cref="YamlException">The text has an unpaired surrogate.</exception>
     public void WritePropertyName(ReadOnlySpan<char> name)
     {
         if (ScalarText.IsSimplePlain(name, out bool spaced) && !spaced)
@@ -57,7 +59,8 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes the key of a mapping entry from UTF-8 bytes. The value follows as the next call.</summary>
     /// <param name="utf8Name">The key, valid UTF-8.</param>
-    /// <exception cref="YamlException">No mapping is open, the previous key has no value yet, or the bytes are not valid UTF-8.</exception>
+    /// <exception cref="InvalidOperationException">No mapping is open, or the previous key has no value yet.</exception>
+    /// <exception cref="YamlException">The bytes are not valid UTF-8.</exception>
     public void WritePropertyName(ReadOnlySpan<byte> utf8Name)
     {
         if (!Utf8.IsValid(utf8Name))
@@ -213,7 +216,7 @@ public sealed partial class Utf8YamlEmitter
 
         if (_depth == 0 || !_frames[_depth - 1].IsMapping || _frames[_depth - 1].KeyPending)
         {
-            throw Misuse("A property name is only allowed inside a mapping, before the value of the previous one.");
+            throw State("A property name is only allowed inside a mapping, before the value of the previous one.");
         }
 
         return ref _frames[_depth - 1];
@@ -265,7 +268,8 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes a string value, or the key when a mapping expects one. <see langword="null"/> is written as <c>null</c>.</summary>
     /// <param name="value">The string.</param>
-    /// <exception cref="YamlException">A value is not allowed here, or the string has an unpaired surrogate.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
+    /// <exception cref="YamlException">The string has an unpaired surrogate.</exception>
     public void WriteStringValue(string? value)
     {
         if (value is null)
@@ -279,7 +283,8 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes a string value, or the key when a mapping expects one.</summary>
     /// <param name="value">The characters.</param>
-    /// <exception cref="YamlException">A value is not allowed here, or the text has an unpaired surrogate.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
+    /// <exception cref="YamlException">The text has an unpaired surrogate.</exception>
     public void WriteStringValue(ReadOnlySpan<char> value)
     {
         if (ScalarText.IsSimplePlain(value, out bool spaced) && TryWriteSimple(value, spaced))
@@ -306,7 +311,7 @@ public sealed partial class Utf8YamlEmitter
     /// cannot be text, so they are written as <c>!!binary</c> data (not allowed as a key).
     /// </summary>
     /// <param name="utf8Value">The bytes.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteStringValue(ReadOnlySpan<byte> utf8Value)
     {
         if (Utf8.IsValid(utf8Value))
@@ -447,12 +452,12 @@ public sealed partial class Utf8YamlEmitter
     // ---- values that are never quoted ----
 
     /// <summary>Writes <c>null</c>.</summary>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNullValue() => WriteLiteral("null"u8);
 
     /// <summary>Writes <c>true</c> or <c>false</c>.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteBooleanValue(bool value) => WriteLiteral(value ? "true"u8 : "false"u8);
 
     // A value that is a fixed text, in one buffer request with its lead and line break.
@@ -476,12 +481,12 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes an integer.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(int value) => WriteNumberValue((long)value);
 
     /// <summary>Writes an integer.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(long value)
     {
         Place place = BeginScalarLead(out _, out Lead lead);
@@ -503,7 +508,7 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes an unsigned integer.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(ulong value)
     {
         Utf8YamlWriter w = ValueWriter(out Place place);
@@ -513,7 +518,7 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes an integer of any size, exactly.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(BigInteger value)
     {
         Utf8YamlWriter w = ValueWriter(out Place place);
@@ -526,7 +531,7 @@ public sealed partial class Utf8YamlEmitter
     /// exponent so it is never an integer. Not-a-number and the infinities are written as <c>.nan</c>, <c>.inf</c> and <c>-.inf</c>.
     /// </summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(double value)
     {
         Place place = BeginScalarLead(out _, out Lead lead);
@@ -547,7 +552,7 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes a single-precision number the way <see cref="WriteNumberValue(double)"/> writes a double.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(float value)
     {
         Utf8YamlWriter w = ValueWriter(out Place place);
@@ -557,7 +562,7 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes a decimal number, exactly.</summary>
     /// <param name="value">The value.</param>
-    /// <exception cref="YamlException">A value is not allowed here.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here.</exception>
     public void WriteNumberValue(decimal value)
     {
         Span<byte> text = stackalloc byte[48];
@@ -604,19 +609,19 @@ public sealed partial class Utf8YamlEmitter
 
     /// <summary>Writes binary data as Base64 with the <c>!!binary</c> tag. It cannot be a mapping key.</summary>
     /// <param name="value">The bytes.</param>
-    /// <exception cref="YamlException">A value is not allowed here, or a mapping expects a key.</exception>
+    /// <exception cref="InvalidOperationException">A value is not allowed here, or a mapping expects a key.</exception>
     public void WriteBinaryValue(ReadOnlySpan<byte> value)
     {
         if (_hasTag)
         {
             ClearProperties();
-            throw Misuse("Binary data carries the tag !!binary, so it cannot be given another.");
+            throw State("Binary data carries the tag !!binary, so it cannot be given another.");
         }
 
         Place place = BeginScalar(out _);
         if (place == Place.MapKey)
         {
-            throw Misuse("Binary data cannot be a mapping key.");
+            throw KeyState("Binary data cannot be a mapping key.");
         }
 
         _w.WriteRaw("!!binary "u8);

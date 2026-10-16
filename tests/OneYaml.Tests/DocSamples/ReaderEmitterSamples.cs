@@ -31,6 +31,22 @@ public class ReaderEmitterSamples
     });
 
     [Fact]
+    public void XmlWriteTag() => DocSample.Run(nameof(XmlWriteTag), () =>
+    {
+        #region XmlWriteTag
+        var buffer = new ArrayBufferWriter<byte>();
+        var emitter = new Utf8YamlEmitter(buffer);
+        emitter.WriteStartMapping();
+        emitter.WritePropertyName("id");
+        emitter.WriteTag("tag:yaml.org,2002:str");
+        emitter.WriteStringValue("1");
+        emitter.WriteEndMapping();
+        Console.Write(Encoding.UTF8.GetString(buffer.WrittenSpan));
+        // id: !!str '1'
+        #endregion
+    });
+
+    [Fact]
     public void EmitterAlone() => DocSample.Run(nameof(EmitterAlone), () =>
     {
         #region EmitterAlone

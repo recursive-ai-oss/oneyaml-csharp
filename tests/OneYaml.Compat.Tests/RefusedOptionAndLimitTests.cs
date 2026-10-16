@@ -52,6 +52,17 @@ public class RefusedOptionAndLimitTests
     }
 
     [Fact]
+    public void SharpYaml_write_indented_false_is_refused_when_writing_and_not_when_reading()
+    {
+        var options = new Cs.YamlSerializerOptions { WriteIndented = false };
+
+        NotSupportedException ex = Assert.Throws<NotSupportedException>(() => Cs.YamlSerializer.Serialize(new Dictionary<string, int> { ["a"] = 1 }, options));
+        Assert.Contains("WriteIndented", ex.Message, StringComparison.Ordinal);
+        Assert.Equal(1, Cs.YamlSerializer.Deserialize<Dictionary<string, int>>("a: 1\n", options)!["a"]);
+        Assert.Equal("a: 1\n", Cs.YamlSerializer.Serialize(new Dictionary<string, int> { ["a"] = 1 }, new Cs.YamlSerializerOptions { WriteIndented = true }));
+    }
+
+    [Fact]
     public void SharpYaml_reference_handling_still_reads_aliases_and_only_writing_is_refused()
     {
         var options = new Cs.YamlSerializerOptions { ReferenceHandling = Cs.YamlReferenceHandling.Preserve };
@@ -118,11 +129,24 @@ public class RefusedOptionAndLimitTests
     [Fact]
     public void YamlDotNet_EnsureRoundtrip_is_refused_when_the_serializer_is_used()
     {
+#pragma warning disable CS0618 // The call is the thing under test.
         YdnSer.ISerializer serializer = new YdnSer.SerializerBuilder().EnsureRoundtrip().Build();
+#pragma warning restore CS0618
 
         NotSupportedException ex = Assert.Throws<NotSupportedException>(() => serializer.Serialize(new Person { Name = "z" }));
         Assert.Contains("EnsureRoundtrip", ex.Message, StringComparison.Ordinal);
         Assert.Throws<NotSupportedException>(() => serializer.Serialize(new StringWriter(), new Person()));
+    }
+
+    [Fact]
+    public void YamlDotNet_EnsureRoundtrip_is_marked_obsolete_as_a_warning()
+    {
+        System.Reflection.MethodInfo method = typeof(YdnSer.SerializerBuilder).GetMethod(nameof(YdnSer.SerializerBuilder.EnsureRoundtrip))!;
+        ObsoleteAttribute? obsolete = (ObsoleteAttribute?)Attribute.GetCustomAttribute(method, typeof(ObsoleteAttribute));
+
+        Assert.NotNull(obsolete);
+        Assert.False(obsolete.IsError);
+        Assert.Contains("NotSupportedException", obsolete.Message, StringComparison.Ordinal);
     }
 
     // ---- YamlDotNet: limits ----
