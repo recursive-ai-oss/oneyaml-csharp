@@ -1,0 +1,13 @@
+# Update pull requests for the actions the workflows use. The library projects have no package
+# references; test and benchmark packages are pinned with lock files and updated by hand.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: ci

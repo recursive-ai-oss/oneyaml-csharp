@@ -16,6 +16,10 @@
     <ArtifactsPath Condition="'$(ArtifactsPath)' == ''">$(_UserCache)/oneyaml-csharp/artifacts</ArtifactsPath>
   </PropertyGroup>
 
+  <!-- The three packages check their own shape when packed (EnablePackageValidation). No release exists to
+       compare against yet; once 1.0.0 is published, set PackageValidationBaselineVersion to 1.0.0 here so
+       later packs fail on a breaking change to the public API. -->
+
   <!-- One version for the three packages. The suffix stays until the API is declared stable. -->
   <PropertyGroup>
     <VersionPrefix>1.0.0</VersionPrefix>

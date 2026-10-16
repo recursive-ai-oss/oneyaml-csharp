@@ -8,7 +8,7 @@ using Xunit;
 
 namespace OneYaml.Tests.Generated;
 
-// Shapes the fix round covers. Each runs through reflection and through the generated context.
+// Shapes that must bind the same way in both paths. Each runs through reflection and through the generated context.
 
 internal class BaseInit
 {
