@@ -78,7 +78,7 @@ follows aliases with any value.
 | A stream in UTF-16 or UTF-32 without a byte order mark is detected from its first characters, as YAML 1.2 says (the real library fails) | `Deserialize<Plain>(stream)` over `a: b` in UTF-16 |
 | A null inside a mapping or sequence, read into a non-nullable number or boolean, is the default value (real: `YamlException` for a mapping value or sequence item). A null that is the whole document is an error here too, as in the real library | `Deserialize<List<int>>("[~]")` gives `[0]`; `Deserialize<int>("~")` throws |
 | Enums are written by name regardless of the naming policy | `Serialize(Mood.Happy, new() { PropertyNamingPolicy = CamelCase })` |
-| `MaxDepth` defaults to 64 as in the real library and is never raised above the library limit | `YamlSerializerOptions { MaxDepth = 100000 }` is capped |
+| `MaxDepth` defaults to 64 as in the real library and is never raised above the depth limit of `Limits`; the property reads back the value set, and the lower of the two applies | `YamlSerializerOptions { MaxDepth = 100000 }` reads back 100000 and still stops at the limit |
 | Error marks are a point (`Start == End`), normally at the real library's line and column but not always | `Deserialize<object>("a: [")` |
 | Syntax errors are `SyntaxErrorException`; every other category is `YamlException` (the real `SemanticErrorException` is never raised) | `Deserialize<object>("a: [")` is a syntax error; `Deserialize<int>("x")` is a `YamlException` |
 | `Stream` input is read to the end, with UTF-8, UTF-16 and UTF-32 detected, and left open | `Deserialize<Plain>(stream)` |

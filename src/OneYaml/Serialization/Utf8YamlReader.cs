@@ -306,7 +306,8 @@ internal sealed class AnchorBook
 /// leave it on the last token of that value: the scalar itself, or the matching end token.
 /// Unlike <c>System.Text.Json.Utf8JsonReader</c>, the reader must not be copied: a copy shares the scanner and its buffers with
 /// the original, so reading on the copy changes what the original reads next. Pass it by <see langword="ref"/>, and read ahead
-/// by reading on, never by reading a copy.
+/// by reading on, never by reading a copy. A reader that is left without a valid position by a copy that read past the end of
+/// its value throws <see cref="InvalidOperationException"/> from <see cref="Read"/> instead of reporting the text as invalid.
 /// </remarks>
 [StructLayout(LayoutKind.Auto)]
 public ref partial struct Utf8YamlReader
@@ -870,7 +871,7 @@ public ref partial struct Utf8YamlReader
         _chargedBytes = Sat(_chargedBytes + e.Bytes);
         if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes) || _chargedBytes > _limits.AliasByteBudget(_src.Length))
         {
-            throw Error(YamlErrorCategory.Limit, $"Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}).");
+            throw Error(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"));
         }
 
         _expNodes = Sat(_expNodes + e.Nodes);

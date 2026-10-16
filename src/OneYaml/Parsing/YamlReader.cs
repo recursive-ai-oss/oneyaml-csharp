@@ -70,6 +70,13 @@ internal ref partial struct YamlReader
     // The error that ended reading, kept so that a later Read reports it again.
     private YamlException? _failure;
 
+    // How many events this reader has produced, and a cell that every copy of it shares and that holds the highest
+    // count any of them reached. A reader that fails while the cell holds more than its own count has been left
+    // behind by a copy that read on (or is the copy and was left behind), so its error blames the use, not the text.
+    // The cell is empty for a reader that nobody can copy.
+    private readonly Span<int> _cell;
+    private int _serial;
+
     // Scalar details of the current event.
     private int _contentStart;
     private int _contentEnd;
@@ -120,6 +127,8 @@ internal ref partial struct YamlReader
         _keys = scratch.Keys;
         _queue = scratch.Queue;
         _flowKinds = scratch.FlowKinds;
+        _cell = scratch.Cell;
+        _cell[0] = 0;
     }
 
     private YamlReader(ReadOnlySpan<byte> utf8, YamlReaderOptions options, Common _)
@@ -164,6 +173,12 @@ internal ref partial struct YamlReader
         private Token _first;
     }
 
+    [InlineArray(1)]
+    internal struct CellBuffer
+    {
+        private int _first;
+    }
+
     [InlineArray(ScratchSize)]
     internal struct ByteBuffer
     {
@@ -178,6 +193,7 @@ internal ref partial struct YamlReader
         public KeyBuffer Keys;
         public TokenBuffer Queue;
         public ByteBuffer FlowKinds;
+        public CellBuffer Cell;
     }
 
     private static bool ContainsNonPrintable(ReadOnlySpan<byte> s)
@@ -338,6 +354,10 @@ internal ref partial struct YamlReader
         {
             ParseEvent();
         }
+        catch (YamlException) when (IsLeftBehind())
+        {
+            throw new InvalidOperationException("The reader was used after a copy of it read on. A Utf8YamlReader must not be copied: the copy shares the scanner with the original, so reading on either one leaves the other without a valid position. Read ahead with the reader itself, or pass it by ref.");
+        }
         catch (YamlException ex) when (_deferred is not null && !ReferenceEquals(ex, _deferred) && ex.Offset >= _deferredFrom)
         {
             // The scanner read ahead and found the real problem; the parser tripped over its effect.
@@ -350,8 +370,17 @@ internal ref partial struct YamlReader
             throw;
         }
 
+        _serial++;
+        if (_cell.Length != 0)
+        {
+            _cell[0] = _serial;
+        }
+
         return true;
     }
+
+    // Whether a copy of this reader has read further than this one has.
+    private readonly bool IsLeftBehind() => _cell.Length != 0 && _cell[0] != _serial;
 
     /// <summary>The tag resolved against the document's <c>%TAG</c> directives, or null when there is no tag.</summary>
     /// <remarks>Builds the string when asked, and keeps the last one, so a run of nodes that share a tag shares its string.</remarks>

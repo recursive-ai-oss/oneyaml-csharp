@@ -100,6 +100,10 @@ public sealed record YamlLimits
     /// <returns>The budget, never less than <see cref="AliasByteFloor"/>.</returns>
     public long AliasByteBudget(long inputBytes) => Budget(inputBytes, AliasByteFactor, AliasByteFloor);
 
+    // The one wording for a refused alias expansion, whoever noticed it: what was refused, and the settings that set the budget.
+    internal string AliasBudgetMessage(string what) =>
+        $"{what} exceeds the budget set by YamlLimits (AliasNodeFactor {AliasNodeFactor}, AliasNodeFloor {AliasNodeFloor}, AliasByteFactor {AliasByteFactor}, AliasByteFloor {AliasByteFloor}).";
+
     // Each limit at the lower of the two: what a reader that must honour both has to use.
     internal static YamlLimits Stricter(YamlLimits a, YamlLimits b) =>
         a.Equals(b) ? b : new YamlLimits

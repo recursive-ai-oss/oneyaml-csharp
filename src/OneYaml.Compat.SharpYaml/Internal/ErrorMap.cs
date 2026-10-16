@@ -18,12 +18,33 @@ internal static class ErrorMap
     public static YamlException Translate(Oy.YamlException error, ReadOnlySpan<char> text, string? sourceName)
     {
         Mark at = MarkOf(error, text);
-        string message = error.Message;
+        string message = WithoutPosition(error);
         return error.Category switch
         {
             Oy.YamlErrorCategory.Syntax or Oy.YamlErrorCategory.Encoding => new SyntaxErrorException(sourceName, at, at, message),
             _ => new YamlException(sourceName, at, at, message, null),
         };
+    }
+
+    // The engine puts its line and column in the message; the Mark in front of the message says it already, in SharpYaml's
+    // own counting, so the message keeps what went wrong and the path, if any.
+    private static string WithoutPosition(Oy.YamlException error)
+    {
+        string message = error.Message;
+        if (error.Line < 1 || message.Length == 0 || message[^1] != ')')
+        {
+            return message;
+        }
+
+        string marker = $" (line {error.Line}, column {error.Column}";
+        int cut = message.LastIndexOf(marker, StringComparison.Ordinal);
+        if (cut < 0)
+        {
+            return message;
+        }
+
+        int path = message.IndexOf(", path ", cut + marker.Length, StringComparison.Ordinal);
+        return path < 0 ? message[..cut] : message[..cut] + " (path " + message[(path + ", path ".Length)..];
     }
 
     // The index in the text of the place the engine names, or -1 when it names none.

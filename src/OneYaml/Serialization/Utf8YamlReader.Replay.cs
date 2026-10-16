@@ -44,7 +44,7 @@ public ref partial struct Utf8YamlReader
         _chargedNodes = Sat(_chargedNodes + entries);
         if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes))
         {
-            throw Error(YamlErrorCategory.Limit, $"Merging mappings exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}).");
+            throw Error(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Merging mappings"));
         }
     }
 
@@ -74,7 +74,7 @@ public ref partial struct Utf8YamlReader
                     _chargedBytes = Sat(_chargedBytes + a.Bytes);
                     if (_chargedNodes > _limits.AliasNodeBudget(_liveNodes) || _chargedBytes > _limits.AliasByteBudget(_src.Length))
                     {
-                        throw Error(YamlErrorCategory.Limit, $"Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor {_limits.AliasNodeFactor}, AliasNodeFloor {_limits.AliasNodeFloor}, AliasByteFactor {_limits.AliasByteFactor}, AliasByteFloor {_limits.AliasByteFloor}).");
+                        throw Error(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"));
                     }
 
                     break;

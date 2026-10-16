@@ -24,7 +24,7 @@ public class SharpYamlLimitsSamples
         catch (YamlException e)
         {
             Console.WriteLine(e.Message);
-            // (Lin: 14, Col: 17, Chr: 293) - (Lin: 14, Col: 17, Chr: 293): Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor 2, AliasNodeFloor 100000, AliasByteFactor 2, AliasByteFloor 8388608). (line 15, column 18)
+            // (Lin: 14, Col: 17, Chr: 293) - (Lin: 14, Col: 17, Chr: 293): Expanding the aliases exceeds the budget set by YamlLimits (AliasNodeFactor 2, AliasNodeFloor 100000, AliasByteFactor 2, AliasByteFloor 8388608).
         }
 
         // The default limits allow the same text.
