@@ -256,8 +256,12 @@ public class KitDocumentTests
             {
                 long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
                 var ex = Assert.Throws<YamlException>(() => run(doc));
-                string wanted = kind == "bounded" ? expect.GetProperty("error").GetString()! : expect.GetProperty("category").GetString()!;
-                Assert.Equal(CategoryOf(wanted), ex.Category);
+                // A case may name one category or a list of acceptable ones.
+                JsonElement wanted = kind == "bounded" ? expect.GetProperty("error") : expect.GetProperty("category");
+                YamlErrorCategory[] allowed = wanted.ValueKind == JsonValueKind.Array
+                    ? wanted.EnumerateArray().Select(w => CategoryOf(w.GetString()!)).ToArray()
+                    : [CategoryOf(wanted.GetString()!)];
+                Assert.Contains(ex.Category, allowed);
                 if (kind == "bounded")
                 {
                     Assert.True(GC.GetAllocatedBytesForCurrentThread() - allocatedBefore < expect.GetProperty("memory_mb").GetInt64() * 1024 * 1024, "the refusal allocated more than the bound");
