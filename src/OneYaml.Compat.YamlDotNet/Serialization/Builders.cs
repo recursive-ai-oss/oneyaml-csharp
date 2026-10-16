@@ -334,15 +334,6 @@ public sealed class SerializerBuilder : BuilderSkeleton<SerializerBuilder>
         return this;
     }
 
-    /// <summary>Sets the limits writing keeps to. Without aliases, the nodes written for objects the graph shares are counted against the alias budget. Not in YamlDotNet.</summary>
-    /// <param name="limits">The limits. The default is <see cref="global::OneYaml.YamlLimits.Default"/>.</param>
-    /// <returns>This builder.</returns>
-    public SerializerBuilder WithLimits(global::OneYaml.YamlLimits limits)
-    {
-        Settings.Limits = limits ?? throw new ArgumentNullException(nameof(limits));
-        return this;
-    }
-
     /// <summary>Writes JSON-compatible YAML: flow style, double-quoted strings and keys.</summary>
     /// <returns>This builder.</returns>
     public SerializerBuilder JsonCompatible()

@@ -622,17 +622,12 @@ public class ApiConsistencyTests
             _ => $"- {i}.5",
         })) + "\n";
 
-        List<JsonNode?>? nodes = null;
-        long perItem = long.MaxValue;
+        List<JsonNode?>? warm = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
+        Assert.Equal(items, warm!.Count);
 
-        // Allocation is counted on this thread only. Rounds repeat and the smallest counts, so one-off
-        // work such as lazy initialisation or compilation on this thread cannot decide the result.
-        for (int round = 0; round < 6; round++)
-        {
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            nodes = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
-            perItem = Math.Min(perItem, (GC.GetAllocatedBytesForCurrentThread() - before) / items);
-        }
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        List<JsonNode?>? nodes = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
+        long perItem = (GC.GetAllocatedBytesForCurrentThread() - before) / items;
 
         Assert.Equal(items, nodes!.Count);
         Assert.Equal(3, nodes[0]!.GetValue<int>() + 3);
