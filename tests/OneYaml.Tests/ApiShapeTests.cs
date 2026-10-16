@@ -658,7 +658,7 @@ public class ApiShapeTests
     // ---- package ----
 
     [Fact]
-    public void The_library_version_is_a_preview()
+    public void The_library_version_is_a_release_version()
     {
         string? version = typeof(YamlSerializer).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
@@ -667,7 +667,9 @@ public class ApiShapeTests
             .FirstOrDefault();
 
         Assert.NotNull(version);
-        Assert.StartsWith("1.0.0-preview.1", version, StringComparison.Ordinal);
+        // The informational version may carry build metadata after '+', never a prerelease suffix.
+        string core = version!.Split('+')[0];
+        Assert.Equal("1.0.0", core);
     }
 
     // The metadata plumbing lives apart from the types a user works with.

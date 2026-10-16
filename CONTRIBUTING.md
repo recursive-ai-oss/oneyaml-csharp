@@ -21,6 +21,15 @@ dotnet test --solution OneYaml.slnx
 
 Build output goes outside the clone: to the directory in `ONEYAML_ARTIFACTS` if you set it, otherwise to a per-user cache directory (see `Directory.Build.props`).
 
+To try your build in another project, pack it with a version of its own, so that NuGet does not mix it up with the published package of the same number, and add it from the folder it was written to:
+
+```sh
+dotnet pack src/OneYaml/OneYaml.csproj -c Release -p:VersionSuffix=local.1 -o $HOME/oneyaml-packages   # in the clone
+dotnet add package OneYaml --version 1.0.0-local.1 --source $HOME/oneyaml-packages                      # in your project
+```
+
+The version is the `VersionPrefix` in `Directory.Build.props` followed by the suffix you pass.
+
 The repository holds:
 
 | Path | What it is |

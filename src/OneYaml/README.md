@@ -38,9 +38,9 @@ record Config(int Replicas, string Script);
 
 ## Documentation
 
-- [README](https://github.com/recursive-ai-oss/oneyaml-csharp#readme): benchmarks, conformance, when to use it and when not to
-- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/editing.md), [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/limits.md)
-- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/migrate-yamldotnet.md) or [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/docs/migrate-sharpyaml.md)
+- [README](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/README.md): benchmarks, conformance, when to use it and when not to
+- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/editing.md), [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/limits.md)
+- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-yamldotnet.md) or [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/migrate-sharpyaml.md)
 - [Changelog](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/CHANGELOG.md) and [security policy](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/SECURITY.md)
 
 Report problems at [GitHub issues](https://github.com/recursive-ai-oss/oneyaml-csharp/issues). Licensed under MIT or Apache-2.0, at your option.
