@@ -70,6 +70,15 @@ builds (reflection, generated, and the string overload), and `--load-loop name s
 workload repeatedly with OneYaml (both paths), VYaml and SharpYaml as the kit does and prints each best batch
 time in microseconds and the bytes one load allocates.
 
+## Unchanged-write benchmarks
+
+`UnchangedEmitBenchmarks` writes parsed documents back unchanged in batches of about 4 MB of input,
+after a forced collection, for `ToUtf8Bytes`, for `WriteTo` into a reused buffer, and for SharpYaml's
+syntax tree. Outputs above 85,000 bytes are large-object-heap arrays, and when the collector has
+returned that memory the fresh array costs page faults on first touch, which is most of the time of
+those cells; the reused-buffer row shows the cost without that allocation. `ONEYAML_EMIT_WORKLOADS`
+(comma separated) narrows the run to some workloads.
+
 ## Scalar benchmarks
 
 The scalar benchmarks read workload files from a checkout of the conformance kit: set

@@ -25,11 +25,18 @@ public class UnchangedEmitBenchmarks
     private YamlDocument[] _docs = [];
     private YamlSyntaxTree[] _trees = [];
     private YamlSyntaxTree[] _ownTrees = [];
+    private readonly System.Buffers.ArrayBufferWriter<byte> _writer = new();
     private YamlDocument _warmDoc = null!;
     private YamlSyntaxTree _warmTree = null!;
 
-    [Params("reference-a", "compose-wordpress", "helm-ingress-nginx", "records-64k", "compose-merge-64k", "wide-map-64k", "flow-heavy-64k", "openapi-100k", "openapi-8m",
-        "synthetic-16k", "synthetic-32k", "synthetic-48k", "synthetic-64k", "synthetic-80k", "synthetic-100k")]
+    /// <summary>The workloads to time; <c>ONEYAML_EMIT_WORKLOADS</c> (comma separated) narrows the run.</summary>
+    public static IEnumerable<string> Workloads =>
+        Environment.GetEnvironmentVariable("ONEYAML_EMIT_WORKLOADS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+        ?? ["reference-a", "compose-wordpress", "helm-ingress-nginx", "records-64k", "compose-merge-64k", "wide-map-64k", "flow-heavy-64k", "openapi-100k", "openapi-8m", "long-scalars-256k", "anchors-32k", "records-4k", "records-1m",
+            "synthetic-16k", "synthetic-32k", "synthetic-48k", "synthetic-64k", "synthetic-80k", "synthetic-100k"];
+
+    /// <summary>The workload being timed.</summary>
+    [ParamsSource(nameof(Workloads))]
     public string Workload { get; set; } = string.Empty;
 
     /// <summary>The number of documents in one timed batch.</summary>
@@ -208,6 +215,21 @@ public class UnchangedEmitBenchmarks
         foreach (YamlDocument d in _docs)
         {
             total += d.ToUtf8Bytes().Length;
+        }
+
+        return total;
+    }
+
+    /// <summary>The write-back route that needs no fresh array per call: one buffer writer, reset between documents.</summary>
+    [Benchmark]
+    public int OneYamlWriteToReusedBuffer()
+    {
+        int total = 0;
+        foreach (YamlDocument d in _docs)
+        {
+            _writer.ResetWrittenCount();
+            d.WriteTo(_writer);
+            total += _writer.WrittenCount;
         }
 
         return total;
