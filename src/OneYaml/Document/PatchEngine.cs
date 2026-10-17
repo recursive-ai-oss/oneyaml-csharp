@@ -179,7 +179,7 @@ internal static class PatchEngine
             }
             catch (YamlException ex) when (ex.OperationIndex is null)
             {
-                throw new YamlException(ex.Message, ex.Category, ex.Line, ex.Column, ex.Offset, index, ex);
+                throw new YamlException(ex.Message, ex.Category, ex.Line, ex.Column, ex.Offset, index, ex) { IsAliasBudget = ex.IsAliasBudget };
             }
 
             index++;
@@ -289,7 +289,7 @@ internal static class PatchEngine
         }
         catch (YamlException ex) when (ex.OperationIndex is null)
         {
-            throw new YamlException(ex.Message, ex.Category, ex.Line, ex.Column, ex.Offset, i, ex);
+            throw new YamlException(ex.Message, ex.Category, ex.Line, ex.Column, ex.Offset, i, ex) { IsAliasBudget = ex.IsAliasBudget };
         }
         finally
         {

@@ -63,6 +63,59 @@ internal sealed partial class DocState
 
     private bool _exclusive;
 
+    // Set while one edit made through the document's own methods runs in place. Such an edit must leave the state as it
+    // was when it fails, so it keeps what it needs to put the text back (see Splice); a patch discards its state instead.
+    // Three flags in one byte, so that a state does not grow: an edit through the document's methods is running, the
+    // splice that is running has replaced the text, and an edit has changed the state in place since it was last cleared.
+    private byte _editFlags;
+
+    private const byte SingleEditFlag = 1;
+    private const byte TextSplicedFlag = 2;
+    private const byte ChangedFlag = 4;
+
+    private bool _singleEdit => (_editFlags & SingleEditFlag) != 0;
+
+    // Tests make a splice fail at a chosen step (1 after the key indexes were prepared, 2 after the text was replaced,
+    // 3 after the nodes were) to show that a failed edit leaves the state as it was. Zero, the normal value, fails nowhere.
+    [ThreadStatic]
+    internal static int FaultStage;
+
+    private static void Fault(int stage)
+    {
+        if (FaultStage == stage)
+        {
+            throw new InvalidOperationException("Injected failure at step " + stage + " of a splice.");
+        }
+    }
+
+    /// <summary>
+    /// Whether an edit has changed this state in place since the last call, which clears the answer. A caller that
+    /// gets the same state back from an edit tells a change from none by it.
+    /// </summary>
+    internal bool TakeChangedInPlace()
+    {
+        bool changed = (_editFlags & ChangedFlag) != 0;
+        _editFlags = (byte)(_editFlags & ~ChangedFlag);
+        return changed;
+    }
+
+    /// <summary>
+    /// Starts one edit that works on this state itself instead of a copy. It lasts until <see cref="EndSingleEdit"/>: the
+    /// state is only ever read in between by the edit itself, and a failure puts the state back as it was.
+    /// </summary>
+    internal void BeginSingleEdit()
+    {
+        _editFlags = SingleEditFlag;
+        Exclusive = true;
+    }
+
+    /// <summary>Ends the edit: the state may be shared by readers again.</summary>
+    internal void EndSingleEdit()
+    {
+        _editFlags = (byte)(_editFlags & ChangedFlag);
+        Exclusive = false;
+    }
+
     // How far this state has come in being edited in place, in one byte so that the state does not grow: 0 not at all,
     // 1 once, 2 at least twice and the starts of the nodes never decrease along the array, 3 at least twice and they do.
     // Holding an offset move back for the nodes behind an edit is only right in state 2, and a state edited once is not
@@ -629,7 +682,7 @@ internal sealed partial class DocState
 
             int newKids = sub._nodes[0].Count;
             bool checkKeys = map && !old.AllowDuplicateKeys && nn.Count - oldKids + newKids > 2 && old.KeysDiffer(sub, kFirst, oldKids, newKids);
-            return old.Splice(sub, n, kFirst, tNode, oldKids, newKids, kStart, regionEnd, s, e, text, flow ? kStart - 1 : kStart - prefix, checkKeys, touchesEnd);
+            return old.Splice(sub, n, kFirst, tNode, oldKids, newKids, kStart, regionEnd, s, e, text, flow ? kStart - 1 : kStart - prefix, checkKeys, touchesEnd, limits);
         }
         finally
         {
@@ -812,6 +865,7 @@ internal sealed partial class DocState
     // A copy that has room for the changes about to be made, taken so that the original stays whole.
     private DocState CloneForSplice(int extraBytes, int extraNodes, int extraProps, int extraComments)
     {
+        EditWork.StateClones++;
         byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(Length + Math.Max(extraBytes, 0) + 16, 1));
         _buf.AsSpan(0, Length).CopyTo(buf);
         var c = new DocState(buf, Length, Encoding, HasByteOrderMark, AllowDuplicateKeys)
@@ -828,9 +882,11 @@ internal sealed partial class DocState
         };
         try
         {
-            c._cache = TakeCache();
             c._nodes = ArrayPool<CstNode>.Shared.Rent(Math.Max(NodeCount + Math.Max(extraNodes, 0) + 16, 1));
+
+            // The nodes are read before the cache goes: the counts of moves held back live in it.
             NodeSpan(0, NodeCount).CopyTo(c._nodes);
+            c._cache = TakeCache();
             c._props = ArrayPool<int>.Shared.Rent(Math.Max(((PropCountRows + extraProps) * PropWidth) + PropWidth, 1));
             _props.AsSpan(0, PropCountRows * PropWidth).CopyTo(c._props);
             c._docs = ArrayPool<DocInfo>.Shared.Rent(Math.Max(DocCount, 1));
@@ -846,16 +902,30 @@ internal sealed partial class DocState
         }
     }
 
-    private DocState Splice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, bool checkKeys, bool touchesEnd)
+    private DocState Splice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, bool checkKeys, bool touchesEnd, YamlLimits limits)
     {
         int newCount = sub.NodeCount - 1;
         int d = newCount - (end - first);
         int bd = text.Length - (e - s);
         int subComments = sub.CommentCount;
+
+        // An edit that works in place and must leave the state whole when it fails keeps the bytes it replaces. Room for
+        // everything the edit adds is made first, while nothing has changed, so that running out of memory cannot
+        // happen halfway through.
+        byte[]? undo = null;
+        if (_exclusive && _singleEdit)
+        {
+            Reserve(bd, d, sub.PropCountRows, subComments);
+            undo = ArrayPool<byte>.Shared.Rent(Math.Max(e - s, 1));
+            _buf.AsSpan(s, e - s).CopyTo(undo);
+            _editFlags = (byte)(_editFlags & ~TextSplicedFlag);
+        }
+
         DocState t = Exclusive ? this : CloneForSplice(bd, d, sub.PropCountRows, subComments);
         try
         {
             bool unique = t.ApplySplice(sub, n, first, end, oldKids, newKids, regionStart, regionEnd, s, e, text, baseOffset, d, bd, touchesEnd);
+            Fault(3);
 
             // Taking keys out cannot make two of them equal, and a key the index shows to be new needs no comparison
             // with the others; every other change to the keys is checked against all of them.
@@ -869,6 +939,11 @@ internal sealed partial class DocState
                 t.VerifyCache();
             }
 
+            if (ReferenceEquals(t, this))
+            {
+                _editFlags |= ChangedFlag;
+            }
+
             return t;
         }
         catch
@@ -877,9 +952,95 @@ internal sealed partial class DocState
             {
                 t.Dispose();
             }
+            else if (undo is not null)
+            {
+                // The edit found out too late that it is not allowed (a key twice, say). The text before it is parsed
+                // again: the state is the same as before the edit, and only the error path pays for it.
+                RestoreBeforeSplice(undo, s, e - s, text.Length, limits);
+            }
 
             throw;
         }
+        finally
+        {
+            if (undo is not null)
+            {
+                ArrayPool<byte>.Shared.Return(undo);
+            }
+        }
+    }
+
+    // Makes room for an edit in place in every array it can grow, without changing what they hold.
+    private void Reserve(int bd, int d, int subProps, int subComments)
+    {
+        long needed = (long)Length + bd;
+        if (_buf.Length < needed)
+        {
+            byte[] bigger = ArrayPool<byte>.Shared.Rent((int)Math.Min(needed + (needed >> 3), int.MaxValue - 64));
+            _buf.AsSpan(0, Length).CopyTo(bigger);
+            ArrayPool<byte>.Shared.Return(_buf);
+            _buf = bigger;
+        }
+
+        if (d > 0 && _nodes.Length < NodeCount + d)
+        {
+            SettleNodes();
+            Ensure(ref _nodes, NodeCount, NodeCount + d);
+        }
+
+        Ensure(ref _props, PropCountRows * PropWidth, (PropCountRows + subProps) * PropWidth);
+        Ensure(ref _comments, CommentCount * 2, ((CommentCount + subComments) * 2) + 2);
+    }
+
+    // Puts the state back as it was before a splice that failed: the old text is made from the new one and the bytes
+    // that were replaced, parsed again, and its arrays take the place of this state's.
+    private void RestoreBeforeSplice(byte[] undo, int at, int undoLength, int newTextLength, YamlLimits limits)
+    {
+        bool spliced = (_editFlags & TextSplicedFlag) != 0;
+        int oldLength = spliced ? Length - newTextLength + undoLength : Length;
+        byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(oldLength, 1));
+        if (spliced)
+        {
+            _buf.AsSpan(0, at).CopyTo(buf);
+            undo.AsSpan(0, undoLength).CopyTo(buf.AsSpan(at));
+            _buf.AsSpan(at + newTextLength, Length - at - newTextLength).CopyTo(buf.AsSpan(at + undoLength));
+        }
+        else
+        {
+            _buf.AsSpan(0, Length).CopyTo(buf);
+        }
+
+        var fresh = new DocState(buf, oldLength, Encoding, HasByteOrderMark, AllowDuplicateKeys) { EditMode = EditMode };
+        try
+        {
+            fresh.Parse(limits);
+        }
+        catch
+        {
+            fresh.Dispose();
+            throw;
+        }
+
+        // What this state remembers was worked out for the text that is gone.
+        ReleaseCache();
+        (_buf, fresh._buf) = (fresh._buf, _buf);
+        (_nodes, fresh._nodes) = (fresh._nodes, _nodes);
+        (_props, fresh._props) = (fresh._props, _props);
+        (_docs, fresh._docs) = (fresh._docs, _docs);
+        (_comments, fresh._comments) = (fresh._comments, _comments);
+        Length = fresh.Length;
+        NodeCount = fresh.NodeCount;
+        DocCount = fresh.DocCount;
+        NoRealDocument = fresh.NoRealDocument;
+        CommentCount = fresh.CommentCount;
+        AliasCount = fresh.AliasCount;
+        PropCountRows = fresh.PropCountRows;
+        _maxIntegerDigits = fresh._maxIntegerDigits;
+        _directives = 0;
+        _moveState = 0;
+        _held = false;
+        s_breakOwner = 0;
+        fresh.Dispose();
     }
 
     // Moves the offsets of the nodes behind an edit that kept the number of nodes. In a state edited in place the move
@@ -938,7 +1099,7 @@ internal sealed partial class DocState
     // Returns whether the keys the region brought are known to differ from all the others in the mapping.
     private bool ApplySplice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, int d, int bd, bool touchesEnd)
     {
-        if (_exclusive && NodeCount >= LazyMoveMinNodes)
+        if (_exclusive && !_singleEdit && NodeCount >= LazyMoveMinNodes)
         {
             if (_moveState == 0)
             {
@@ -952,6 +1113,7 @@ internal sealed partial class DocState
         }
 
         CacheBeforeSplice(sub, n, first, end, d);
+        Fault(1);
 
         // Sizes worked out for the text before the edit no longer fit it.
         ExpansionCache?.Release();
@@ -1182,6 +1344,8 @@ internal sealed partial class DocState
 
         text.CopyTo(_buf.AsSpan(s));
         Length = newLength;
+        _editFlags |= TextSplicedFlag;
+        Fault(2);
 
         // Where the next token starts after a node can only be told from the text that follows it.
         ReadOnlySpan<byte> all = Text;

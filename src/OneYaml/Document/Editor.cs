@@ -8,8 +8,9 @@ namespace OneYaml.Documents;
 /// <summary>
 /// The edit engine. Every edit, whether it comes from an indexer or a pointer, is one of four
 /// operations that read a state and return the next one: replace a node, add a mapping member,
-/// insert a sequence item, remove an entry. None of them changes a state it is given unless a patch has
-/// marked that state exclusive (it made the state itself and nobody else can see it). A failure therefore
+/// insert a sequence item, remove an entry. None of them changes a state it is given unless the state was
+/// marked exclusive: by a patch that made the state itself, or by the document for the one edit it is making.
+/// In the first case a failure discards the state; in the second the state is put back as it was. A failure therefore
 /// leaves the document as it was, and a series of them can be chained and committed at once.
 /// </summary>
 internal static partial class Editor

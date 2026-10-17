@@ -51,11 +51,18 @@ public class YamlException : Exception
         _offset = offset;
         _library = library;
         OperationIndex = operationIndex;
-        IsAliasBudget = category == YamlErrorCategory.Limit && YamlLimits.IsAliasBudgetMessage(message);
     }
 
     // Whether the error is a refused alias expansion (the alias budget), as opposed to the depth or size limits.
-    internal bool IsAliasBudget { get; private set; }
+    // The code that refuses the expansion says so with AsAliasBudget; nothing infers it from the wording.
+    internal bool IsAliasBudget { get; set; }
+
+    // Marks this error as a refused alias expansion and returns it, for `throw Error(...).AsAliasBudget()`.
+    internal YamlException AsAliasBudget()
+    {
+        IsAliasBudget = true;
+        return this;
+    }
 
     // Whether the library made this exception, with its position already worked out. One made by the public
     // constructors, in a converter for example, has none until the serializer fills it in.
@@ -172,11 +179,7 @@ public class YamlException : Exception
             }
         }
 
-        // The wording gets the position added, so the mark is read from the message as the limits built it.
-        return new YamlException(describe ? Describe(message, line, column, path) : message, category, line, column, offset, path: path)
-        {
-            IsAliasBudget = category == YamlErrorCategory.Limit && YamlLimits.IsAliasBudgetMessage(message),
-        };
+        return new YamlException(describe ? Describe(message, line, column, path) : message, category, line, column, offset, path: path);
     }
 
     // An error about the key that starts at offset. The template holds {0} where the key goes; the key is the
@@ -317,9 +320,6 @@ public class YamlException : Exception
             }
         }
 
-        return new YamlException(Describe(message, line, column, null), category, line, column, Encoding.UTF8.GetByteCount(text[..charIndex]))
-        {
-            IsAliasBudget = category == YamlErrorCategory.Limit && YamlLimits.IsAliasBudgetMessage(message),
-        };
+        return new YamlException(Describe(message, line, column, null), category, line, column, Encoding.UTF8.GetByteCount(text[..charIndex]));
     }
 }

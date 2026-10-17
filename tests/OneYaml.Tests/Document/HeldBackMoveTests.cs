@@ -165,11 +165,14 @@ public class HeldBackMoveTests
     public void Views_taken_before_a_run_of_replaces_read_the_right_values_afterwards()
     {
         const int Keys = 8_000;
-        string first = Patch(Keys, 400, 9);
-        string second = Patch(Keys, 300, 13, "{\"op\":\"replace\",\"path\":\"/tail/1/two\",\"value\":\"changed\"}");
+        // The last edit of each patch is near the start of the text, so that the offsets of everything behind it are held
+        // back, and the nodes read afterwards by position have not been brought up to date by anything else.
+        string first = Patch(Keys, 400, 9, "{\"op\":\"replace\",\"path\":\"/name\",\"value\":\"a name much longer than demo\"}");
+        string second = Patch(Keys, 300, 13, "{\"op\":\"replace\",\"path\":\"/tail/1/two\",\"value\":\"changed\"}", "{\"op\":\"replace\",\"path\":\"/name\",\"value\":\"n\"}");
 
         using YamlDocument doc = YamlDocument.Parse(Mapping(Keys));
         YamlNode last = doc.Root["big"]["key7999"];
+        YamlNode middle = doc.Root["big"]["key4000"];
         YamlNode tail = doc.Root["tail"];
         YamlNode three = doc.Root["tail"][1]["three"];
         doc.ApplyPatch(first);
@@ -179,6 +182,7 @@ public class HeldBackMoveTests
         // The reference parses the whole text again after every operation.
         using YamlDocument reference = YamlDocument.Parse(Mapping(Keys));
         YamlNode refLast = reference.Root["big"]["key7999"];
+        YamlNode refMiddle = reference.Root["big"]["key4000"];
         YamlNode refTail = reference.Root["tail"];
         YamlNode refThree = reference.Root["tail"][1]["three"];
         DocState.NoSplice = true;
@@ -193,6 +197,7 @@ public class HeldBackMoveTests
 
         // Positions and whole values come from the offsets of the nodes, which a move held back must not leave behind.
         Assert.Equal(refLast.Position, last.Position);
+        Assert.Equal(refMiddle.Position, middle.Position);
         Assert.Equal(refTail.Position, tail.Position);
         Assert.Equal(refThree.Position, three.Position);
         Assert.Equal(Canon(refTail.Deserialize<object>()), Canon(tail.Deserialize<object>()));
@@ -212,6 +217,7 @@ public class HeldBackMoveTests
 
         Assert.Equal(Encoding.UTF8.GetString(reference.ToUtf8Bytes()), Encoding.UTF8.GetString(doc.ToUtf8Bytes()));
         Assert.Equal(refLast.Position, last.Position);
+        Assert.Equal(refMiddle.Position, middle.Position);
         Assert.Equal(Canon(reference.Root.Deserialize<object>()), Canon(doc.Root.Deserialize<object>()));
     }
 

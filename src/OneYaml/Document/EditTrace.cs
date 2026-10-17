@@ -138,6 +138,9 @@ internal sealed class EditTrace
 {
     private readonly List<NodeEdit> _edits = [];
 
+    /// <summary>The number of nodes the state had when the operation began.</summary>
+    public int NodesBefore { get; init; }
+
     public int Count => _edits.Count;
 
     public void Add(in NodeEdit edit) => _edits.Add(edit);

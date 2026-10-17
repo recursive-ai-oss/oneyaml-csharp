@@ -411,7 +411,31 @@ public sealed class YamlDocument : IDisposable
     // Notes the edits of the operation that is about to run, when views exist that have to follow them.
     internal void BeginEdit(DocState s)
     {
-        s.Trace = ViewsMayExist(out _) ? new EditTrace() : null;
+        // An edit made in place hands the same state back, so the trace keeps the node count the edit began with.
+        s.Trace = ViewsMayExist(out _) ? new EditTrace { NodesBefore = s.NodeCount } : null;
+        s.TakeChangedInPlace();
+    }
+
+    // Begins an edit that works on the document's own state instead of a copy of it, which for a large document is
+    // what the edit costs. The state is the one the edit reads and changes; if the edit fails it is put back as it was.
+    // Use it in a using declaration, so that the state is shared by readers again however the edit ends.
+    internal EditScope BeginInPlaceEdit(DocState s)
+    {
+        BeginEdit(s);
+        s.BeginSingleEdit();
+        return new EditScope(s);
+    }
+
+    internal readonly struct EditScope : IDisposable
+    {
+        private readonly DocState _state;
+
+        internal EditScope(DocState state)
+        {
+            _state = state;
+        }
+
+        public void Dispose() => _state.EndSingleEdit();
     }
 
     // Patches report a document index outside the stream as a patch error, like every other way a patch can fail.
@@ -429,25 +453,33 @@ public sealed class YamlDocument : IDisposable
     internal void Swap(DocState next)
     {
         DocState? old = _state;
-        if (!ReferenceEquals(next, old))
+        bool inPlace = ReferenceEquals(next, old);
+        if (inPlace && (old is null || !old.TakeChangedInPlace()))
         {
-            _editCount++;
-            if (old is not null && ViewsMayExist(out EditEpoch? head))
-            {
-                // The edits the operation noted must account for every node that appeared or went; if they do
-                // not (or nothing was noted), views cannot be followed and are told so.
-                EditTrace? trace = old.Trace;
-                NodeEdit[]? edits = trace is not null && trace.NetDelta == next.NodeCount - old.NodeCount ? trace.ToArray() : null;
-                var epoch = new EditEpoch { Edits = edits, Number = _editCount };
-                head!.Next = epoch;
-                _head!.SetTarget(epoch);
-            }
-
-            old?.Dispose();
-            next.Trace = null;
-            _state = next;
-            ResetWalk();
+            // The operation changed nothing.
+            return;
         }
+
+        _editCount++;
+        if (old is not null && ViewsMayExist(out EditEpoch? head))
+        {
+            // The edits the operation noted must account for every node that appeared or went; if they do
+            // not (or nothing was noted), views cannot be followed and are told so.
+            EditTrace? trace = old.Trace;
+            NodeEdit[]? edits = trace is not null && trace.NetDelta == next.NodeCount - (inPlace ? trace.NodesBefore : old.NodeCount) ? trace.ToArray() : null;
+            var epoch = new EditEpoch { Edits = edits, Number = _editCount };
+            head!.Next = epoch;
+            _head!.SetTarget(epoch);
+        }
+
+        if (!inPlace)
+        {
+            old?.Dispose();
+        }
+
+        next.Trace = null;
+        _state = next;
+        ResetWalk();
     }
 
     /// <summary>
@@ -509,7 +541,7 @@ public sealed class YamlDocument : IDisposable
     private void Write(in Pointer p, ValueTree v, int document, PointerOps.Mode mode)
     {
         DocState s = Current(document);
-        BeginEdit(s);
+        using EditScope scope = BeginInPlaceEdit(s);
         Swap(PointerOps.Write(s, _limits, document, p, v, mode));
     }
 
@@ -681,7 +713,7 @@ public sealed class YamlDocument : IDisposable
     {
         Pointer p = Pointer.Parse(path);
         DocState s = Current(document);
-        BeginEdit(s);
+        using EditScope scope = BeginInPlaceEdit(s);
         Swap(PointerOps.Remove(s, _limits, document, p));
     }
 
