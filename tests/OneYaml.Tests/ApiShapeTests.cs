@@ -669,7 +669,7 @@ public class ApiShapeTests
         Assert.NotNull(version);
         // The informational version may carry build metadata after '+', never a prerelease suffix.
         string core = version!.Split('+')[0];
-        Assert.Equal("1.0.0", core);
+        Assert.Matches(@"^[1-9][0-9]*\.[0-9]+\.[0-9]+$", core);
     }
 
     // The metadata plumbing lives apart from the types a user works with.

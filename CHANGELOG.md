@@ -4,6 +4,8 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-17
+
 ### Changed
 
 - **`Get<object>` and `GetValue<object>` read collections.** Asking a node for `object`, through `YamlDocument.Get<object>`, `TryGet`, `YamlNode.GetValue<object>` or `TryGetValue`, now gives what `YamlSerializer.Deserialize<object>` gives: a `Dictionary<string, object?>` for a mapping and a `List<object?>` for a sequence. It used to fail with "The node is not a scalar".
