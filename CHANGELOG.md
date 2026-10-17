@@ -4,6 +4,10 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- **Error positions in UTF-16 and UTF-32 input.** A malformed UTF-16 or UTF-32 input, a lone surrogate for example, was reported one column too far, with or without a byte order mark; the column now names the bad character. The `Offset` of such an error still counts bytes of the original input, the byte order mark included. Other errors in these encodings already had the column and offset of the same text read as UTF-8, and a test now holds that.
+
 ## [1.1.0] - 2026-10-17
 
 ### Changed
