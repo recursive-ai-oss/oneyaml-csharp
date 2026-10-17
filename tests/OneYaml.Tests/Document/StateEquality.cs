@@ -40,8 +40,8 @@ internal static class StateEquality
 
         for (int i = 0; i < a.NodeCount; i++)
         {
-            ref readonly CstNode x = ref a.Node(i);
-            ref readonly CstNode y = ref b.Node(i);
+            ref readonly CstNode x = ref a.NodeH(i);
+            ref readonly CstNode y = ref b.NodeH(i);
             if (x.Start != y.Start || x.End != y.End || x.Parent != y.Parent || x.Size != y.Size || x.Count != y.Count
                 || x.Aux != y.Aux || x.Kind != y.Kind || x.Style != y.Style || x.Flags != y.Flags || x.Chomp != y.Chomp
                 || (x.Props >= 0) != (y.Props >= 0))
@@ -133,6 +133,9 @@ internal static class SpliceCheck
         DocState.VerifyCaches = true;
         DocState.IndexMinNodes = 8;
         DocState.LayoutMinSteps = 0;
+
+        // The held-back move of node offsets is used from the second edit in place on, whatever the size.
+        DocState.LazyMoveMinNodes = 0;
     }
 #pragma warning restore CA2255
 

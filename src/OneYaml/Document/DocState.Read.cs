@@ -13,7 +13,7 @@ internal sealed partial class DocState
     /// <summary>The scalar's text between its quotes or after its block header, before unescaping.</summary>
     public ReadOnlySpan<byte> RawContent(int node)
     {
-        ref readonly CstNode n = ref _nodes[node];
+        ref readonly CstNode n = ref N(node);
         ReadOnlySpan<byte> src = Text;
         switch ((ScalarStyle)n.Style)
         {
@@ -409,8 +409,8 @@ internal sealed partial class DocState
     /// <returns>The offset, or the key's end when no colon follows.</returns>
     public int ColonEnd(int key)
     {
-        int at = SkipTrivia(Text, _nodes[key].End);
-        return at < Length && Text[at] == (byte)':' && IsValueIndicator(key, at) ? at + 1 : _nodes[key].End;
+        int at = SkipTrivia(Text, N(key).End);
+        return at < Length && Text[at] == (byte)':' && IsValueIndicator(key, at) ? at + 1 : N(key).End;
     }
 
     // A colon right before more text is an indicator only inside a flow collection. In block context it starts a
@@ -433,7 +433,7 @@ internal sealed partial class DocState
     public int DashOf(int item, int previous)
     {
         int parent = _nodes[item].Parent;
-        int from = previous >= 0 ? _nodes[previous].End : _nodes[parent].Start;
+        int from = previous >= 0 ? N(previous).End : N(parent).Start;
         return SkipTrivia(Text, from);
     }
 
@@ -446,7 +446,7 @@ internal sealed partial class DocState
         int prop = PropStart(key);
         int prev = PrevSibling(key);
         int parent = _nodes[key].Parent;
-        int from = prev >= 0 ? _nodes[prev].End : (parent >= 0 ? _nodes[parent].Start : prop);
+        int from = prev >= 0 ? N(prev).End : (parent >= 0 ? N(parent).Start : prop);
         int at = SkipTrivia(src, from);
         if (at < prop && at < src.Length && src[at] == (byte)'?' && (at + 1 >= src.Length || src[at + 1] is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t'))
         {
@@ -467,7 +467,7 @@ internal sealed partial class DocState
         int prop = PropStart(key);
         int prev = PrevSibling(key);
         int parent = _nodes[key].Parent;
-        int from = prev >= 0 ? _nodes[prev].End : _nodes[parent].Start + 1;
+        int from = prev >= 0 ? N(prev).End : N(parent).Start + 1;
         int at = SkipTrivia(src, from);
         if (at < src.Length && src[at] == (byte)',')
         {

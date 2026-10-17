@@ -23,6 +23,18 @@ internal static class EditWork
     /// <summary>Entries and nodes looked at while working out the layout new text should copy.</summary>
     [ThreadStatic]
     internal static long LayoutSteps;
+
+    /// <summary>Nodes whose offsets an edit rewrote one by one.</summary>
+    [ThreadStatic]
+    internal static long NodesMoved;
+
+    /// <summary>Chunks of nodes whose move an edit only noted.</summary>
+    [ThreadStatic]
+    internal static long ChunksMoved;
+
+    /// <summary>Times every chunk of a node array had to be brought up to date at once.</summary>
+    [ThreadStatic]
+    internal static long FullSettles;
 }
 
 internal sealed partial class DocState
@@ -432,7 +444,7 @@ internal sealed partial class DocState
             return;
         }
 
-        bool neutral = !HasCollection(_nodes.AsSpan(first, end - first)) && !HasCollection(sub._nodes.AsSpan(1, sub.NodeCount - 1));
+        bool neutral = !HasCollection(NodeSpan(first, end - first)) && !HasCollection(sub._nodes.AsSpan(1, sub.NodeCount - 1));
         cache.ShiftLayouts(neutral, end, d);
         for (int i = 0; i < MapCache.Slots; i++)
         {
@@ -687,6 +699,12 @@ internal sealed class MapCache
         public int Seq;
     }
 
+    /// <summary>
+    /// How far the offsets of each chunk of nodes are behind while a state is edited in place; null otherwise.
+    /// It lives here so that a state that is only read takes no more room.
+    /// </summary>
+    public int[]? Behind;
+
     /// <summary>The expansion sizes of a read through aliases, returned to the pool with the state.</summary>
     public NodeReplay.ExpansionSizes? Expansion;
 
@@ -775,17 +793,29 @@ internal sealed class MapCache
         KeyTable?[]? tables = _tables;
         long want = node + 1;
         int free = -1;
+        KeyTable? freeLeftover = null;
         int victim = -1;
         long victimWork = long.MaxValue;
         for (int i = 0; i < Slots; i++)
         {
             long w = track[i];
+            KeyTable? table = tables?[i];
+
+            // A reader that lost a race can leave the table of one mapping in the slot the account gives to another.
+            // Nobody finds that table, so the slot counts as free: otherwise the mapping would stay unindexed.
+            bool stale = table is not null && table.Node != (int)(w >> 32) - 1;
             if ((w >> 32) == want)
             {
-                if (tables?[i] is not null)
+                if (table is not null && !stale)
                 {
                     work = 0;
                     return -1;
+                }
+
+                if (stale)
+                {
+                    // Take the leftover out for good, so that it can never be found again without a Publish check.
+                    Interlocked.CompareExchange(ref tables![i], null, table);
                 }
 
                 long sum = Math.Min((long)(w & 0xFFFFFFFFL) + pairs, int.MaxValue);
@@ -794,14 +824,15 @@ internal sealed class MapCache
                 return i;
             }
 
-            if (w == 0)
+            if (w == 0 || stale)
             {
                 if (free < 0)
                 {
                     free = i;
+                    freeLeftover = stale ? table : null;
                 }
             }
-            else if (tables?[i] is null)
+            else if (table is null)
             {
                 long spent = w & 0xFFFFFFFFL;
                 if (spent < victimWork)
@@ -840,6 +871,11 @@ internal sealed class MapCache
             tables![at] = null;
         }
 
+        if (freeLeftover is not null && at == free)
+        {
+            Interlocked.CompareExchange(ref tables![at], null, freeLeftover);
+        }
+
         long first = Math.Min((long)pairs, int.MaxValue);
         track[at] = (want << 32) | first;
         work = first;
@@ -855,13 +891,20 @@ internal sealed class MapCache
     // Makes a built table the mapping's index, unless another reader got there first or the slot has moved on.
     public void Publish(int slot, KeyTable t)
     {
-        KeyTable?[] tables = _tables ?? CreateTables();
         long[] track = _track!;
         if ((track[slot] >> 32) != t.Node + 1L)
         {
             return;
         }
 
+        Install(slot, t);
+    }
+
+    // The step of Publish after the slot was found to belong to the table's mapping; a reader that was slow to get
+    // here may find the slot has since been given to another mapping, and then leaves its table behind.
+    internal void Install(int slot, KeyTable t)
+    {
+        KeyTable?[] tables = _tables ?? CreateTables();
         KeyTable? seen = Interlocked.CompareExchange(ref tables[slot], t, null);
         if (seen is not null && seen.Node != t.Node)
         {
@@ -941,6 +984,16 @@ internal sealed class MapCache
         }
     }
 
+    /// <summary>Gives the chunk counts back to the pool; they are cleared when next rented.</summary>
+    public void ReturnBehind()
+    {
+        if (Behind is int[] counts)
+        {
+            Behind = null;
+            ArrayPool<int>.Shared.Return(counts);
+        }
+    }
+
     public void Release()
     {
         if (_tables is not null)
@@ -953,6 +1006,7 @@ internal sealed class MapCache
 
         _track = null;
         _tables = null;
+        ReturnBehind();
         _layouts = 0;
         Expansion?.Release();
         Expansion = null;

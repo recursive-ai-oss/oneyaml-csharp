@@ -42,7 +42,7 @@ internal sealed class AliasPolicy
         _sourceEnd = sourceEnd;
         int root = state.Doc(document).Root;
         _rootFirst = root;
-        _rootEnd = root + state.Node(root).Size;
+        _rootEnd = root + state.NodeS(root).Size;
         _destination = destination;
     }
 
@@ -74,7 +74,7 @@ internal sealed class AliasPolicy
 
         // An anchor takes effect when its node is complete: an alias placed inside the anchored node
         // itself would name an anchor that is not defined yet.
-        if (target <= _dest.Within && _dest.Within < target + _state.Node(target).Size)
+        if (target <= _dest.Within && _dest.Within < target + _state.NodeS(target).Size)
         {
             return false;
         }

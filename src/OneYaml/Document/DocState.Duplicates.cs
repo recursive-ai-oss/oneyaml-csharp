@@ -64,7 +64,7 @@ internal sealed partial class DocState
 
                     if (hashes[e - 1] == h && SameKey(keys[e - 1], key))
                     {
-                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", Text, _nodes[key].Start);
+                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", Text, N(key).Start);
                     }
 
                     slot = (slot + 1) & mask;
@@ -92,7 +92,7 @@ internal sealed partial class DocState
 
     private bool IsPlainlyString(int key)
     {
-        ref readonly CstNode n = ref _nodes[key];
+        ref readonly CstNode n = ref N(key);
         if (n.Props >= 0)
         {
             return false;
@@ -175,7 +175,7 @@ internal sealed partial class DocState
         {
             const string Message = "The integer has more digits than the configured limit.";
             throw where is not null && node >= 0
-                ? YamlException.At(YamlErrorCategory.Limit, Message, where.Text, where._nodes[node].Start)
+                ? YamlException.At(YamlErrorCategory.Limit, Message, where.Text, where.N(node).Start)
                 : new YamlException(Message, YamlErrorCategory.Limit, 0, 0, 0);
         }
     }

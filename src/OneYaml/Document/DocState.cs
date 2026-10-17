@@ -76,9 +76,26 @@ internal sealed partial class DocState : IDisposable
 
     public ReadOnlySpan<byte> Text => _buf.AsSpan(0, Length);
 
-    public ReadOnlySpan<CstNode> Nodes => _nodes.AsSpan(0, NodeCount);
+    public ReadOnlySpan<CstNode> Nodes => NodeSpan(0, NodeCount);
 
-    public ref readonly CstNode Node(int index) => ref _nodes[index];
+    /// <summary>
+    /// The node at an index, read as it is. For code that only runs on states readers share, where no move of offsets is
+    /// held back; the edit engine reads through <see cref="NodeH"/>.
+    /// </summary>
+    public ref readonly CstNode Node(int index)
+    {
+        AssertNotHeld();
+        return ref _nodes[index];
+    }
+
+    /// <summary>
+    /// The node at an index, for reading what an edit never holds back: kind, flags, style, size, count, parent and
+    /// properties. Its offsets may be behind.
+    /// </summary>
+    public ref readonly CstNode NodeS(int index) => ref _nodes[index];
+
+    /// <summary>The node at an index with true offsets, for the edit engine, which may meet a state with moves held back.</summary>
+    public ref readonly CstNode NodeH(int index) => ref N(index);
 
     public ref readonly DocInfo Doc(int index) => ref _docs[index];
 
@@ -214,7 +231,7 @@ internal sealed partial class DocState : IDisposable
     public int PropStart(int node)
     {
         int p = _nodes[node].Props;
-        return p < 0 ? _nodes[node].Start : _props[(p * PropWidth) + 4];
+        return p < 0 ? N(node).Start : _props[(p * PropWidth) + 4];
     }
 
     /// <summary>Just after the node's last property, or its start when it has none.</summary>
@@ -223,7 +240,7 @@ internal sealed partial class DocState : IDisposable
         int p = _nodes[node].Props;
         if (p < 0)
         {
-            return _nodes[node].Start;
+            return N(node).Start;
         }
 
         int end = 0;
@@ -261,6 +278,7 @@ internal sealed partial class DocState : IDisposable
         ExpansionCache = null;
         ReleaseCache();
         Return(ref _buf);
+        _held = false;
         Return(ref _nodes);
         Return(ref _props);
         Return(ref _docs);

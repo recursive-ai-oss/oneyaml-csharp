@@ -10,9 +10,9 @@ internal static partial class Editor
     /// <summary>Finds the line break, indentation step and sequence offset new text near a node should copy.</summary>
     private static Layout DetectLayout(DocState s, int near)
     {
-        string nl = s.BreakNear(s.Node(near).Start);
-        int scope = s.Node(near).Kind == NodeKind.Mapping ? near : s.Node(near).Parent;
-        if (scope >= 0 && s.Node(scope).Kind != NodeKind.Mapping)
+        string nl = s.BreakNear(s.NodeH(near).Start);
+        int scope = s.NodeS(near).Kind == NodeKind.Mapping ? near : s.NodeS(near).Parent;
+        if (scope >= 0 && s.NodeS(scope).Kind != NodeKind.Mapping)
         {
             scope = -1;
         }
@@ -54,7 +54,7 @@ internal static partial class Editor
         if (scope >= 0)
         {
             Probe(s, scope, ref step, ref seqOff);
-            seen += s.Node(scope).Count / 2;
+            seen += s.NodeS(scope).Count / 2;
             if (step == 0)
             {
                 step = EnclosingStep(s, scope);
@@ -64,10 +64,10 @@ internal static partial class Editor
         int i = 0;
         for (; i < s.NodeCount && (step == 0 || seqOff < 0); i++)
         {
-            if (s.Node(i).Kind == NodeKind.Mapping && !s.Node(i).IsFlow)
+            if (s.NodeS(i).Kind == NodeKind.Mapping && !s.NodeS(i).IsFlow)
             {
                 Probe(s, i, ref step, ref seqOff);
-                seen += s.Node(i).Count / 2;
+                seen += s.NodeS(i).Count / 2;
             }
         }
 
@@ -90,12 +90,12 @@ internal static partial class Editor
     // outward. Returns 0 when no enclosing mapping gives a step (the new key is in the root mapping).
     private static int EnclosingStep(DocState s, int map)
     {
-        for (int m = map; m >= 0; m = s.Node(m).Parent)
+        for (int m = map; m >= 0; m = s.NodeS(m).Parent)
         {
-            ref readonly CstNode n = ref s.Node(m);
+            ref readonly CstNode n = ref s.NodeH(m);
             int parent = n.Parent;
             if (n.Kind != NodeKind.Mapping || n.IsFlow || (n.Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0 || parent < 0
-                || s.Node(parent).Kind != NodeKind.Mapping || s.Node(parent).IsFlow || !s.StartsLine(n.Start))
+                || s.NodeS(parent).Kind != NodeKind.Mapping || s.NodeS(parent).IsFlow || !s.StartsLine(n.Start))
             {
                 continue;
             }
@@ -114,18 +114,18 @@ internal static partial class Editor
     // A flow collection takes only the line break from its surroundings, so the document is not searched
     // for indentation it would not use.
     private static Layout FlowOrDetect(DocState s, int near)
-        => s.Node(near).IsFlow ? new Layout(s.BreakNear(s.Node(near).Start), 2, 2, s.EditMode) : DetectLayout(s, near);
+        => s.NodeS(near).IsFlow ? new Layout(s.BreakNear(s.NodeH(near).Start), 2, 2, s.EditMode) : DetectLayout(s, near);
 
     // Looks at the entries of one block mapping for a nested block collection on its own lines.
     private static void Probe(DocState s, int map, ref int step, ref int seqOff)
     {
         int c = map + 1;
-        int pairs = s.Node(map).Count / 2;
+        int pairs = s.NodeS(map).Count / 2;
         for (int p = 0; p < pairs; p++)
         {
             int k = c;
-            int v = c + s.Node(k).Size;
-            ref readonly CstNode vn = ref s.Node(v);
+            int v = c + s.NodeS(k).Size;
+            ref readonly CstNode vn = ref s.NodeH(v);
             if (vn.Kind is NodeKind.Mapping or NodeKind.Sequence && !vn.IsFlow && s.StartsLine(vn.Start))
             {
                 int keyCol = s.Column(s.EntryStart(k));
@@ -191,9 +191,9 @@ internal static partial class Editor
         int n = node;
         while (true)
         {
-            while (s.Node(n).Kind != NodeKind.Scalar)
+            while (s.NodeS(n).Kind != NodeKind.Scalar)
             {
-                if (s.Node(n).Count == 0)
+                if (s.NodeS(n).Count == 0)
                 {
                     return false;
                 }
@@ -201,7 +201,7 @@ internal static partial class Editor
                 n = LastChild(s, n);
             }
 
-            if ((s.Node(n).Flags & NodeFlags.Bare) == 0)
+            if ((s.NodeS(n).Flags & NodeFlags.Bare) == 0)
             {
                 break;
             }
@@ -211,7 +211,7 @@ internal static partial class Editor
             n = s.PrevSibling(n);
         }
 
-        ref readonly CstNode sc = ref s.Node(n);
+        ref readonly CstNode sc = ref s.NodeH(n);
         if (!IsBlockScalar(sc) || (Chomping)sc.Chomp == Chomping.Strip)
         {
             return false;
@@ -264,12 +264,12 @@ internal static partial class Editor
             return AddMemberCore(s, limits, map, key, v);
         }
 
-        int oldSize = s.Node(map).Size;
+        int oldSize = s.NodeS(map).Size;
         int before = trace.Count;
         DocState next = AddMemberCore(s, limits, map, key, v);
         if (trace.Count == before)
         {
-            trace.Add(new NodeEdit(NodeEditKind.Insert, map + oldSize, 0, next.Node(map).Size - oldSize));
+            trace.Add(new NodeEdit(NodeEditKind.Insert, map + oldSize, 0, next.NodeS(map).Size - oldSize));
         }
 
         return next;
@@ -277,7 +277,7 @@ internal static partial class Editor
 
     private static DocState AddMemberCore(DocState s, YamlLimits limits, int map, byte[] key, ValueTree v)
     {
-        ref readonly CstNode m = ref s.Node(map);
+        ref readonly CstNode m = ref s.NodeH(map);
         if ((m.Flags & NodeFlags.Pair) != 0)
         {
             throw Fail(YamlErrorCategory.PatchPath, "A key cannot be added to a pair inside a flow sequence.", s, map);
@@ -315,13 +315,13 @@ internal static partial class Editor
             return InsertItemCore(s, limits, seq, index, v);
         }
 
-        int oldSize = s.Node(seq).Size;
-        int at = index >= 0 && index < s.Node(seq).Count ? s.ChildAt(seq, index) : seq + oldSize;
+        int oldSize = s.NodeS(seq).Size;
+        int at = index >= 0 && index < s.NodeS(seq).Count ? s.ChildAt(seq, index) : seq + oldSize;
         int before = trace.Count;
         DocState next = InsertItemCore(s, limits, seq, index, v);
         if (trace.Count == before)
         {
-            trace.Add(new NodeEdit(NodeEditKind.Insert, at, 0, next.Node(seq).Size - oldSize));
+            trace.Add(new NodeEdit(NodeEditKind.Insert, at, 0, next.NodeS(seq).Size - oldSize));
         }
 
         return next;
@@ -329,7 +329,7 @@ internal static partial class Editor
 
     private static DocState InsertItemCore(DocState s, YamlLimits limits, int seq, int index, ValueTree v)
     {
-        ref readonly CstNode q = ref s.Node(seq);
+        ref readonly CstNode q = ref s.NodeH(seq);
         int count = q.Count;
         if (index < 0 || index > count)
         {
@@ -375,7 +375,7 @@ internal static partial class Editor
 
     private static DocState AddFlow(DocState s, YamlLimits limits, int coll, Layout lay, byte[]? key, ValueTree v, ScalarWriteStyle keyPref, ScalarWriteStyle valPref, int index = -1)
     {
-        ref readonly CstNode c = ref s.Node(coll);
+        ref readonly CstNode c = ref s.NodeH(coll);
         using var text = new ByteBuffer();
         if (key is not null)
         {
@@ -409,7 +409,7 @@ internal static partial class Editor
         if (at >= entries)
         {
             int last = LastChild(s, coll);
-            pos = s.Node(last).End;
+            pos = s.NodeH(last).End;
             if (TryAppendAfterComment(s, limits, last, map, text.WrittenSpan, lay.Nl, out DocState? appended))
             {
                 return appended!;
@@ -438,7 +438,7 @@ internal static partial class Editor
     {
         next = null;
         ReadOnlySpan<byte> src = s.Text;
-        int end = s.Node(last).End;
+        int end = s.NodeH(last).End;
         int entryAt = map ? s.EntryStart(s.PrevSibling(last)) : s.PropStart(last);
         if (!s.StartsLine(entryAt))
         {
@@ -553,8 +553,8 @@ internal static partial class Editor
             return RemoveCore(s, limits, node);
         }
 
-        int parent = s.Node(node).Parent;
-        int first = parent >= 0 && s.Node(parent).Kind == NodeKind.Mapping ? s.PrevSibling(node) : node;
+        int parent = s.NodeS(node).Parent;
+        int first = parent >= 0 && s.NodeS(parent).Kind == NodeKind.Mapping ? s.PrevSibling(node) : node;
         int after = s.After(node);
         int before = trace.Count;
         DocState next = RemoveCore(s, limits, node);
@@ -568,13 +568,13 @@ internal static partial class Editor
 
     private static DocState RemoveCore(DocState s, YamlLimits limits, int node)
     {
-        int parent = s.Node(node).Parent;
+        int parent = s.NodeS(node).Parent;
         if (parent < 0)
         {
             throw Fail(YamlErrorCategory.PatchInvalid, "The root of a document cannot be removed.", s, node);
         }
 
-        ref readonly CstNode p = ref s.Node(parent);
+        ref readonly CstNode p = ref s.NodeH(parent);
         if ((p.Flags & NodeFlags.Pair) != 0 && p.Count == 2)
         {
             // The only entry of a single pair in a flow sequence: the item stays, as an empty mapping.
@@ -597,8 +597,8 @@ internal static partial class Editor
         }
 
         ReadOnlySpan<byte> src = s.Text;
-        string nl = s.BreakNear(s.Node(node).Start);
-        int end = s.Node(node).End;
+        string nl = s.BreakNear(s.NodeH(node).Start);
+        int end = s.NodeH(node).End;
         int prevEntry = s.PrevSibling(first);
         int nextEntry = s.After(node) < s.After(parent) ? s.After(node) : -1;
         if (p.IsFlow)
@@ -644,7 +644,7 @@ internal static partial class Editor
             }
             else
             {
-                from = s.Node(prevEntry).End;
+                from = s.NodeH(prevEntry).End;
                 to = end;
             }
 
@@ -662,7 +662,7 @@ internal static partial class Editor
         // The text that ends right before this entry. A key with no value has an empty value node after it; the
         // key's own text is what ends there.
         int before = first - 1;
-        if (map && before > 0 && (s.Node(before).Flags & NodeFlags.Empty) != 0 && (s.Node(before - 1).Flags & NodeFlags.IsKey) != 0)
+        if (map && before > 0 && (s.NodeS(before).Flags & NodeFlags.Empty) != 0 && (s.NodeS(before - 1).Flags & NodeFlags.IsKey) != 0)
         {
             before--;
         }
@@ -673,20 +673,20 @@ internal static partial class Editor
         {
             start = s.OwnedCommentsStart(s.LineStart(entryStart));
             stop = s.PastLine(end);
-            if (before >= 0 && IsKeepBlock(s.Node(before)))
+            if (before >= 0 && IsKeepBlock(s.NodeH(before)))
             {
                 // A kept block scalar ends right before this entry. The blank lines after the entry would
                 // join it and become part of its value, so they go with the entry.
                 stop = BlankLinesEnd(src, stop);
             }
 
-            if (before >= 0 && IsBlockScalar(s.Node(before)))
+            if (before >= 0 && IsBlockScalar(s.NodeH(before)))
             {
                 // A block scalar ends right before this entry. Comment lines after the entry that are indented
                 // as deep as its lines would be read as text of the scalar, so they go with the entry.
-                stop = CommentLinesEnd(src, stop, s.Node(before).Aux);
+                stop = CommentLinesEnd(src, stop, s.NodeH(before).Aux);
                 stop = TabLinesEnd(src, stop);
-                while (IsKeepBlock(s.Node(before)))
+                while (IsKeepBlock(s.NodeH(before)))
                 {
                     // Blank and comment lines may alternate. Blank lines that lead up to the end of the text stay as
                     // they are; ones that lead up to another entry would join the kept scalar.
@@ -697,7 +697,7 @@ internal static partial class Editor
                         stop = blanksEnd;
                     }
 
-                    stop = CommentLinesEnd(src, stop, s.Node(before).Aux);
+                    stop = CommentLinesEnd(src, stop, s.NodeH(before).Aux);
                     if (stop == seen)
                     {
                         break;
@@ -706,7 +706,7 @@ internal static partial class Editor
             }
 
             if (stop == s.Length && stop > 0 && !DocState.IsBreak(src[stop - 1]) && start > 0
-                && !(before >= 0 && IsBlockScalar(s.Node(before)) && (Chomping)s.Node(before).Chomp != Chomping.Strip))
+                && !(before >= 0 && IsBlockScalar(s.NodeH(before)) && (Chomping)s.NodeS(before).Chomp != Chomping.Strip))
             {
                 // The text had no final line break; the new last line should not gain one.
                 start -= start >= 2 && src[start - 1] == (byte)'\n' && src[start - 2] == (byte)'\r' ? 2 : 1;
@@ -719,8 +719,8 @@ internal static partial class Editor
         }
 
         using var none = new ByteBuffer(1);
-        if (map && nextEntry >= 0 && prevEntry >= 0 && (s.Node(prevEntry).Flags & NodeFlags.Bare) != 0 && s.StartsLine(entryStart)
-            && (s.Node(nextEntry).Flags & NodeFlags.Empty) != 0 && IsColonOnlyEntry(src, s.Node(node).End))
+        if (map && nextEntry >= 0 && prevEntry >= 0 && (s.NodeS(prevEntry).Flags & NodeFlags.Bare) != 0 && s.StartsLine(entryStart)
+            && (s.NodeS(nextEntry).Flags & NodeFlags.Empty) != 0 && IsColonOnlyEntry(src, s.NodeH(node).End))
         {
             // A key with no value, then an entry that is only a colon: without this entry between them the colon
             // would turn into the key's value. A colon line of its own gives the key its empty value.

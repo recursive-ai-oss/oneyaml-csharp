@@ -15,7 +15,7 @@ namespace OneYaml.Documents;
 internal static partial class Editor
 {
     private static YamlException Fail(YamlErrorCategory category, string message, DocState s, int node)
-        => YamlException.At(category, message, s.Text, node >= 0 ? s.Node(node).Start : 0);
+        => YamlException.At(category, message, s.Text, node >= 0 ? s.NodeH(node).Start : 0);
 
     /// <summary>
     /// Refuses an edit that would destroy an anchor that aliases elsewhere still use. Aliases inside
@@ -32,7 +32,7 @@ internal static partial class Editor
         bool any = false;
         for (int i = first; i < end; i++)
         {
-            if (i != except && (s.Node(i).Flags & NodeFlags.HasAliases) != 0)
+            if (i != except && (s.NodeS(i).Flags & NodeFlags.HasAliases) != 0)
             {
                 any = true;
                 break;
@@ -46,7 +46,7 @@ internal static partial class Editor
 
         for (int a = 0; a < s.NodeCount; a++)
         {
-            ref readonly CstNode n = ref s.Node(a);
+            ref readonly CstNode n = ref s.NodeH(a);
             if (n.Kind == NodeKind.Alias && n.Aux >= first && n.Aux < end && n.Aux != except && (a < first || a >= end))
             {
                 throw Fail(YamlErrorCategory.RefusedAlias, "The edit would remove an anchor that aliases still refer to.", s, n.Aux);
@@ -71,12 +71,12 @@ internal static partial class Editor
             return ScalarWriteStyle.Plain;
         }
 
-        ScalarWriteStyle st = StyleOf(s.Node(sibling));
+        ScalarWriteStyle st = StyleOf(s.NodeH(sibling));
         return st is ScalarWriteStyle.SingleQuoted or ScalarWriteStyle.DoubleQuoted ? st : ScalarWriteStyle.Plain;
     }
 
     private static bool IsNullScalar(DocState s, int node)
-        => s.Node(node).Kind == NodeKind.Scalar && s.KindOf(node, out bool valid) == ScalarKind.Null && valid;
+        => s.NodeS(node).Kind == NodeKind.Scalar && s.KindOf(node, out bool valid) == ScalarKind.Null && valid;
 
     /// <summary>Whether the tag on a node still tells the truth about the new value.</summary>
     private static bool KeepTag(DocState s, int node, ValueTree v)
@@ -91,7 +91,7 @@ internal static partial class Editor
 
         // A collection that stays the same kind of collection keeps its tag, whatever the tag says: emptying a
         // mapping that someone tagged with a scalar or sequence tag does not make the tag any less theirs.
-        NodeKind was = s.Node(node).Kind;
+        NodeKind was = s.NodeS(node).Kind;
         if ((was == NodeKind.Mapping && nv.Kind == VKind.Mapping) || (was == NodeKind.Sequence && nv.Kind == VKind.Sequence))
         {
             return true;
@@ -123,7 +123,7 @@ internal static partial class Editor
         }
 
         // A tag the schema does not know makes its scalar read as text, so it fits only a string.
-        NodeKind old = s.Node(node).Kind;
+        NodeKind old = s.NodeS(node).Kind;
         return (old == NodeKind.Scalar && nv.Kind == VKind.Scalar && nv.Scalar == ScalarKind.String)
             || (old == NodeKind.Mapping && nv.Kind == VKind.Mapping)
             || (old == NodeKind.Sequence && nv.Kind == VKind.Sequence);
@@ -149,15 +149,15 @@ internal static partial class Editor
             return ReplaceCore(s, limits, node, v);
         }
 
-        int oldSize = s.Node(node).Size;
+        int oldSize = s.NodeS(node).Size;
         DocState next = ReplaceCore(s, limits, node, v);
-        trace.Add(new NodeEdit(NodeEditKind.Replace, node, oldSize, next.Node(node).Size));
+        trace.Add(new NodeEdit(NodeEditKind.Replace, node, oldSize, next.NodeS(node).Size));
         return next;
     }
 
     private static DocState ReplaceCore(DocState s, YamlLimits limits, int node, ValueTree v)
     {
-        ref readonly CstNode n = ref s.Node(node);
+        ref readonly CstNode n = ref s.NodeH(node);
         if ((n.Flags & NodeFlags.IsKey) != 0)
         {
             throw Fail(YamlErrorCategory.PatchPath, "A key cannot be replaced.", s, node);
@@ -174,7 +174,7 @@ internal static partial class Editor
 
         ReadOnlySpan<byte> src = s.Text;
         int parent = n.Parent;
-        bool inFlow = parent >= 0 && s.Node(parent).IsFlow;
+        bool inFlow = parent >= 0 && s.NodeS(parent).IsFlow;
         if ((n.Flags & NodeFlags.Bare) != 0 && !inFlow)
         {
             return ReplaceBareExplicit(s, limits, node, v);
@@ -196,7 +196,7 @@ internal static partial class Editor
         {
             slotStart = -1;
         }
-        else if (s.Node(parent).Kind == NodeKind.Mapping)
+        else if (s.NodeS(parent).Kind == NodeKind.Mapping)
         {
             ownerCol = inFlow ? 0 : s.Column(s.EntryStart(prevSibling));
             slotStart = s.ColonEnd(prevSibling);
@@ -293,7 +293,7 @@ internal static partial class Editor
 
             if (inFlow && regionStart > 0 && src[regionStart - 1] == (byte)':' && (n.Flags & (NodeFlags.Bare | NodeFlags.Empty)) == 0
                 && (!propsUntouched || body.Count == 0 || body.WrittenSpan[0] is not ((byte)'[' or (byte)'{'))
-                && s.PrevSibling(node) is int key && key >= 0 && s.Node(key).Kind == NodeKind.Scalar && (ScalarStyle)s.Node(key).Style == ScalarStyle.Plain)
+                && s.PrevSibling(node) is int key && key >= 0 && s.NodeS(key).Kind == NodeKind.Scalar && (ScalarStyle)s.NodeS(key).Style == ScalarStyle.Plain)
             {
                 // A flow collection may follow the colon directly, and so may any value after a quoted key; but a
                 // value glued to a plain key would join the key's text: in {a:5} the key is "a:5".
@@ -312,7 +312,7 @@ internal static partial class Editor
             {
                 // A flow entry with no value: the colon is missing as well. Behind a bare tag or anchor the colon
                 // needs a blank first, or the tag would swallow it.
-                if (n.Start > 0 && !(src[n.Start - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r') && (s.Node(s.PrevSibling(node)).Flags & NodeFlags.Empty) != 0)
+                if (n.Start > 0 && !(src[n.Start - 1] is (byte)' ' or (byte)'\t' or (byte)'\n' or (byte)'\r') && (s.NodeS(s.PrevSibling(node)).Flags & NodeFlags.Empty) != 0)
                 {
                     edit.Write((byte)' ');
                 }
@@ -356,7 +356,7 @@ internal static partial class Editor
             // A block collection starts on the next line, so the comment moves up to the key instead of down to the
             // collection's last line.
             ReadOnlySpan<byte> trailing = default;
-            if (!root && newBlockNonEmpty && s.Node(parent).Kind == NodeKind.Mapping && !inFlow && (n.Flags & NodeFlags.Empty) == 0 && !oldBlockColl)
+            if (!root && newBlockNonEmpty && s.NodeS(parent).Kind == NodeKind.Mapping && !inFlow && (n.Flags & NodeFlags.Empty) == 0 && !oldBlockColl)
             {
                 if (n.Kind == NodeKind.Scalar && (ScalarStyle)n.Style is ScalarStyle.Literal or ScalarStyle.Folded)
                 {
@@ -468,7 +468,7 @@ internal static partial class Editor
             {
                 bool endsInBlock;
                 using var lines = new ByteBuffer();
-                if (parent >= 0 && s.Node(parent).Kind == NodeKind.Sequence)
+                if (parent >= 0 && s.NodeS(parent).Kind == NodeKind.Sequence)
                 {
                     bool compact = !hasProps && !keptComment;
                     if (compact)
@@ -634,7 +634,7 @@ internal static partial class Editor
         bool keepTag)
     {
         ReadOnlySpan<byte> src = s.Text;
-        ref readonly CstNode n = ref s.Node(node);
+        ref readonly CstNode n = ref s.NodeH(node);
         bool hasTag = s.HasTag(node);
         bool anchor = s.HasAnchor(node);
         bool propsUntouched = !hasTag || keepTag;
@@ -762,7 +762,7 @@ internal static partial class Editor
             ValueWriter.WriteBlock(lines, v, 0, col + 2, true, lay);
         }
 
-        return AppendLines(s, limits, s.PastLine(s.Node(key).End), lines, lay.Nl, key);
+        return AppendLines(s, limits, s.PastLine(s.NodeH(key).End), lines, lay.Nl, key);
     }
 
     // Properties to write in front of the value when the old ones cannot be left in place.
@@ -782,7 +782,7 @@ internal static partial class Editor
     private static ReadOnlySpan<byte> HeaderComment(DocState s, int node)
     {
         ReadOnlySpan<byte> src = s.Text;
-        int start = s.Node(node).Start;
+        int start = s.NodeH(node).Start;
         int bodyStart = DocState.BodyStart(src, start);
         int lineEnd = bodyStart;
         while (lineEnd > start && DocState.IsBreak(src[lineEnd - 1]))

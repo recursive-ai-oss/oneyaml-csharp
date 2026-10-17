@@ -141,7 +141,7 @@ internal struct AliasBudget
                 YamlErrorCategory.Limit,
                 viaAlias ? _limits.AliasBudgetMessage("Expanding the aliases") : "The patch copies more than the configured limit." + Named(),
                 state.Text,
-                state.Node(node).Start);
+                state.NodeH(node).Start);
         }
     }
 
@@ -161,7 +161,7 @@ internal struct AliasBudget
         _bytes -= bytes;
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(node).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.NodeH(node).Start);
         }
     }
 
@@ -183,7 +183,7 @@ internal struct AliasBudget
         _bytes -= Math.Max(sizes.Bytes[target], 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(alias).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.NodeH(alias).Start);
         }
     }
 
@@ -193,12 +193,12 @@ internal struct AliasBudget
     /// <param name="target">The node it refers to.</param>
     public void Charge(DocState state, int alias, int target)
     {
-        ref readonly CstNode t = ref state.Node(target);
+        ref readonly CstNode t = ref state.NodeH(target);
         _nodes -= t.Size;
         _bytes -= Math.Max(t.End - t.Start, 1);
         if (_nodes < 0 || _bytes < 0)
         {
-            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.Node(alias).Start);
+            throw YamlException.Located(YamlErrorCategory.Limit, _limits.AliasBudgetMessage("Expanding the aliases"), state.Text, state.NodeH(alias).Start);
         }
     }
 }

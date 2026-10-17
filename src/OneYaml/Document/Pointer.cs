@@ -258,7 +258,7 @@ internal static class MessageText
 internal static class PointerOps
 {
     private static YamlException Path(DocState s, YamlErrorCategory category, string message, int node)
-        => YamlException.At(category, message, s.Text, node >= 0 ? s.Node(node).Start : 0);
+        => YamlException.At(category, message, s.Text, node >= 0 ? s.NodeH(node).Start : 0);
 
     /// <summary>Finds the child of a collection that a token names.</summary>
     /// <param name="s">The document.</param>
@@ -270,7 +270,7 @@ internal static class PointerOps
     public static int FindChild(DocState s, int container, ReadOnlySpan<byte> token, out int position)
     {
         position = -1;
-        ref readonly CstNode c = ref s.Node(container);
+        ref readonly CstNode c = ref s.NodeH(container);
         if (c.Kind == NodeKind.Sequence)
         {
             if (token.Length == 1 && token[0] == (byte)'-')
@@ -313,14 +313,14 @@ internal static class PointerOps
     // The slow way, and the reference the index is held to: every key in the mapping's order.
     private static int FindInOrder(DocState s, int container, ReadOnlySpan<byte> token, out int scanned)
     {
-        int count = s.Node(container).Count;
+        int count = s.NodeS(container).Count;
         int found = -1;
         int k = container + 1;
         int i = 0;
         for (; i < count; i += 2)
         {
-            int v = k + s.Node(k).Size;
-            if (s.Node(k).Kind == NodeKind.Scalar && KeyMatches(s, k, token))
+            int v = k + s.NodeS(k).Size;
+            if (s.NodeS(k).Kind == NodeKind.Scalar && KeyMatches(s, k, token))
             {
                 if (found >= 0)
                 {
@@ -332,7 +332,7 @@ internal static class PointerOps
                 found = v;
             }
 
-            k = v + s.Node(v).Size;
+            k = v + s.NodeS(v).Size;
         }
 
         EditWork.KeysExamined += i / 2;
@@ -398,15 +398,15 @@ internal static class PointerOps
     /// <summary>Follows an alias (charging the budget) and checks the node, reached by the first tokens of a pointer, can hold children.</summary>
     public static int Descend(DocState s, ref AliasBudget budget, int node, ref bool viaAlias, in Pointer p, int resolved)
     {
-        if (s.Node(node).Kind == NodeKind.Alias)
+        if (s.NodeS(node).Kind == NodeKind.Alias)
         {
-            int target = s.Node(node).Aux;
+            int target = s.NodeH(node).Aux;
             budget.Charge(s, node, target);
             node = target;
             viaAlias = true;
         }
 
-        if (s.Node(node).Kind == NodeKind.Scalar)
+        if (s.NodeS(node).Kind == NodeKind.Scalar)
         {
             string where = resolved >= 0 ? $"The pointer '{p.Excerpt(p.Count)}' names nothing: '{p.Excerpt(resolved)}' is a scalar (an empty value is a null), which has no members or items to address." : "The pointer goes below a scalar (an empty value is a null), which has no members or items to address.";
             throw Path(s, YamlErrorCategory.PatchPath, where, node);
@@ -429,7 +429,7 @@ internal static class PointerOps
         string has = at == 0 ? "the document root" : "'" + p.Excerpt(at) + "'";
         var sb = new StringBuilder();
         sb.Append("The pointer '").Append(p.Excerpt(p.Count)).Append("' names nothing: ");
-        ref readonly CstNode c = ref s.Node(container);
+        ref readonly CstNode c = ref s.NodeH(container);
         string token = MessageText.Bound(p[at]);
         if (c.Kind == NodeKind.Sequence)
         {
@@ -463,7 +463,7 @@ internal static class PointerOps
     // MaxHintTokens, so a pointer of many tokens costs one scan of the keys, not one per token.
     private static string? EscapeHint(DocState s, in Pointer p, int at, int container)
     {
-        if (s.Node(container).Kind != NodeKind.Mapping || at + 1 >= p.Count)
+        if (s.NodeS(container).Kind != NodeKind.Mapping || at + 1 >= p.Count)
         {
             return null;
         }
@@ -512,16 +512,16 @@ internal static class PointerOps
     {
         int longest = 0;
         int k = mapping + 1;
-        for (int i = 0; i < s.Node(mapping).Count; i += 2)
+        for (int i = 0; i < s.NodeS(mapping).Count; i += 2)
         {
-            int v = k + s.Node(k).Size;
-            if (s.Node(k).Kind == NodeKind.Scalar)
+            int v = k + s.NodeS(k).Size;
+            if (s.NodeS(k).Kind == NodeKind.Scalar)
             {
                 // The source length is an upper bound of the decoded length for a plain or quoted key.
-                longest = Math.Max(longest, s.Node(k).End - s.Node(k).Start);
+                longest = Math.Max(longest, s.NodeH(k).End - s.NodeH(k).Start);
             }
 
-            k = v + s.Node(v).Size;
+            k = v + s.NodeS(v).Size;
         }
 
         return longest;
@@ -530,15 +530,15 @@ internal static class PointerOps
     private static bool HasKey(DocState s, int mapping, ReadOnlySpan<byte> key)
     {
         int k = mapping + 1;
-        for (int i = 0; i < s.Node(mapping).Count; i += 2)
+        for (int i = 0; i < s.NodeS(mapping).Count; i += 2)
         {
-            int v = k + s.Node(k).Size;
-            if (s.Node(k).Kind == NodeKind.Scalar && KeyMatches(s, k, key))
+            int v = k + s.NodeS(k).Size;
+            if (s.NodeS(k).Kind == NodeKind.Scalar && KeyMatches(s, k, key))
             {
                 return true;
             }
 
-            k = v + s.Node(v).Size;
+            k = v + s.NodeS(v).Size;
         }
 
         return false;
@@ -631,7 +631,7 @@ internal static class PointerOps
     private static bool IsEmptyCollection(DocState s, int node, out bool sequence)
     {
         sequence = false;
-        if (s.Node(node).Kind != NodeKind.Scalar || (s.Node(node).Flags & NodeFlags.Empty) == 0)
+        if (s.NodeS(node).Kind != NodeKind.Scalar || (s.NodeS(node).Flags & NodeFlags.Empty) == 0)
         {
             return false;
         }
@@ -645,7 +645,7 @@ internal static class PointerOps
     public static DocState WriteIn(DocState s, YamlLimits limits, int container, ReadOnlySpan<byte> token, ValueTree v, Mode mode, Pointer context = default)
     {
         int child = FindChild(s, container, token, out int position);
-        if (s.Node(container).Kind == NodeKind.Mapping)
+        if (s.NodeS(container).Kind == NodeKind.Mapping)
         {
             if (child >= 0)
             {
@@ -661,7 +661,7 @@ internal static class PointerOps
         }
 
         bool dash = token.Length == 1 && token[0] == (byte)'-';
-        int count = s.Node(container).Count;
+        int count = s.NodeS(container).Count;
         switch (mode)
         {
             case Mode.Replace:
@@ -697,13 +697,13 @@ internal static class PointerOps
         if (p.Count == 0)
         {
             int r = s.Doc(document).Root;
-            return new Destination(s.PropStart(r), r, r + s.Node(r).Size, r);
+            return new Destination(s.PropStart(r), r, r + s.NodeS(r).Size, r);
         }
 
         int cur = Walk(s, limits, document, p, p.Count - 1, out bool viaAlias);
         if (!viaAlias && mode != Mode.Replace && IsEmptyCollection(s, cur, out _))
         {
-            return new Destination(s.PropStart(cur), cur, cur + s.Node(cur).Size, cur);
+            return new Destination(s.PropStart(cur), cur, cur + s.NodeS(cur).Size, cur);
         }
 
         var budget = new AliasBudget(s, limits);
@@ -714,18 +714,18 @@ internal static class PointerOps
         }
 
         int child = FindChild(s, container, p[p.Count - 1], out int position);
-        bool replaces = child >= 0 && (s.Node(container).Kind == NodeKind.Mapping || mode != Mode.Add);
+        bool replaces = child >= 0 && (s.NodeS(container).Kind == NodeKind.Mapping || mode != Mode.Add);
         if (replaces)
         {
-            return new Destination(s.PropStart(child), child, child + s.Node(child).Size, child);
+            return new Destination(s.PropStart(child), child, child + s.NodeS(child).Size, child);
         }
 
-        if (s.Node(container).Kind == NodeKind.Sequence && position >= 0 && position < s.Node(container).Count)
+        if (s.NodeS(container).Kind == NodeKind.Sequence && position >= 0 && position < s.NodeS(container).Count)
         {
             return new Destination(s.PropStart(s.ChildAt(container, position)), -1, -1, container);
         }
 
-        return new Destination(s.Node(container).End, -1, -1, container);
+        return new Destination(s.NodeH(container).End, -1, -1, container);
     }
 
     /// <summary>Removes the entry a pointer names.</summary>
@@ -775,15 +775,15 @@ internal static class PointerOps
         var budget = new AliasBudget(s, limits);
         for (int i = 0; i < p.Count; i++)
         {
-            if (s.Node(cur).Kind == NodeKind.Alias)
+            if (s.NodeS(cur).Kind == NodeKind.Alias)
             {
-                budget.Charge(s, cur, s.Node(cur).Aux);
-                cur = s.Node(cur).Aux;
+                budget.Charge(s, cur, s.NodeH(cur).Aux);
+                cur = s.NodeH(cur).Aux;
             }
 
             failedAt = i;
             failedIn = cur;
-            if (s.Node(cur).Kind == NodeKind.Scalar)
+            if (s.NodeS(cur).Kind == NodeKind.Scalar)
             {
                 return -1;
             }
@@ -797,10 +797,10 @@ internal static class PointerOps
             cur = child;
         }
 
-        if (s.Node(cur).Kind == NodeKind.Alias)
+        if (s.NodeS(cur).Kind == NodeKind.Alias)
         {
-            budget.Charge(s, cur, s.Node(cur).Aux);
-            cur = s.Node(cur).Aux;
+            budget.Charge(s, cur, s.NodeH(cur).Aux);
+            cur = s.NodeH(cur).Aux;
         }
 
         return cur;
@@ -814,7 +814,7 @@ internal static class PointerOps
     /// <returns>The error.</returns>
     public static YamlException Unresolved(DocState s, in Pointer p, int failedAt, int failedIn)
     {
-        if (s.Node(failedIn).Kind == NodeKind.Scalar)
+        if (s.NodeS(failedIn).Kind == NodeKind.Scalar)
         {
             return Path(s, YamlErrorCategory.PatchPath, $"The pointer '{p.Excerpt(p.Count)}' names nothing: '{p.Excerpt(failedAt)}' is a scalar (an empty value is a null), which has no members or items to address.", failedIn);
         }

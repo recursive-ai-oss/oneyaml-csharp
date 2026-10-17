@@ -48,7 +48,7 @@ internal static class PatchEngine
         => new(message, YamlErrorCategory.PatchInvalid, 0, 0, -1, operation);
 
     private static YamlException At(DocState s, YamlErrorCategory category, string message, int node)
-        => YamlException.At(category, message, s.Text, node >= 0 ? s.Node(node).Start : 0);
+        => YamlException.At(category, message, s.Text, node >= 0 ? s.NodeH(node).Start : 0);
 
     // ---- Reading a patch document ----
 
@@ -354,16 +354,18 @@ internal static class PatchEngine
         }
 
         int source = located;
-        if (s.Node(source).Kind == NodeKind.Alias)
+        if (s.NodeS(source).Kind == NodeKind.Alias)
         {
             // Reading follows the alias: the value that moves or is copied is what the alias stands for.
-            budget.Charge(s, source, s.Node(source).Aux);
-            source = s.Node(source).Aux;
+            budget.Charge(s, source, s.NodeH(source).Aux);
+            source = s.NodeH(source).Aux;
         }
 
         Pointer dest = to;
-        var policy = new AliasPolicy(s, source, source + s.Node(source).Size, document, () => PointerOps.Locate(s, limits, document, dest, PointerOps.Mode.Add));
+        var policy = new AliasPolicy(s, source, source + s.NodeS(source).Size, document, () => PointerOps.Locate(s, limits, document, dest, PointerOps.Mode.Add));
         var value = new ValueTree();
+        // The copy reads nodes as they are, so nothing may be held back.
+        s.SettleNodes();
         value.AppendFrom(s, source, ref budget, policy, chargeCopies: !remove);
         if (!remove)
         {
@@ -402,7 +404,7 @@ internal static class PatchEngine
 
     private static bool WritesFirst(DocState s, YamlLimits limits, int document, int located, in Pointer from, in Pointer to)
     {
-        if (to.Count == 0 || from.Count == 0 || s.Node(located).Parent < 0 || s.Node(s.Node(located).Parent).Kind != NodeKind.Mapping)
+        if (to.Count == 0 || from.Count == 0 || s.NodeS(located).Parent < 0 || s.NodeS(s.NodeH(located).Parent).Kind != NodeKind.Mapping)
         {
             return false;
         }
@@ -417,7 +419,7 @@ internal static class PatchEngine
         var budget = new AliasBudget(s, limits);
         bool via = false;
         int container = PointerOps.Descend(s, ref budget, parent, ref via);
-        return s.Node(container).Kind == NodeKind.Mapping;
+        return s.NodeS(container).Kind == NodeKind.Mapping;
     }
 
     // ---- Comparing by the data model ----
@@ -429,14 +431,14 @@ internal static class PatchEngine
         while (work.Count > 0)
         {
             (int d, int vi) = work.Pop();
-            if (s.Node(d).Kind == NodeKind.Alias)
+            if (s.NodeS(d).Kind == NodeKind.Alias)
             {
-                budget.Charge(s, d, s.Node(d).Aux);
-                d = s.Node(d).Aux;
+                budget.Charge(s, d, s.NodeH(d).Aux);
+                d = s.NodeH(d).Aux;
             }
 
             ref readonly VNode vn = ref v[vi];
-            ref readonly CstNode dn = ref s.Node(d);
+            ref readonly CstNode dn = ref s.NodeH(d);
             switch (vn.Kind)
             {
                 case VKind.Scalar:
@@ -458,7 +460,7 @@ internal static class PatchEngine
                         for (int i = 0; i < vn.Count; i++)
                         {
                             work.Push((dc, vc));
-                            dc += s.Node(dc).Size;
+                            dc += s.NodeS(dc).Size;
                             vc += v[vc].Size;
                         }
 
@@ -507,10 +509,10 @@ internal static class PatchEngine
 
         int found = -1;
         int k = map + 1;
-        for (int i = 0; i < s.Node(map).Count; i += 2)
+        for (int i = 0; i < s.NodeS(map).Count; i += 2)
         {
-            int val = k + s.Node(k).Size;
-            if (s.Node(k).Kind == NodeKind.Scalar && ScalarEquals(s, k, key))
+            int val = k + s.NodeS(k).Size;
+            if (s.NodeS(k).Kind == NodeKind.Scalar && ScalarEquals(s, k, key))
             {
                 if (found >= 0)
                 {
@@ -520,7 +522,7 @@ internal static class PatchEngine
                 found = val;
             }
 
-            k = val + s.Node(val).Size;
+            k = val + s.NodeS(val).Size;
         }
 
         return found;
@@ -651,7 +653,7 @@ internal static class PatchEngine
         int cur = s.Doc(document).Root;
         foreach (byte[] token in tokens)
         {
-            if (s.Node(cur).Kind != NodeKind.Mapping)
+            if (s.NodeS(cur).Kind != NodeKind.Mapping)
             {
                 return -1;
             }
@@ -669,7 +671,7 @@ internal static class PatchEngine
     private static void Enter(ref DocState cur, DocState original, YamlLimits limits, int document, List<byte[]> tokens, List<MergeFrame> frames, JsonNode? patch, bool popToken)
     {
         int target = Locate(cur, document, tokens);
-        if (patch is JsonObject obj && target >= 0 && cur.Node(target).Kind == NodeKind.Mapping)
+        if (patch is JsonObject obj && target >= 0 && cur.NodeS(target).Kind == NodeKind.Mapping)
         {
             var frame = new MergeFrame { PopToken = popToken };
             foreach (KeyValuePair<string, JsonNode?> member in obj)
@@ -688,17 +690,17 @@ internal static class PatchEngine
             return;
         }
 
-        if (patch is JsonObject && target >= 0 && cur.Node(target).Kind == NodeKind.Alias)
+        if (patch is JsonObject && target >= 0 && cur.NodeS(target).Kind == NodeKind.Alias)
         {
             // Merging into an alias would change every place that shares the anchored node.
-            int resolved = cur.Node(target).Aux;
-            if (cur.Node(resolved).Kind == NodeKind.Mapping && ((JsonObject)patch).Count == 0)
+            int resolved = cur.NodeH(target).Aux;
+            if (cur.NodeS(resolved).Kind == NodeKind.Mapping && ((JsonObject)patch).Count == 0)
             {
                 Finish(tokens, popToken);
                 return;
             }
 
-            if (cur.Node(resolved).Kind == NodeKind.Mapping)
+            if (cur.NodeS(resolved).Kind == NodeKind.Mapping)
             {
                 throw At(cur, YamlErrorCategory.RefusedAlias, "The patch would merge into an alias and change every place that shares the anchored node.", target);
             }
@@ -729,7 +731,7 @@ internal static class PatchEngine
         }
 
         int map = Locate(cur, document, tokens);
-        if (map < 0 || cur.Node(map).Kind != NodeKind.Mapping)
+        if (map < 0 || cur.NodeS(map).Kind != NodeKind.Mapping)
         {
             return false;
         }
@@ -755,7 +757,7 @@ internal static class PatchEngine
         int cur = s.Doc(document).Root;
         for (int i = 0; i < tokens.Count; i++)
         {
-            if (s.Node(cur).Kind != NodeKind.Mapping)
+            if (s.NodeS(cur).Kind != NodeKind.Mapping)
             {
                 return s;
             }
