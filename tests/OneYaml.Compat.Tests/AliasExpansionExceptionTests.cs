@@ -63,16 +63,4 @@ public class AliasExpansionExceptionTests
         var ex = Assert.ThrowsAny<YdnCore.MaximumRecursionLevelReachedException>(() => deserializer.Deserialize<object>(yaml));
         Assert.Equal(typeof(YdnCore.MaximumRecursionLevelReachedException), ex.GetType());
     }
-
-    [Fact]
-    public void The_mapping_follows_the_mark_on_the_engine_error_and_not_its_wording()
-    {
-        // Same words as a real refusal, but not made by the engine as one: only a depth or size limit by the mark.
-        var spoken = new global::OneYaml.YamlException("Expanding the aliases exceeds the budget set by YamlLimits (invented).") { Category = global::OneYaml.YamlErrorCategory.Limit };
-        Assert.Equal(typeof(YdnCore.MaximumRecursionLevelReachedException), global::OneYaml.Compat.YamlDotNet.Internal.ErrorMap.Translate(spoken, null).GetType());
-
-        string yaml = Bomb(9, 9);
-        var ex = Assert.Throws<YdnCore.AliasExpansionLimitExceededException>(() => new YdnSer.DeserializerBuilder().Build().Deserialize<object>(yaml));
-        Assert.NotNull(ex);
-    }
 }

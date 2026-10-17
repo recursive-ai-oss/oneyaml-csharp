@@ -18,10 +18,6 @@ internal struct MemberSet
     private ulong _low;
     private ulong[]? _high;
 
-    // Names of extension entries that came in through a merge key inside this merge source's mapping. Members have a bit
-    // for that; the keys of an extension member are open-ended, so they are kept by name, only for a mapping read through a merge.
-    private HashSet<string>? _extNames;
-
     public MemberSet(int count) => _high = count > 64 ? new ulong[(count - 1) / 64] : null;
 
     // The set of a mapping that is read as a merge source: the words for the members, then the words for merged keys.
@@ -54,21 +50,12 @@ internal struct MemberSet
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void MarkMerged(in MemberSet other)
     {
-        if (other._extNames is not null)
-        {
-            (_extNames ??= []).UnionWith(other._extNames);
-        }
-
         int words = (_high!.Length + 1) / 2;
         for (int k = 0; k < words; k++)
         {
             _high[_high.Length - 1 - k] |= other.Word(k) | other.MergedWord(k);
         }
     }
-
-    public readonly bool HasExtension(string name) => _extNames is not null && _extNames.Contains(name);
-
-    public void AddExtension(string name) => (_extNames ??= []).Add(name);
 
     private ulong Word(int k) => k == 0 ? _low : _high![k - 1];
 
@@ -611,7 +598,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
         if (extra is not null)
         {
-            FlushExtra(ref instance, slots, extra, merging, ref merged);
+            FlushExtra(ref instance, slots, extra, merging);
         }
 
         skipped.Release();
@@ -667,21 +654,13 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         (extra ??= new Dictionary<string, object?>(StringComparer.Ordinal))[name] = value;
     }
 
-    // Hands the collected keys to the member. In a mapping read as a merge source, entries that mapping merged in itself
-    // give way to its own keys, and entries that were there before it began give way to both.
-    private void FlushExtra(ref T instance, object?[]? slots, Dictionary<string, object?> collected, bool merging, ref MemberSet merged)
+    // Hands the collected keys to the member. Entries from a merged mapping give way to a key the mapping has itself.
+    private void FlushExtra(ref T instance, object?[]? slots, Dictionary<string, object?> collected, bool merging)
     {
         YamlPropertyInfo<T> extension = _info.Extension!;
         foreach (KeyValuePair<string, object?> entry in collected)
         {
-            if (!merging)
-            {
-                extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: true);
-            }
-            else if (extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: merged.HasExtension(entry.Key)))
-            {
-                merged.AddExtension(entry.Key);
-            }
+            extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: !merging);
         }
     }
 

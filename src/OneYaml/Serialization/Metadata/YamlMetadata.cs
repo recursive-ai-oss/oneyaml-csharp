@@ -129,9 +129,8 @@ public abstract class YamlPropertyInfo<TDeclaring> : YamlPropertyInfo
     internal abstract object? ReadExtensionValue(ref Utf8YamlReader reader, YamlSerializerOptions options);
 
     // For the extension member: adds one entry, creating the dictionary when the member holds none. In the slots of a
-    // type made through a constructor, or in the instance itself. Tells whether the entry was written: without overwrite,
-    // an entry that is already there stays.
-    internal abstract bool AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite);
+    // type made through a constructor, or in the instance itself.
+    internal abstract void AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite);
 
     // For the extension member: writes the entries as mapping entries.
     internal abstract void WriteExtension(Utf8YamlEmitter writer, TDeclaring instance, YamlTypeInfo<TDeclaring> info, string? discriminatorKey);
@@ -318,7 +317,7 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
     internal override object? ReadExtensionValue(ref Utf8YamlReader reader, YamlSerializerOptions options) =>
         _extensionConverter!.ReadValue(ref reader, options);
 
-    internal override bool AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite)
+    internal override void AddExtension(ref TDeclaring instance, object?[]? slots, string key, object? value, bool overwrite)
     {
         IDictionary<string, object?>? target;
         if (slots is not null)
@@ -343,10 +342,7 @@ internal sealed class YamlPropertyInfoImpl<TDeclaring, TProperty> : YamlProperty
         if (overwrite || !target.ContainsKey(key))
         {
             target[key] = value;
-            return true;
         }
-
-        return false;
     }
 
     // A key that a member wrote, or that names the derived type, is not written from the dictionary: written twice it would
