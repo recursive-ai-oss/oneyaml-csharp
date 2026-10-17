@@ -15,6 +15,8 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ### Fixed
 
+- **`OneYaml.Compat.YamlDotNet` writes `Int128`, `UInt128` and `Half` as numbers and reads them back.** They were written as `{}` (as YamlDotNet does), which lost the value. A `Half` too large for the type is an error rather than infinity.
+- **`OneYaml.Compat.YamlDotNet` reports a repeated key read from a parser as a `YamlException`.** `YamlStream.Load(IParser)` threw `ArgumentException`; it now throws the library's `YamlException`, positioned at the repeated key.
 - **A key in extension data now beats the same key merged into the same merge source.** With `MergeKeys` on, a mapping read through a merge key (`<<: *base`) whose own `<<` brought in `x` and which also gave `x` itself kept the merged value when the type has an extension data member; the mapping's own `x` now wins, wherever its `<<` stands, as it already did for members and dictionaries. The first source still wins among several, and the keys of the mapping that is read itself still beat every source.
 - **`OneYaml.Compat.YamlDotNet` no longer reads the error text to tell an alias budget from a depth limit.** The core error carries the mark, so rewording a message cannot change which exception is thrown.
 

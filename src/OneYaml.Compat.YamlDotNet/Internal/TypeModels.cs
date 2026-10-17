@@ -151,7 +151,7 @@ internal sealed class TypeModels
     public static bool IsScalarType(Type t) =>
         t.IsPrimitive || t == typeof(string) || t == typeof(decimal) || t == typeof(DateTime) || t == typeof(DateTimeOffset)
         || t == typeof(Guid) || t == typeof(TimeSpan) || t == typeof(Uri) || t == typeof(Version) || t == typeof(DateOnly)
-        || t == typeof(TimeOnly) || t == typeof(BigInteger);
+        || t == typeof(TimeOnly) || t == typeof(BigInteger) || t == typeof(Int128) || t == typeof(UInt128) || t == typeof(Half);
 
     private TypeModel Build(Type type)
     {
