@@ -27,7 +27,7 @@ public class PatchBenchmarks
     private YamlPatch _patch = new();
     private JsonPatch _jsonPatch = null!;
 
-    [Params("reference-a", "reference-b", "compose-wordpress", "gha-workflow", "records-4k", "records-64k", "openapi-100k-many-ops", "records-64k-many-ops", "flow-appends-1k")]
+    [Params("reference-a", "reference-b", "compose-wordpress", "gha-workflow", "records-4k", "records-64k", "openapi-100k-many-ops", "records-64k-many-ops", "records-8m-many-ops", "openapi-8m-many-ops", "flow-appends-1k")]
     public string Workload { get; set; } = string.Empty;
 
     /// <summary>The size of the input, to turn allocated bytes into a multiple of it.</summary>

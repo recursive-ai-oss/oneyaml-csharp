@@ -23,6 +23,18 @@ internal static class EditWork
     /// <summary>Entries and nodes looked at while working out the layout new text should copy.</summary>
     [ThreadStatic]
     internal static long LayoutSteps;
+
+    /// <summary>Nodes whose offsets an edit rewrote one by one.</summary>
+    [ThreadStatic]
+    internal static long NodesMoved;
+
+    /// <summary>Chunks of nodes whose move an edit only noted.</summary>
+    [ThreadStatic]
+    internal static long ChunksMoved;
+
+    /// <summary>Times every chunk of a node array had to be brought up to date at once.</summary>
+    [ThreadStatic]
+    internal static long FullSettles;
 }
 
 internal sealed partial class DocState
@@ -179,7 +191,7 @@ internal sealed partial class DocState
                 int key = container + rel;
                 if (KeyTextMatches(key, token))
                 {
-                    result = key + _nodes[key].Size;
+                    result = key + N(key).Size;
                     break;
                 }
             }
@@ -200,7 +212,7 @@ internal sealed partial class DocState
     {
         MapCache c = EnsureCache();
         int slot = c.Charge(container, pairsScanned, out long work);
-        if (slot >= 0 && work >= (long)BuildAfterScans * (_nodes[container].Count / 2))
+        if (slot >= 0 && work >= (long)BuildAfterScans * (N(container).Count / 2))
         {
             c.Publish(slot, BuildTable(container, Exclusive));
         }
@@ -211,7 +223,7 @@ internal sealed partial class DocState
     // array that goes back to the pool twice is handed to two renters.
     private KeyTable BuildTable(int container, bool pooled)
     {
-        int pairs = _nodes[container].Count / 2;
+        int pairs = N(container).Count / 2;
         int capacity = 64;
         while (capacity * 5 < pairs * 8)
         {
@@ -235,15 +247,15 @@ internal sealed partial class DocState
         for (int i = 0; i < pairs; i++)
         {
             int key = c;
-            int value = key + _nodes[key].Size;
-            if (_nodes[key].Kind == NodeKind.Scalar && !InsertKey(t, key))
+            int value = key + N(key).Size;
+            if (N(key).Kind == NodeKind.Scalar && !InsertKey(t, key))
             {
                 t.Release();
                 t.Refused = true;
                 break;
             }
 
-            c = value + _nodes[value].Size;
+            c = value + N(value).Size;
         }
 
         EditWork.KeysExamined += pairs;
@@ -432,7 +444,7 @@ internal sealed partial class DocState
             return;
         }
 
-        bool neutral = !HasCollection(_nodes.AsSpan(first, end - first)) && !HasCollection(sub._nodes.AsSpan(1, sub.NodeCount - 1));
+        bool neutral = !HasCollection(NodeSpan(first, end - first)) && !HasCollection(sub._nodes.AsSpan(1, sub.NodeCount - 1));
         cache.ShiftLayouts(neutral, end, d);
         for (int i = 0; i < MapCache.Slots; i++)
         {
@@ -456,7 +468,7 @@ internal sealed partial class DocState
             }
 
             KeyTable? t = cache.TableAt(i);
-            if (t is null || node + _nodes[node].Size <= first || t.Slots is null)
+            if (t is null || node + N(node).Size <= first || t.Slots is null)
             {
                 continue;
             }
@@ -468,14 +480,14 @@ internal sealed partial class DocState
                 while (c < end)
                 {
                     // Children alternate key and value from the region's first node, which is a key.
-                    if (_nodes[c].Kind == NodeKind.Scalar && !RemoveKey(t, c))
+                    if (N(c).Kind == NodeKind.Scalar && !RemoveKey(t, c))
                     {
                         ok = false;
                         break;
                     }
 
-                    c += _nodes[c].Size;
-                    c += _nodes[c].Size;
+                    c += N(c).Size;
+                    c += N(c).Size;
                 }
 
                 if (!ok)
@@ -506,7 +518,7 @@ internal sealed partial class DocState
         int stop = first + newCount;
         while (c < stop)
         {
-            if (_nodes[c].Kind == NodeKind.Scalar)
+            if (N(c).Kind == NodeKind.Scalar)
             {
                 if (!InsertKey(t, c))
                 {
@@ -523,8 +535,8 @@ internal sealed partial class DocState
                 }
             }
 
-            c += _nodes[c].Size;
-            c += _nodes[c].Size;
+            c += N(c).Size;
+            c += N(c).Size;
         }
 
         return unique;
@@ -544,19 +556,19 @@ internal sealed partial class DocState
         for (int slotIndex = 0; slotIndex < MapCache.Slots; slotIndex++)
         {
             KeyTable? t = cache.TableAt(slotIndex);
-            if (t is null || t.Slots is null || cache.NodeAt(slotIndex) != t.Node || _nodes[t.Node].Count > VerifyMaxNodes)
+            if (t is null || t.Slots is null || cache.NodeAt(slotIndex) != t.Node || N(t.Node).Count > VerifyMaxNodes)
             {
                 continue;
             }
 
             int expected = 0;
-            int pairs = _nodes[t.Node].Count / 2;
+            int pairs = N(t.Node).Count / 2;
             int c = t.Node + 1;
             for (int i = 0; i < pairs; i++)
             {
                 int key = c;
-                int value = key + _nodes[key].Size;
-                if (_nodes[key].Kind == NodeKind.Scalar)
+                int value = key + N(key).Size;
+                if (N(key).Kind == NodeKind.Scalar)
                 {
                     expected++;
                     if (IndexedFind(t.Node, RawOrDecoded(key)) != value)
@@ -565,7 +577,7 @@ internal sealed partial class DocState
                     }
                 }
 
-                c = value + _nodes[value].Size;
+                c = value + N(value).Size;
             }
 
             if (t.Used != expected)
@@ -687,6 +699,12 @@ internal sealed class MapCache
         public int Seq;
     }
 
+    /// <summary>
+    /// How far the offsets of each chunk of nodes are behind while a state is edited in place; null otherwise.
+    /// It lives here so that a state that is only read takes no more room.
+    /// </summary>
+    public int[]? Behind;
+
     /// <summary>The expansion sizes of a read through aliases, returned to the pool with the state.</summary>
     public NodeReplay.ExpansionSizes? Expansion;
 
@@ -780,9 +798,14 @@ internal sealed class MapCache
         for (int i = 0; i < Slots; i++)
         {
             long w = track[i];
+            KeyTable? table = tables?[i];
+
+            // A reader that lost a race can leave the table of one mapping in the slot the account gives to another.
+            // Nobody finds that table, so the slot counts as free: otherwise the mapping would stay unindexed.
+            bool stale = table is not null && table.Node != (int)(w >> 32) - 1;
             if ((w >> 32) == want)
             {
-                if (tables?[i] is not null)
+                if (table is not null && !stale)
                 {
                     work = 0;
                     return -1;
@@ -794,14 +817,14 @@ internal sealed class MapCache
                 return i;
             }
 
-            if (w == 0)
+            if (w == 0 || stale)
             {
                 if (free < 0)
                 {
                     free = i;
                 }
             }
-            else if (tables?[i] is null)
+            else if (table is null)
             {
                 long spent = w & 0xFFFFFFFFL;
                 if (spent < victimWork)
@@ -855,13 +878,20 @@ internal sealed class MapCache
     // Makes a built table the mapping's index, unless another reader got there first or the slot has moved on.
     public void Publish(int slot, KeyTable t)
     {
-        KeyTable?[] tables = _tables ?? CreateTables();
         long[] track = _track!;
         if ((track[slot] >> 32) != t.Node + 1L)
         {
             return;
         }
 
+        Install(slot, t);
+    }
+
+    // The step of Publish after the slot was found to belong to the table's mapping; a reader that was slow to get
+    // here may find the slot has since been given to another mapping, and then leaves its table behind.
+    internal void Install(int slot, KeyTable t)
+    {
+        KeyTable?[] tables = _tables ?? CreateTables();
         KeyTable? seen = Interlocked.CompareExchange(ref tables[slot], t, null);
         if (seen is not null && seen.Node != t.Node)
         {
@@ -953,6 +983,7 @@ internal sealed class MapCache
 
         _track = null;
         _tables = null;
+        Behind = null;
         _layouts = 0;
         Expansion?.Release();
         Expansion = null;

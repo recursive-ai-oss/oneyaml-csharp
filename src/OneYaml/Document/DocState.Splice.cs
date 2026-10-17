@@ -46,7 +46,31 @@ internal sealed partial class DocState
     /// Whether the state may be changed in place. A patch holds the states it made on the way and says so,
     /// so that its next operation edits the one it owns instead of copying it.
     /// </summary>
-    internal bool Exclusive { get; set; }
+    internal bool Exclusive
+    {
+        get => _exclusive;
+        set
+        {
+            if (!value)
+            {
+                // Readers of a shared state never bring a chunk up to date, so nothing may be held back from here on.
+                ReleaseHeld();
+            }
+
+            _exclusive = value;
+        }
+    }
+
+    private bool _exclusive;
+
+    // How far this state has come in being edited in place, in one byte so that the state does not grow: 0 not at all,
+    // 1 once, 2 at least twice and the starts of the nodes never decrease along the array, 3 at least twice and they do.
+    // Holding an offset move back for the nodes behind an edit is only right in state 2, and a state edited once is not
+    // worth the pass that tells which of the two it is.
+    private byte _moveState;
+
+    // From this many nodes on, an edit in place holds the offset move back; tests lower the number.
+    internal static int LazyMoveMinNodes = 4096;
 
     /// <summary>Whether a directive may precede a document: tags are then not resolved with the default handles.</summary>
     private bool HasDirectives
@@ -111,7 +135,8 @@ internal sealed partial class DocState
         d.AliasCount = 0;
         d.PropCountRows = 0;
         d._directives = 0;
-        d.Exclusive = false;
+        d._exclusive = false;
+        d._moveState = 0;
         return d;
     }
 
@@ -202,7 +227,7 @@ internal sealed partial class DocState
     /// <summary>Whether a collection can stand as the region that an edit is parsed again in.</summary>
     private bool IsRegionRoot(int node)
     {
-        ref readonly CstNode n = ref _nodes[node];
+        ref readonly CstNode n = ref N(node);
         return n.Kind is NodeKind.Mapping or NodeKind.Sequence && (n.Flags & (NodeFlags.Pair | NodeFlags.IsKey)) == 0;
     }
 
@@ -212,7 +237,7 @@ internal sealed partial class DocState
     /// </summary>
     private bool Encloses(int node, int s, int e)
     {
-        ref readonly CstNode n = ref _nodes[node];
+        ref readonly CstNode n = ref N(node);
         if (n.Kind is not (NodeKind.Mapping or NodeKind.Sequence))
         {
             return false;
@@ -237,7 +262,7 @@ internal sealed partial class DocState
         while (lo <= hi)
         {
             int mid = (lo + hi) >> 1;
-            if (_nodes[mid].Start < position)
+            if (N(mid).Start < position)
             {
                 found = mid;
                 lo = mid + 1;
@@ -254,9 +279,9 @@ internal sealed partial class DocState
     // The child of a collection that a node below it belongs to.
     private int ChildContaining(int node, int collection)
     {
-        while (node >= 0 && _nodes[node].Parent != collection)
+        while (node >= 0 && N(node).Parent != collection)
         {
-            node = _nodes[node].Parent;
+            node = N(node).Parent;
         }
 
         return node;
@@ -280,7 +305,7 @@ internal sealed partial class DocState
         }
 
         // The collection around the last node that starts before the edit, or around a node it contains.
-        int cur = LastStartingBefore(root + 1, root + _nodes[root].Size, s);
+        int cur = LastStartingBefore(root + 1, root + N(root).Size, s);
         if (cur < 0)
         {
             cur = root;
@@ -288,7 +313,7 @@ internal sealed partial class DocState
 
         while (cur != root && !Encloses(cur, s, e))
         {
-            cur = _nodes[cur].Parent;
+            cur = N(cur).Parent;
         }
 
         return cur;
@@ -344,7 +369,7 @@ internal sealed partial class DocState
             }
 
             int cur = old.InnermostEnclosing(s, e);
-            for (int attempt = 0; cur >= 0 && attempt < MaxSpliceAttempts; attempt++, cur = old._nodes[cur].Parent)
+            for (int attempt = 0; cur >= 0 && attempt < MaxSpliceAttempts; attempt++, cur = old.N(cur).Parent)
             {
                 if (old.IsRegionRoot(cur))
                 {
@@ -371,25 +396,25 @@ internal sealed partial class DocState
     // collection the item's own start (or just after the opening bracket for the first item).
     private int ItemStart(int collection, int index, int firstNode, int previousEnd)
     {
-        if (_nodes[collection].IsFlow)
+        if (N(collection).IsFlow)
         {
-            return index == 0 ? _nodes[collection].Start + 1 : PropStart(firstNode);
+            return index == 0 ? N(collection).Start + 1 : PropStart(firstNode);
         }
 
-        return index == 0 ? _nodes[collection].Start : SkipTrivia(Text, previousEnd);
+        return index == 0 ? N(collection).Start : SkipTrivia(Text, previousEnd);
     }
 
     // The first node of the item that a node of a collection belongs to: the key of a mapping's pair.
     private int ItemFirst(int collection, int child)
     {
-        return _nodes[collection].Kind == NodeKind.Mapping && (_nodes[child].Flags & NodeFlags.IsKey) == 0 ? PrevSibling(child) : child;
+        return N(collection).Kind == NodeKind.Mapping && (N(child).Flags & NodeFlags.IsKey) == 0 ? PrevSibling(child) : child;
     }
 
     private static DocState? TryRegion(DocState old, int n, int s, int e, ReadOnlySpan<byte> text, YamlLimits limits, out int reparsed)
     {
         reparsed = 0;
         ReadOnlySpan<byte> src = old.Text;
-        ref readonly CstNode nn = ref old._nodes[n];
+        ref readonly CstNode nn = ref old.N(n);
         bool flow = nn.IsFlow;
         bool map = nn.Kind == NodeKind.Mapping;
         int step = map ? 2 : 1;
@@ -400,9 +425,9 @@ internal sealed partial class DocState
         }
 
         int ancestors = 0;
-        for (int p = nn.Parent; p >= 0; p = old._nodes[p].Parent)
+        for (int p = nn.Parent; p >= 0; p = old.N(p).Parent)
         {
-            if ((old._nodes[p].Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0)
+            if ((old.N(p).Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0)
             {
                 return null;
             }
@@ -446,7 +471,7 @@ internal sealed partial class DocState
             while (true)
             {
                 bool first = kFirst == n + 1;
-                kStart = old.ItemStart(n, first ? 0 : 1, kFirst, first ? -1 : old._nodes[old.PrevSibling(kFirst)].End);
+                kStart = old.ItemStart(n, first ? 0 : 1, kFirst, first ? -1 : old.N(old.PrevSibling(kFirst)).End);
                 if (s > kStart || first)
                 {
                     break;
@@ -462,16 +487,16 @@ internal sealed partial class DocState
                 jFirst = kFirst;
             }
 
-            int jLast = map ? jFirst + old._nodes[jFirst].Size : jFirst;
-            tNode = jLast + old._nodes[jLast].Size;
-            int jEnd = old._nodes[jLast].End;
+            int jLast = map ? jFirst + old.N(jFirst).Size : jFirst;
+            tNode = jLast + old.N(jLast).Size;
+            int jEnd = old.N(jLast).End;
             if (e > jEnd && tNode < end)
             {
                 // The edit ends in the gap before the next item, which then belongs to the region.
                 jFirst = tNode;
-                jLast = map ? jFirst + old._nodes[jFirst].Size : jFirst;
-                tNode = jLast + old._nodes[jLast].Size;
-                jEnd = old._nodes[jLast].End;
+                jLast = map ? jFirst + old.N(jFirst).Size : jFirst;
+                tNode = jLast + old.N(jLast).Size;
+                jEnd = old.N(jLast).End;
                 if (e > jEnd)
                 {
                     return null;
@@ -483,7 +508,7 @@ internal sealed partial class DocState
             // Only a block scalar at the end can read the comment lines after it as its own, so only then are they all included.
             regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e), EndsInBlockScalar(old, kFirst, tNode, text))) : jEnd;
             oldKids = 0;
-            for (int c = kFirst; c < tNode; c += old._nodes[c].Size)
+            for (int c = kFirst; c < tNode; c += old.N(c).Size)
             {
                 oldKids++;
             }
@@ -546,7 +571,7 @@ internal sealed partial class DocState
         // Aliases and anchors in the old region may reach outside it; the whole text decides those.
         for (int i = kFirst; i < tNode; i++)
         {
-            ref readonly CstNode o = ref old._nodes[i];
+            ref readonly CstNode o = ref old.N(i);
             if (o.Kind == NodeKind.Alias || old.HasAnchor(i))
             {
                 return null;
@@ -626,7 +651,7 @@ internal sealed partial class DocState
 
         for (int i = firstNode; i < endNode; i++)
         {
-            if (old._nodes[i].Kind == NodeKind.Scalar && (ScalarStyle)old._nodes[i].Style is ScalarStyle.Literal or ScalarStyle.Folded)
+            if (old.N(i).Kind == NodeKind.Scalar && (ScalarStyle)old.N(i).Style is ScalarStyle.Literal or ScalarStyle.Folded)
             {
                 return true;
             }
@@ -722,7 +747,7 @@ internal sealed partial class DocState
             return false;
         }
 
-        ref readonly CstNode root = ref _nodes[0];
+        ref readonly CstNode root = ref N(0);
         if (root.Kind != kind || root.IsFlow != flow || (root.Flags & NodeFlags.Pair) != 0 || (root.Count == 0 && !flow))
         {
             return false;
@@ -759,7 +784,7 @@ internal sealed partial class DocState
         ReadOnlySpan<byte> subText = sub.Text;
         for (int i = 0; i < oldKids / 2; i++)
         {
-            ref readonly CstNode a = ref _nodes[o];
+            ref readonly CstNode a = ref N(o);
             ref readonly CstNode b = ref sub._nodes[m];
             if (a.Kind != b.Kind || a.Style != b.Style || a.Props >= 0 || b.Props >= 0 || a.End - a.Start != b.End - b.Start
                 || !oldText.Slice(a.Start, a.End - a.Start).SequenceEqual(subText.Slice(b.Start, b.End - b.Start)))
@@ -768,7 +793,7 @@ internal sealed partial class DocState
             }
 
             o += a.Size;
-            o += _nodes[o].Size;
+            o += N(o).Size;
             m += b.Size;
             m += sub._nodes[m].Size;
         }
@@ -805,7 +830,7 @@ internal sealed partial class DocState
         {
             c._cache = TakeCache();
             c._nodes = ArrayPool<CstNode>.Shared.Rent(Math.Max(NodeCount + Math.Max(extraNodes, 0) + 16, 1));
-            _nodes.AsSpan(0, NodeCount).CopyTo(c._nodes);
+            NodeSpan(0, NodeCount).CopyTo(c._nodes);
             c._props = ArrayPool<int>.Shared.Rent(Math.Max(((PropCountRows + extraProps) * PropWidth) + PropWidth, 1));
             _props.AsSpan(0, PropCountRows * PropWidth).CopyTo(c._props);
             c._docs = ArrayPool<DocInfo>.Shared.Rent(Math.Max(DocCount, 1));
@@ -857,9 +882,75 @@ internal sealed partial class DocState
         }
     }
 
+    // Moves the offsets of the nodes behind an edit that kept the number of nodes. In a state edited in place the move
+    // of the far nodes is held back (see DocState.Held), so that a run of edits costs what the edits do and not the
+    // size of the document each time.
+    private void MoveTail(int from, int count, int regionEnd, int bd)
+    {
+        if (from >= count)
+        {
+            return;
+        }
+
+        if (_moveState == 2 && _exclusive && N(from).Start >= regionEnd)
+        {
+            HoldMoveFrom(from, count, bd);
+            return;
+        }
+
+        Span<CstNode> tail = NodeSpan(from, count - from);
+        for (int i = 0; i < tail.Length; i++)
+        {
+            ref CstNode x = ref tail[i];
+
+            // The empty root made up for a document without any node is kept at the end of the array,
+            // whichever document it belongs to: only those after the region move.
+            if (x.Start < regionEnd)
+            {
+                continue;
+            }
+
+            x.Start += bd;
+            x.End += bd;
+            if (x.Kind is NodeKind.Mapping or NodeKind.Sequence || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
+            {
+                x.Aux += bd;
+            }
+        }
+
+        EditWork.NodesMoved += tail.Length;
+    }
+
+    private bool StartsAreOrdered()
+    {
+        ReadOnlySpan<CstNode> all = NodeSpan(0, NodeCount);
+        for (int i = 1; i < all.Length; i++)
+        {
+            if (all[i].Start < all[i - 1].Start)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     // Returns whether the keys the region brought are known to differ from all the others in the mapping.
     private bool ApplySplice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, int d, int bd, bool touchesEnd)
     {
+        if (_exclusive && NodeCount >= LazyMoveMinNodes)
+        {
+            if (_moveState == 0)
+            {
+                _moveState = 1;
+            }
+            else if (_moveState == 1)
+            {
+                // Asked before the arrays change: halfway through an edit they are not in order.
+                _moveState = StartsAreOrdered() ? (byte)2 : (byte)3;
+            }
+        }
+
         CacheBeforeSplice(sub, n, first, end, d);
 
         // Sizes worked out for the text before the edit no longer fit it.
@@ -870,11 +961,11 @@ internal sealed partial class DocState
         int propBase = PropCountRows;
 
         // The collections around the region get a different size, and every offset beyond the region moves.
-        int oldEnd = _nodes[n].End;
+        int oldEnd = N(n).End;
         int newEnd = sub._nodes[0].End + baseOffset;
-        for (int a = n; a >= 0; a = _nodes[a].Parent)
+        for (int a = n; a >= 0; a = N(a).Parent)
         {
-            ref CstNode an = ref _nodes[a];
+            ref CstNode an = ref N(a);
             an.Size += d;
             if (touchesEnd && an.End == oldEnd)
             {
@@ -892,43 +983,28 @@ internal sealed partial class DocState
             }
         }
 
-        _nodes[n].Count += newKids - oldKids;
+        N(n).Count += newKids - oldKids;
 
-        Ensure(ref _nodes, oldCount, oldCount + d);
-        if (d != 0)
+        if (_nodes.Length < oldCount + d)
         {
-            Array.Copy(_nodes, end, _nodes, end + d, oldCount - end);
+            // A bigger array starts with counts that fit it.
+            SettleNodes();
+            Ensure(ref _nodes, oldCount, oldCount + d);
         }
 
-        Span<CstNode> nodes = _nodes.AsSpan(0, oldCount + d);
-        Span<CstNode> tail = nodes.Slice(first + newCount);
         if (d == 0)
         {
             // No node changed place, so only offsets move, and not at all when the text kept its length.
             if (bd != 0)
             {
-                for (int i = 0; i < tail.Length; i++)
-                {
-                    ref CstNode x = ref tail[i];
-
-                    // The empty root made up for a document without any node is kept at the end of the array,
-                    // whichever document it belongs to: only those after the region move.
-                    if (x.Start < regionEnd)
-                    {
-                        continue;
-                    }
-
-                    x.Start += bd;
-                    x.End += bd;
-                    if (x.Kind is NodeKind.Mapping or NodeKind.Sequence || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
-                    {
-                        x.Aux += bd;
-                    }
-                }
+                MoveTail(end, oldCount, regionEnd, bd);
             }
         }
         else
         {
+            CstNode[] items = NodesSettled();
+            Array.Copy(items, end, items, end + d, oldCount - end);
+            Span<CstNode> tail = items.AsSpan(first + newCount, oldCount + d - first - newCount);
             for (int i = 0; i < tail.Length; i++)
             {
                 ref CstNode x = ref tail[i];
@@ -956,6 +1032,8 @@ internal sealed partial class DocState
                     x.Aux += bd;
                 }
             }
+
+            EditWork.NodesMoved += tail.Length;
         }
 
         // The old property rows keep their numbers; offsets beyond the region move.
@@ -1010,7 +1088,7 @@ internal sealed partial class DocState
                 x.Aux = 0;
             }
 
-            _nodes[first + m - 1] = x;
+            N(first + m - 1) = x;
         }
 
         NodeCount = oldCount + d;
@@ -1107,9 +1185,9 @@ internal sealed partial class DocState
 
         // Where the next token starts after a node can only be told from the text that follows it.
         ReadOnlySpan<byte> all = Text;
-        for (int a = n; a >= 0; a = _nodes[a].Parent)
+        for (int a = n; a >= 0; a = N(a).Parent)
         {
-            ref CstNode an = ref _nodes[a];
+            ref CstNode an = ref N(a);
             if (!an.IsFlow)
             {
                 an.Aux = SkipTriviaAndMark(all, an.End);
@@ -1118,7 +1196,7 @@ internal sealed partial class DocState
 
         for (int i = first; i < first + newCount; i++)
         {
-            ref CstNode x = ref _nodes[i];
+            ref CstNode x = ref N(i);
             if ((x.Kind is NodeKind.Mapping or NodeKind.Sequence && !x.IsFlow) || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
             {
                 x.Aux = SkipTriviaAndMark(all, x.End);

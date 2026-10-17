@@ -76,29 +76,29 @@ internal sealed partial class DocState : IDisposable
 
     public ReadOnlySpan<byte> Text => _buf.AsSpan(0, Length);
 
-    public ReadOnlySpan<CstNode> Nodes => _nodes.AsSpan(0, NodeCount);
+    public ReadOnlySpan<CstNode> Nodes => NodeSpan(0, NodeCount);
 
-    public ref readonly CstNode Node(int index) => ref _nodes[index];
+    public ref readonly CstNode Node(int index) => ref N(index);
 
     public ref readonly DocInfo Doc(int index) => ref _docs[index];
 
     public (int Start, int End) Comment(int index) => (_comments[index * 2], _comments[(index * 2) + 1]);
 
-    public bool HasAnchor(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth)] >= 0;
+    public bool HasAnchor(int node) => N(node).Props >= 0 && _props[(N(node).Props * PropWidth)] >= 0;
 
-    public bool HasTag(int node) => _nodes[node].Props >= 0 && _props[(_nodes[node].Props * PropWidth) + 2] >= 0;
+    public bool HasTag(int node) => N(node).Props >= 0 && _props[(N(node).Props * PropWidth) + 2] >= 0;
 
     /// <summary>What the node's tag means once its handle is resolved, <see cref="TagClass.None"/> when it has no tag.</summary>
     public TagClass TagClassOf(int node)
     {
-        int p = _nodes[node].Props;
+        int p = N(node).Props;
         return p < 0 || _props[(p * PropWidth) + 2] < 0 ? TagClass.None : (TagClass)_props[(p * PropWidth) + 5];
     }
 
     /// <summary>The anchor name (without <c>&amp;</c>) of a node, empty when it has none.</summary>
     public ReadOnlySpan<byte> AnchorName(int node)
     {
-        int p = _nodes[node].Props;
+        int p = N(node).Props;
         if (p < 0 || _props[p * PropWidth] < 0)
         {
             return default;
@@ -110,7 +110,7 @@ internal sealed partial class DocState : IDisposable
     /// <summary>The tag as written (including the leading <c>!</c>), empty when the node has none.</summary>
     public ReadOnlySpan<byte> RawTag(int node)
     {
-        int p = _nodes[node].Props;
+        int p = N(node).Props;
         if (p < 0 || _props[(p * PropWidth) + 2] < 0)
         {
             return default;
@@ -120,7 +120,7 @@ internal sealed partial class DocState : IDisposable
     }
 
     /// <summary>Where the node's tag, as written, starts; the node must have one.</summary>
-    public int TagStartOf(int node) => _props[(_nodes[node].Props * PropWidth) + 2];
+    public int TagStartOf(int node) => _props[(N(node).Props * PropWidth) + 2];
 
     /// <summary>Says where a node's tag is written and where its prefix and suffix are, without building the full tag.</summary>
     /// <param name="node">A node.</param>
@@ -134,7 +134,7 @@ internal sealed partial class DocState : IDisposable
     public bool TryTagParts(int node, out int start, out int length, out int prefixStart, out int prefixLength, out int suffixStart, out int suffixLength)
     {
         start = length = prefixStart = prefixLength = suffixStart = suffixLength = 0;
-        int p = _nodes[node].Props;
+        int p = N(node).Props;
         if (p < 0 || _props[(p * PropWidth) + 2] < 0)
         {
             return false;
@@ -213,17 +213,17 @@ internal sealed partial class DocState : IDisposable
     /// <summary>Where the node's first property starts, or its own start when it has none.</summary>
     public int PropStart(int node)
     {
-        int p = _nodes[node].Props;
-        return p < 0 ? _nodes[node].Start : _props[(p * PropWidth) + 4];
+        int p = N(node).Props;
+        return p < 0 ? N(node).Start : _props[(p * PropWidth) + 4];
     }
 
     /// <summary>Just after the node's last property, or its start when it has none.</summary>
     public int PropEnd(int node)
     {
-        int p = _nodes[node].Props;
+        int p = N(node).Props;
         if (p < 0)
         {
-            return _nodes[node].Start;
+            return N(node).Start;
         }
 
         int end = 0;
@@ -261,6 +261,7 @@ internal sealed partial class DocState : IDisposable
         ExpansionCache = null;
         ReleaseCache();
         Return(ref _buf);
+        _held = false;
         Return(ref _nodes);
         Return(ref _props);
         Return(ref _docs);

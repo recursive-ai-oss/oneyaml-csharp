@@ -19,7 +19,7 @@ internal sealed partial class DocState
     /// <param name="map">The mapping node, whose subtree is complete.</param>
     private void CheckDuplicateKeys(int map)
     {
-        int pairs = _nodes[map].Count / 2;
+        int pairs = N(map).Count / 2;
         int[]? rented = null;
         Span<int> hashes = pairs <= SmallPairs ? stackalloc int[SmallPairs] : (rented = ArrayPool<int>.Shared.Rent(pairs * 2)).AsSpan(0, pairs);
         Span<int> keys = pairs <= SmallPairs ? stackalloc int[SmallPairs] : rented.AsSpan(pairs, pairs);
@@ -41,9 +41,9 @@ internal sealed partial class DocState
             for (int i = 0; i < pairs; i++)
             {
                 int key = c;
-                c += _nodes[key].Size;
-                c += _nodes[c].Size;
-                if (_nodes[key].Kind != NodeKind.Scalar)
+                c += N(key).Size;
+                c += N(c).Size;
+                if (N(key).Kind != NodeKind.Scalar)
                 {
                     continue;
                 }
@@ -64,7 +64,7 @@ internal sealed partial class DocState
 
                     if (hashes[e - 1] == h && SameKey(keys[e - 1], key))
                     {
-                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", Text, _nodes[key].Start);
+                        throw YamlException.AtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", Text, N(key).Start);
                     }
 
                     slot = (slot + 1) & mask;
@@ -92,7 +92,7 @@ internal sealed partial class DocState
 
     private bool IsPlainlyString(int key)
     {
-        ref readonly CstNode n = ref _nodes[key];
+        ref readonly CstNode n = ref N(key);
         if (n.Props >= 0)
         {
             return false;

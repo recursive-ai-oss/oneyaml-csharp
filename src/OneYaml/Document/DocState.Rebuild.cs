@@ -89,7 +89,7 @@ internal sealed partial class DocState
     /// <returns>The sibling's index.</returns>
     public int PrevSibling(int node)
     {
-        int parent = _nodes[node].Parent;
+        int parent = N(node).Parent;
         if (parent < 0 || node == parent + 1)
         {
             return -1;
@@ -97,9 +97,9 @@ internal sealed partial class DocState
 
         // The node just before this one in the array is the last of the previous sibling's subtree.
         int c = node - 1;
-        while (_nodes[c].Parent != parent)
+        while (N(c).Parent != parent)
         {
-            c = _nodes[c].Parent;
+            c = N(c).Parent;
         }
 
         return c;

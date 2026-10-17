@@ -133,6 +133,9 @@ internal static class SpliceCheck
         DocState.VerifyCaches = true;
         DocState.IndexMinNodes = 8;
         DocState.LayoutMinSteps = 0;
+
+        // The held-back move of node offsets is used from the second edit in place on, whatever the size.
+        DocState.LazyMoveMinNodes = 0;
     }
 #pragma warning restore CA2255
 
