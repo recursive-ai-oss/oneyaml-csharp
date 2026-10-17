@@ -4,6 +4,8 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-17
+
 ### Changed
 
 - **Many operations on one large mapping no longer slow down with its size.** Looking up a key, working out the indentation to write and checking for duplicate keys each walked the whole mapping on every operation. On a mapping of 100,000 keys, 10,000 patch operations took 19.1 s to remove, 11.9 s to replace and 3.4 s to test; they take about 1.5 s, 1.1 s and 26 ms now (`ApplyPatch`, `ApplyMergePatch`, `Set`, `Remove` and the indexers share the change). A mapping of 256 or more entries gets a key index once searching it in order has cost a few times its size, so a small mapping, or one read once or twice, behaves and costs as before; the read that builds the index costs a few searches more, and later reads are quicker; the index stays correct across edits, and a mapping with two keys of the same text is searched in order as before. Output bytes, errors and positions are unchanged. A document that is only parsed keeps its size; once an index is built the document holds it until it is disposed, about 13 to 32 bytes per entry (21 at 100,000 keys). What still grows with the document is moving the entries after an edit, about 80 microseconds per edit at 100,000 keys.
@@ -52,5 +54,7 @@ The first release: a YAML 1.2 library for .NET 8 and .NET 10 that reads and writ
 - **What an edit keeps.** Removing an entry also removes the comment lines just above it, replacing a whole mapping or sequence discards the comments inside it, and writes through an alias are refused. There is no API to read or write comments. See [What an edit keeps](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/editing.md#what-an-edit-keeps-and-what-it-does-not).
 - **The adapters refuse what they cannot do.** Options an adapter cannot follow, such as YamlDotNet's `EnsureRoundtrip` and SharpYaml's layout options, throw `NotSupportedException` instead of being ignored. Each is listed on the adapter's differences page.
 
-[Unreleased]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/recursive-ai-oss/oneyaml-csharp/releases/tag/v1.0.0

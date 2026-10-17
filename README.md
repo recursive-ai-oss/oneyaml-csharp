@@ -17,11 +17,11 @@ slower shows as a slower bar):
 
 <!-- generated:bench-chart -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.0/docs/img/oneyaml-csharp-hero-dark.svg">
-  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.0/docs/img/oneyaml-csharp-hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-dark.svg">
+  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-light.svg">
 </picture>
 
-[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.1.0/docs/performance.md)
+[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.1.1/docs/performance.md)
 <!-- end generated -->
 
 ## Why oneyaml-csharp
@@ -46,8 +46,9 @@ slower shows as a slower bar):
   library at typed load, generic load, dump, document parse, editing
   and writing back an unedited file, through reflection and generated
   metadata alike, and level or lower on memory throughout. Not on
-  every file: writing back an unedited file of about 64 KB was slower
-  than SharpYaml's syntax tree in our run, and a few files are level
+  every file: writing back three unedited files (about 32 KB to
+  256 KB) was up to 1.6 times slower than SharpYaml's syntax tree in
+  our run, and a few files are level
   ([every loss](docs/performance.md#results-at-a-glance)).
 
 [How oneyaml-csharp compares](docs/comparison.md) with YamlDotNet,
