@@ -9,6 +9,10 @@ using OneYaml.Serialization.Metadata;
 namespace OneYaml;
 
 // A set of member indexes already seen. Up to 64 members need no allocation.
+//
+// A set made for a merge source (the constructor with mergeSource) also has a second bit per member, kept in the top words of the array:
+// it marks a key that came in through a merge key inside that mapping, which an explicit key of the same mapping
+// may still replace. Only mappings read through a merge pay for it; the sets of an ordinary read never allocate.
 internal struct MemberSet
 {
     private ulong _low;
@@ -16,18 +20,46 @@ internal struct MemberSet
 
     public MemberSet(int count) => _high = count > 64 ? new ulong[(count - 1) / 64] : null;
 
-    // Adds every member of another set of the same size.
-    public void UnionWith(in MemberSet other)
+    // The set of a mapping that is read as a merge source: the words for the members, then the words for merged keys.
+    public MemberSet(int count, bool mergeSource)
     {
-        _low |= other._low;
-        if (_high is not null)
+        _high = new ulong[(2 * ((count + 63) / 64)) - 1];
+    }
+
+    // Adds every member of a merge source's set, given by the mapping or merged into it, to a set made by the plain constructor.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void UnionWithAll(in MemberSet other)
+    {
+        bool tracksMerged = (other._high?.Length ?? 0) > (_high?.Length ?? 0);
+        int words = (_high?.Length ?? 0) + 1;
+        for (int k = 0; k < words; k++)
         {
-            for (int i = 0; i < _high.Length; i++)
+            ulong bits = other.Word(k) | (tracksMerged ? other.MergedWord(k) : 0);
+            if (k == 0)
             {
-                _high[i] |= other._high![i];
+                _low |= bits;
+            }
+            else
+            {
+                _high![k - 1] |= bits;
             }
         }
     }
+
+    // Marks every member of another merge source's set as one that came in through a merge, in this merge source's set.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void MarkMerged(in MemberSet other)
+    {
+        int words = (_high!.Length + 1) / 2;
+        for (int k = 0; k < words; k++)
+        {
+            _high[_high.Length - 1 - k] |= other.Word(k) | other.MergedWord(k);
+        }
+    }
+
+    private ulong Word(int k) => k == 0 ? _low : _high![k - 1];
+
+    private ulong MergedWord(int k) => _high![_high.Length - 1 - k];
 
     // A set of its own with the same members.
     public MemberSet Copy()
@@ -703,8 +735,8 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         bool inSource)
     {
         MemberSet decided = seen.Copy();
-        decided.UnionWith(in merged);
-        var own = new MemberSet(_info.Props.Length);
+        decided.UnionWithAll(in merged);
+        var own = new MemberSet(_info.Props.Length, mergeSource: true);
         if (_info.Extension is null)
         {
             ReadMembers(ref reader, options, ref instance, slots, ref decided, ref own, merging: true);
@@ -714,15 +746,15 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
             ReadMembersGeneral(ref reader, options, ref instance, slots, ref decided, ref own, ReadMerging, null);
         }
 
-        // Inside another merged mapping the keys count as decided there, not as keys that mapping gave itself: an
+        // Inside another merged mapping the keys came in through a merge there, not as keys that mapping gave itself: an
         // explicit key after the merge key still takes the place of a merged one.
         if (inSource)
         {
-            seen.UnionWith(in own);
+            merged.MarkMerged(in own);
         }
         else
         {
-            merged.UnionWith(in own);
+            merged.UnionWithAll(in own);
         }
     }
 
