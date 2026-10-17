@@ -450,7 +450,7 @@ public class ProductionThresholds
 
                 ops.Append((i % 3) switch
                 {
-                    0 => $"{{\"op\":\"replace\",\"path\":\"/big/key{i * 17}\",\"value\":\"r{i}\"}}",
+                    0 => $"{{\"op\":\"replace\",\"path\":\"/big/key{i * 17}\",\"value\":\"replaced{i}\"}}",
                     1 => $"{{\"op\":\"add\",\"path\":\"/big/new{i}\",\"value\":{{\"a\":[1,2]}}}}",
                     _ => $"{{\"op\":\"remove\",\"path\":\"/big/key{(i * 13) + 1}\"}}",
                 });
@@ -461,7 +461,7 @@ public class ProductionThresholds
 
             using YamlDocument fresh = YamlDocument.Parse(doc.ToUtf8Bytes());
             Assert.Equal(fresh.Get<string>("/big/key17"), doc.Get<string>("/big/key17"));
-            Assert.Equal("r3", doc.Get<string>("/big/key51"));
+            Assert.Equal("replaced3", doc.Get<string>("/big/key51"));
             Assert.False(doc.TryGet<string>("/big/key27", out _));
             doc.Set("/big/key2000", "set");
             doc.Remove("/big/key2001");
