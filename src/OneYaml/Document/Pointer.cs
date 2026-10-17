@@ -288,15 +288,44 @@ internal static class PointerOps
             return idx < c.Count ? s.ChildAt(container, idx) : -1;
         }
 
+        if (c.Count >= DocState.IndexMinNodes)
+        {
+            int indexed = s.IndexedFind(container, token);
+            if (indexed != DocState.NotIndexed)
+            {
+                if (DocState.VerifyCaches && c.Count <= DocState.VerifyMaxNodes)
+                {
+                    VerifyIndexed(s, container, token, indexed);
+                }
+
+                return indexed;
+            }
+
+            // The state keeps account of what searching this mapping costs, and builds its index when that is worth it.
+            int found = FindInOrder(s, container, token, out int scanned);
+            s.NoteScan(container, scanned);
+            return found;
+        }
+
+        return FindInOrder(s, container, token, out _);
+    }
+
+    // The slow way, and the reference the index is held to: every key in the mapping's order.
+    private static int FindInOrder(DocState s, int container, ReadOnlySpan<byte> token, out int scanned)
+    {
+        int count = s.Node(container).Count;
         int found = -1;
         int k = container + 1;
-        for (int i = 0; i < c.Count; i += 2)
+        int i = 0;
+        for (; i < count; i += 2)
         {
             int v = k + s.Node(k).Size;
             if (s.Node(k).Kind == NodeKind.Scalar && KeyMatches(s, k, token))
             {
                 if (found >= 0)
                 {
+                    EditWork.KeysExamined += i / 2;
+                    scanned = i / 2;
                     throw Path(s, YamlErrorCategory.RefusedAmbiguous, $"More than one key matches the pointer token '{MessageText.Bound(token)}'.", k);
                 }
 
@@ -306,26 +335,34 @@ internal static class PointerOps
             k = v + s.Node(v).Size;
         }
 
+        EditWork.KeysExamined += i / 2;
+        scanned = i / 2;
         return found;
     }
 
-    private static bool KeyMatches(DocState s, int key, ReadOnlySpan<byte> token)
+    private static void VerifyIndexed(DocState s, int container, ReadOnlySpan<byte> token, int indexed)
     {
-        if (s.IsRaw(key))
-        {
-            return s.RawContent(key).SequenceEqual(token);
-        }
-
-        ReadOnlySpan<byte> text = s.DecodedScalar(key, out byte[]? rented);
+        // The check is not part of the work the counters are there to show.
+        long counted = EditWork.KeysExamined;
+        int expected;
         try
         {
-            return text.SequenceEqual(token);
+            expected = FindInOrder(s, container, token, out _);
         }
-        finally
+        catch (YamlException)
         {
-            DocState.ReleaseDecoded(rented);
+            throw new InvalidOperationException("The key index found a key where searching in order finds two.");
+        }
+
+        EditWork.KeysExamined = counted;
+
+        if (expected != indexed)
+        {
+            throw new InvalidOperationException($"The key index found node {indexed}, searching in order found node {expected}.");
         }
     }
+
+    private static bool KeyMatches(DocState s, int key, ReadOnlySpan<byte> token) => s.KeyTextMatches(key, token);
 
     /// <summary>Follows the first tokens of a pointer from a document root.</summary>
     /// <param name="s">The document.</param>

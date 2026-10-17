@@ -125,7 +125,15 @@ internal static class SpliceCheck
 
 #pragma warning disable CA2255 // The check must be in place before any test runs, whichever one is first.
     [ModuleInitializer]
-    internal static void Install() => DocState.RebuildObserver = Observe;
+    internal static void Install()
+    {
+        DocState.RebuildObserver = Observe;
+
+        // Every remembered layout and key index is held to a fresh computation while the tests run.
+        DocState.VerifyCaches = true;
+        DocState.IndexMinNodes = 8;
+        DocState.LayoutMinSteps = 0;
+    }
 #pragma warning restore CA2255
 
     private static void Observe(DocState state, YamlLimits limits, int reparsed)

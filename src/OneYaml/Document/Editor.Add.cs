@@ -11,26 +11,67 @@ internal static partial class Editor
     private static Layout DetectLayout(DocState s, int near)
     {
         string nl = s.BreakNear(s.Node(near).Start);
-        int step = 0;
-        int seqOff = -1;
         int scope = s.Node(near).Kind == NodeKind.Mapping ? near : s.Node(near).Parent;
-        if (scope >= 0 && s.Node(scope).Kind == NodeKind.Mapping)
+        if (scope >= 0 && s.Node(scope).Kind != NodeKind.Mapping)
+        {
+            scope = -1;
+        }
+
+        // What the layout is worked out from does not change while edits leave collections alone, so a layout that was
+        // costly to work out is remembered and the next edits reuse it.
+        if (s.TryGetLayoutMemo(scope, out int knownStep, out int knownSeq))
+        {
+            if (DocState.VerifyCaches)
+            {
+                long counted = EditWork.LayoutSteps;
+                FindIndentation(s, scope, out int freshStep, out int freshSeq);
+                EditWork.LayoutSteps = counted;
+                if (freshStep != knownStep || freshSeq != knownSeq)
+                {
+                    throw new InvalidOperationException($"The remembered layout ({knownStep}, {knownSeq}) differs from the one worked out again ({freshStep}, {freshSeq}).");
+                }
+            }
+
+            return new Layout(nl, knownStep, knownSeq, s.EditMode);
+        }
+
+        long steps = FindIndentation(s, scope, out int step, out int seqOff);
+        if (steps >= DocState.LayoutMinSteps)
+        {
+            s.StoreLayoutMemo(scope, step, seqOff);
+        }
+
+        return new Layout(nl, step, seqOff, s.EditMode);
+    }
+
+    // The indentation of nested mappings and the offset of sequences under a key, taken from the mapping the edit is in
+    // (when it is one) and then from the first mappings of the document that show them.
+    private static long FindIndentation(DocState s, int scope, out int step, out int seqOff)
+    {
+        step = 0;
+        seqOff = -1;
+        long seen = 0;
+        if (scope >= 0)
         {
             Probe(s, scope, ref step, ref seqOff);
+            seen += s.Node(scope).Count / 2;
             if (step == 0)
             {
                 step = EnclosingStep(s, scope);
             }
         }
 
-        for (int i = 0; i < s.NodeCount && (step == 0 || seqOff < 0); i++)
+        int i = 0;
+        for (; i < s.NodeCount && (step == 0 || seqOff < 0); i++)
         {
             if (s.Node(i).Kind == NodeKind.Mapping && !s.Node(i).IsFlow)
             {
                 Probe(s, i, ref step, ref seqOff);
+                seen += s.Node(i).Count / 2;
             }
         }
 
+        EditWork.LayoutSteps += seen + i;
         if (step == 0)
         {
             step = 2;
@@ -41,7 +82,7 @@ internal static partial class Editor
             seqOff = step;
         }
 
-        return new Layout(nl, step, seqOff, s.EditMode);
+        return seen + i;
     }
 
     // The step of the nearest block mapping, from the mapping out, that sits on its own lines under a key: how far its

@@ -242,12 +242,24 @@ internal sealed partial class DocState : IDisposable
     }
 
     /// <summary>The expansion sizes a read through aliases worked out for this state, returned to the pool on <see cref="Dispose"/>.</summary>
-    internal NodeReplay.ExpansionSizes? ExpansionCache { get; set; }
+    internal NodeReplay.ExpansionSizes? ExpansionCache
+    {
+        get => _cache?.Expansion;
+        set
+        {
+            // Both live in one object that exists only once either is needed, so a state that is only read carries a single reference.
+            if (value is not null || _cache is not null)
+            {
+                EnsureCache().Expansion = value;
+            }
+        }
+    }
 
     public void Dispose()
     {
         ExpansionCache?.Release();
         ExpansionCache = null;
+        ReleaseCache();
         Return(ref _buf);
         Return(ref _nodes);
         Return(ref _props);
