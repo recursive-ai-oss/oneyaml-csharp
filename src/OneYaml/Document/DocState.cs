@@ -7,10 +7,11 @@ using OneYaml.Text;
 namespace OneYaml.Documents;
 
 /// <summary>
-/// The text of a YAML stream and its lossless tree. A state is not changed once it is built: an edit
-/// builds the next state from the bytes it wants, so a failed edit leaves this one intact. The one
-/// exception is a state a patch has marked <see cref="Exclusive"/>: the patch made it, nobody else can
-/// see it yet, and its next operation edits it in place.
+/// The text of a YAML stream and its lossless tree. A state is not changed while readers may be using it: an edit
+/// builds the next state from the bytes it wants, so a failed edit leaves this one intact. There are two
+/// exceptions, both of which nobody else can see while they run: a state a patch has marked <see cref="Exclusive"/>
+/// (the patch made it, and its next operation edits it in place), and the state of a document during one edit made
+/// through its own methods (see <see cref="BeginSingleEdit"/>), which puts the state back if the edit fails.
 /// The arrays come from the shared pool and go back on <see cref="Dispose"/>.
 /// </summary>
 internal sealed partial class DocState : IDisposable

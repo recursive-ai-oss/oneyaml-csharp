@@ -138,6 +138,7 @@ public class LookAheadTests
 
         YamlException ex = Assert.Throws<YamlException>(() => Read(path, NestedKeyLast(40, keyLast: true), options));
         Assert.Equal(YamlErrorCategory.Limit, ex.Category);
+        Assert.True(ex.IsAliasBudget);
     }
 
     [Theory, MemberData(nameof(Paths))]

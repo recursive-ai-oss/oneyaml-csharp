@@ -582,7 +582,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
             ArgumentNullException.ThrowIfNull(key);
             ValueTree v = ValueOf(value);
             DocState s = State();
-            _doc!.BeginEdit(s);
+            using YamlDocument.EditScope scope = _doc!.BeginInPlaceEdit(s);
             if (IsEmptyRoot(s))
             {
                 // The root of a stream with no content becomes the mapping on its first write.
@@ -637,7 +637,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
         {
             ValueTree v = ValueOf(value);
             DocState s = State();
-            _doc!.BeginEdit(s);
+            using YamlDocument.EditScope scope = _doc!.BeginInPlaceEdit(s);
             if (index == 0 && IsEmptyRoot(s))
             {
                 _doc!.Swap(Editor.Replace(s, _doc.Limits, _index, ValueTree.Wrap(null, v)));
@@ -712,7 +712,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     private void Replace(ValueTree v)
     {
         DocState s = State();
-        _doc!.BeginEdit(s);
+        using YamlDocument.EditScope scope = _doc!.BeginInPlaceEdit(s);
         if (_viaAlias)
         {
             throw YamlException.At(YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", s.Text, s.Node(_index).Start);
@@ -728,7 +728,7 @@ public sealed class YamlNode : IEquatable<YamlNode>
     public void Remove()
     {
         DocState s = State();
-        _doc!.BeginEdit(s);
+        using YamlDocument.EditScope scope = _doc!.BeginInPlaceEdit(s);
         if (_viaAlias)
         {
             throw YamlException.At(YamlErrorCategory.RefusedAlias, "The edit would write through an alias and change every place that shares the anchored node.", s.Text, s.Node(_index).Start);

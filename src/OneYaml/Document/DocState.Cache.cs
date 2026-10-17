@@ -28,6 +28,10 @@ internal static class EditWork
     [ThreadStatic]
     internal static long NodesMoved;
 
+    /// <summary>Whole states copied for an edit. An edit that works in place copies nothing.</summary>
+    [ThreadStatic]
+    internal static long StateClones;
+
     /// <summary>Chunks of nodes whose move an edit only noted.</summary>
     [ThreadStatic]
     internal static long ChunksMoved;
