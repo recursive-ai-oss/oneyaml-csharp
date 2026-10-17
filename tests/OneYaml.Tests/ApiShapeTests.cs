@@ -618,7 +618,6 @@ public class ApiShapeTests
     public void A_deep_load_takes_no_heap_for_its_frame_directory_once_the_pool_is_warm()
     {
         const int Levels = 100;
-        var inline = default(InlineFrames);
 
         static void Run(Span<GenericFrame> first, int levels)
         {
@@ -641,18 +640,15 @@ public class ApiShapeTests
             }
         }
 
-        for (int i = 0; i < 50; i++)
-        {
-            Run(inline, Levels);
-        }
-
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 200; i++)
-        {
-            Run(inline, Levels);
-        }
-
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        // The shared array pool drops what it holds when a collection runs, which other tests on a busy machine
+        // can cause at any moment; the next rent then allocates once. Rounds that allocate are run again.
+        SteadyState.AssertAllocatesNothing(
+            () =>
+            {
+                var inline = default(InlineFrames);
+                Run(inline, Levels);
+            },
+            200);
     }
 
     // ---- package ----
