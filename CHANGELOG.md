@@ -8,6 +8,11 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 - **`OneYaml.Compat.YamlDotNet` tells an alias budget from a depth limit.** `AliasExpansionLimitExceededException` derives from `MaximumRecursionLevelReachedException` and is thrown where reading or writing expanded aliases passes the alias budget. Depth and size limits still throw the base type, and a `catch (MaximumRecursionLevelReachedException)` still catches both. `MaximumRecursionLevelReachedException` is no longer sealed so that this is possible.
 
+### Fixed
+
+- **A key in extension data now beats the same key merged into the same merge source.** With `MergeKeys` on, a mapping read through a merge key (`<<: *base`) whose own `<<` brought in `x` and which also gave `x` itself kept the merged value when the type has an extension data member; the mapping's own `x` now wins, wherever its `<<` stands, as it already did for members and dictionaries. The first source still wins among several, and the keys of the mapping that is read itself still beat every source.
+- **`OneYaml.Compat.YamlDotNet` no longer reads the error text to tell an alias budget from a depth limit.** The core error carries the mark, so rewording a message cannot change which exception is thrown.
+
 ## [1.1.1] - 2026-10-17
 
 ### Changed

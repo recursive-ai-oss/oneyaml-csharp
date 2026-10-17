@@ -101,8 +101,19 @@ public sealed record YamlLimits
     public long AliasByteBudget(long inputBytes) => Budget(inputBytes, AliasByteFactor, AliasByteFloor);
 
     // The one wording for a refused alias expansion, whoever noticed it: what was refused, and the settings that set the budget.
-    internal string AliasBudgetMessage(string what) =>
-        $"{what} exceeds the budget set by YamlLimits (AliasNodeFactor {AliasNodeFactor}, AliasNodeFloor {AliasNodeFloor}, AliasByteFactor {AliasByteFactor}, AliasByteFloor {AliasByteFloor}).";
+    internal string AliasBudgetMessage(string what)
+    {
+        string message = $"{what} exceeds the budget set by YamlLimits (AliasNodeFactor {AliasNodeFactor}, AliasNodeFloor {AliasNodeFloor}, AliasByteFactor {AliasByteFactor}, AliasByteFloor {AliasByteFloor}).";
+        s_lastAliasBudgetMessage = message;
+        return message;
+    }
+
+    // The message built last on this thread. An exception made from exactly that string (the same object, not equal
+    // text) is an alias-budget refusal, so callers can tell it apart from the other limits without reading the wording.
+    [ThreadStatic]
+    private static string? s_lastAliasBudgetMessage;
+
+    internal static bool IsAliasBudgetMessage(string message) => ReferenceEquals(message, s_lastAliasBudgetMessage);
 
     // Each limit at the lower of the two: what a reader that must honour both has to use.
     internal static YamlLimits Stricter(YamlLimits a, YamlLimits b) =>
