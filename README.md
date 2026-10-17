@@ -50,10 +50,6 @@ slower shows as a slower bar):
   small and mid-sized files, and level or faster from 1 MiB up
   ([every loss](docs/performance.md#results-at-a-glance)).
 
-<!-- generated:conformance-line -->
-yaml-test-suite data-2022-01-17: 680/681 loose, 586/681 strict. Against the kit's corrected expectations for 12 of them: 12/12 loose, 1/12 strict. Kit's own cases, all of them including the slow ones: 605/605 loose, 605/605 strict. [Details](docs/conformance.md)
-<!-- end generated -->
-
 [How oneyaml-csharp compares](docs/comparison.md) with YamlDotNet,
 SharpYaml and VYaml, including when one of them is the better choice.
 
