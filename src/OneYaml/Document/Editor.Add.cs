@@ -17,10 +17,9 @@ internal static partial class Editor
             scope = -1;
         }
 
-        // What the layout is worked out from does not change while edits leave collections alone, so a large
-        // document works it out once and the next edits reuse it.
-        bool remembered = s.LayoutRemembered(scope);
-        if (remembered && s.TryGetLayoutMemo(scope, out int knownStep, out int knownSeq))
+        // What the layout is worked out from does not change while edits leave collections alone, so a layout that was
+        // costly to work out is remembered and the next edits reuse it.
+        if (s.TryGetLayoutMemo(scope, out int knownStep, out int knownSeq))
         {
             if (DocState.VerifyCaches)
             {
@@ -36,8 +35,8 @@ internal static partial class Editor
             return new Layout(nl, knownStep, knownSeq, s.EditMode);
         }
 
-        FindIndentation(s, scope, out int step, out int seqOff);
-        if (remembered)
+        long steps = FindIndentation(s, scope, out int step, out int seqOff);
+        if (steps >= DocState.LayoutMinSteps)
         {
             s.StoreLayoutMemo(scope, step, seqOff);
         }
@@ -47,7 +46,7 @@ internal static partial class Editor
 
     // The indentation of nested mappings and the offset of sequences under a key, taken from the mapping the edit is in
     // (when it is one) and then from the first mappings of the document that show them.
-    private static void FindIndentation(DocState s, int scope, out int step, out int seqOff)
+    private static long FindIndentation(DocState s, int scope, out int step, out int seqOff)
     {
         step = 0;
         seqOff = -1;
@@ -82,6 +81,8 @@ internal static partial class Editor
         {
             seqOff = step;
         }
+
+        return seen + i;
     }
 
     // The step of the nearest block mapping, from the mapping out, that sits on its own lines under a key: how far its

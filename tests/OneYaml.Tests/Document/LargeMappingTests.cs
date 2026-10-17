@@ -97,7 +97,95 @@ public class LargeMappingTests
         Assert.Equal("value10", doc.Get<string>("/big/key10"));
         Assert.Equal(0, doc.State.BuiltIndexes);
         Assert.Equal("value20", doc.Get<string>("/big/key20"));
+        Assert.Equal(0, doc.State.BuiltIndexes);
+
+        // The index is built once the searches have cost a few times the size of the mapping, not before.
+        for (int i = 0; i < 12 && doc.State.BuiltIndexes == 0; i++)
+        {
+            Assert.Equal("value" + (4_000 + i), doc.Get<string>("/big/key" + (4_000 + i)));
+        }
+
         Assert.Equal(1, doc.State.BuiltIndexes);
+    }
+
+    [Fact]
+    public void Several_threads_reading_one_large_document_get_the_right_values_and_leave_it_sound()
+    {
+        const int Maps = 8;
+        const int Keys = 600;
+        var sb = new StringBuilder();
+        for (int m = 0; m < Maps; m++)
+        {
+            sb.Append('m').Append(m).Append(":\n");
+            for (int i = 0; i < Keys; i++)
+            {
+                sb.Append("  key").Append(i).Append(": v").Append(m).Append('_').Append(i).Append('\n');
+            }
+        }
+
+        using YamlDocument doc = YamlDocument.Parse(sb.ToString());
+        using var start = new ManualResetEventSlim(false);
+        var failures = new System.Collections.Concurrent.ConcurrentBag<string>();
+        Thread[] threads = Enumerable.Range(0, 8).Select(t => new Thread(() =>
+        {
+            start.Wait();
+            for (int r = 0; r < 400; r++)
+            {
+                int m = (r + t) % Maps;
+                int k = ((r * 37) + (t * 101)) % Keys;
+                string got = doc.Get<string>("/m" + m + "/key" + k);
+                if (got != "v" + m + "_" + k)
+                {
+                    failures.Add($"thread {t}: /m{m}/key{k} gave {got}");
+                }
+
+                if (doc.TryGet<string>("/m" + m + "/nokey" + k, out _))
+                {
+                    failures.Add($"thread {t}: a missing key was found");
+                }
+            }
+        })).ToArray();
+        foreach (Thread th in threads)
+        {
+            th.Start();
+        }
+
+        start.Set();
+        foreach (Thread th in threads)
+        {
+            th.Join();
+        }
+
+        Assert.Empty(failures);
+
+        // The document is as sound afterwards as before: every key is found, and an edit still writes the right bytes.
+        for (int m = 0; m < Maps; m++)
+        {
+            Assert.Equal("v" + m + "_599", doc.Get<string>("/m" + m + "/key599"));
+        }
+
+        doc.Set("/m3/key10", "changed");
+        using YamlDocument again = YamlDocument.Parse(doc.ToUtf8Bytes());
+        Assert.Equal("changed", again.Get<string>("/m3/key10"));
+        Assert.Equal("v3_11", again.Get<string>("/m3/key11"));
+        // An array returned to the shared pool twice would hand the same buffer to two renters; rent a few and look.
+        var rented = new List<byte[]>();
+        try
+        {
+            for (int i = 0; i < 64; i++)
+            {
+                rented.Add(System.Buffers.ArrayPool<byte>.Shared.Rent(4096));
+            }
+
+            Assert.Equal(rented.Count, rented.Distinct().Count());
+        }
+        finally
+        {
+            foreach (byte[] b in rented)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(b);
+            }
+        }
     }
 
     // ---- The results are those of one operation after another on fresh text ----
@@ -320,5 +408,139 @@ public class LargeMappingTests
         {
             Assert.Equal(pair.Value, again.Get<string>("/big/" + pair.Key));
         }
+    }
+}
+
+/// <summary>
+/// The tests of the rest of the assembly lower the thresholds so that small documents use the same code as large
+/// ones. These run alone, at the numbers a user gets, with every check on.
+/// </summary>
+[CollectionDefinition(nameof(ProductionThresholds), DisableParallelization = true)]
+public sealed class ProductionThresholdsGroup;
+
+[Collection(nameof(ProductionThresholds))]
+public class ProductionThresholds
+{
+    [Fact]
+    public void A_large_mapping_edited_at_the_default_thresholds_keeps_its_index_and_layout_right()
+    {
+        int indexMin = DocState.IndexMinNodes;
+        int layoutMin = DocState.LayoutMinSteps;
+        bool verify = DocState.VerifyCaches;
+        try
+        {
+            DocState.IndexMinNodes = 512;
+            DocState.LayoutMinSteps = 2048;
+            DocState.VerifyCaches = true;
+
+            var sb = new StringBuilder("# settings\nbig:\n");
+            for (int i = 0; i < 3_000; i++)
+            {
+                sb.Append("  key").Append(i).Append(": value").Append(i).Append('\n');
+            }
+
+            using YamlDocument doc = YamlDocument.Parse(sb.ToString());
+            var ops = new StringBuilder("[");
+            for (int i = 0; i < 60; i++)
+            {
+                if (i > 0)
+                {
+                    ops.Append(',');
+                }
+
+                ops.Append((i % 3) switch
+                {
+                    0 => $"{{\"op\":\"replace\",\"path\":\"/big/key{i * 17}\",\"value\":\"r{i}\"}}",
+                    1 => $"{{\"op\":\"add\",\"path\":\"/big/new{i}\",\"value\":{{\"a\":[1,2]}}}}",
+                    _ => $"{{\"op\":\"remove\",\"path\":\"/big/key{(i * 13) + 1}\"}}",
+                });
+            }
+
+            doc.ApplyPatch(ops.Append(']').ToString());
+            Assert.True(doc.State.BuiltIndexes >= 1);
+
+            using YamlDocument fresh = YamlDocument.Parse(doc.ToUtf8Bytes());
+            Assert.Equal(fresh.Get<string>("/big/key17"), doc.Get<string>("/big/key17"));
+            Assert.Equal("r3", doc.Get<string>("/big/key51"));
+            Assert.False(doc.TryGet<string>("/big/key27", out _));
+            doc.Set("/big/key2000", "set");
+            doc.Remove("/big/key2001");
+            Assert.Equal("set", doc.Get<string>("/big/key2000"));
+            Assert.False(doc.TryGet<string>("/big/key2001", out _));
+            Assert.Equal("value2002", doc.Get<string>("/big/key2002"));
+        }
+        finally
+        {
+            DocState.IndexMinNodes = indexMin;
+            DocState.LayoutMinSteps = layoutMin;
+            DocState.VerifyCaches = verify;
+        }
+    }
+
+    [Fact]
+    public void Reading_more_large_mappings_than_the_cache_follows_allocates_no_more_than_without_a_cache()
+    {
+        const int Maps = 20;
+        var sb = new StringBuilder();
+        for (int m = 0; m < Maps; m++)
+        {
+            sb.Append('m').Append(m).Append(":\n");
+            for (int i = 0; i < 400; i++)
+            {
+                sb.Append("  key").Append(i).Append(": v").Append(i).Append('\n');
+            }
+        }
+
+        string[] paths = Enumerable.Range(0, Maps).Select(m => "/m" + m + "/key217").ToArray();
+        int indexMin = DocState.IndexMinNodes;
+        bool verify = DocState.VerifyCaches;
+        try
+        {
+            // The checks of the other tests would be counted as allocations.
+            DocState.VerifyCaches = false;
+            DocState.IndexMinNodes = int.MaxValue;
+            using YamlDocument plain = YamlDocument.Parse(sb.ToString());
+            long without = Allocated(plain, paths);
+
+            DocState.IndexMinNodes = 512;
+            using YamlDocument cached = YamlDocument.Parse(sb.ToString());
+            for (int r = 0; r < 60; r++)
+            {
+                foreach (string path in paths)
+                {
+                    Assert.True(cached.TryGet<string>(path.Replace("217", ((r * 31) % 400).ToString(System.Globalization.CultureInfo.InvariantCulture)), out _));
+                }
+            }
+
+            Assert.True(cached.State.BuiltIndexes > 0);
+            long with = Allocated(cached, paths);
+            Assert.True(with <= without, $"reads with a cache allocated {with} bytes, without {without}");
+        }
+        finally
+        {
+            DocState.IndexMinNodes = indexMin;
+            DocState.VerifyCaches = verify;
+        }
+    }
+
+    private static long Allocated(YamlDocument doc, string[] paths)
+    {
+        foreach (string path in paths)
+        {
+            doc.TryGet<string>(path, out _);
+        }
+
+        long bytes = 0;
+        for (int round = 0; round < 5; round++)
+        {
+            foreach (string path in paths)
+            {
+                long one = GC.GetAllocatedBytesForCurrentThread();
+                doc.TryGet<string>(path, out _);
+                bytes += GC.GetAllocatedBytesForCurrentThread() - one;
+            }
+        }
+
+        return bytes;
     }
 }

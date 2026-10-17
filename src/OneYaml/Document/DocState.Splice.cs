@@ -803,7 +803,7 @@ internal sealed partial class DocState
         };
         try
         {
-            c._cache = CloneCache();
+            c._cache = TakeCache();
             c._nodes = ArrayPool<CstNode>.Shared.Rent(Math.Max(NodeCount + Math.Max(extraNodes, 0) + 16, 1));
             _nodes.AsSpan(0, NodeCount).CopyTo(c._nodes);
             c._props = ArrayPool<int>.Shared.Rent(Math.Max(((PropCountRows + extraProps) * PropWidth) + PropWidth, 1));

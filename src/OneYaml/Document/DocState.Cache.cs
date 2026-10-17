@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Numerics;
+using System.Threading;
 using OneYaml.Schema;
 
 namespace OneYaml.Documents;
@@ -31,27 +32,45 @@ internal sealed partial class DocState
 
     // A mapping is indexed from this many child nodes (keys and values) on: below it, reading the keys in order
     // costs less than the index would. Tests lower the numbers so that small documents use the same code.
-    internal static int IndexMinNodes = 128;
+    internal static int IndexMinNodes = 512;
 
-    // Layout results are remembered for documents of at least this many nodes, or for a scope of that many children.
-    internal static int LayoutMinNodes = 512;
+    // A layout is remembered only when working it out took at least this many steps; a cheaper one is not worth a cache.
+    internal static int LayoutMinSteps = 2048;
+
+    // An index is built once the searches in order of one mapping have cost this many times the mapping's own size:
+    // the build costs about two and a half searches through all of it, so a mapping read a few times is never indexed.
+    internal const int BuildAfterScans = 3;
 
     private MapCache? _cache;
 
-    /// <summary>How many key indexes this state holds: none until a large mapping has been searched twice.</summary>
-    internal int BuiltIndexes
+    // Several threads may read one document at once, so the cache is made with a compare-and-swap.
+    private MapCache EnsureCache()
     {
-        get
+        MapCache? c = _cache;
+        if (c is null)
         {
-            int built = 0;
-            for (int i = 0; i < (_cache?.TableCount ?? 0); i++)
+            c = new MapCache();
+            MapCache? other = Interlocked.CompareExchange(ref _cache, c, null);
+            if (other is not null)
             {
-                built += _cache!.Tables[i].Slots is null ? 0 : 1;
+                c = other;
             }
-
-            return built;
         }
+
+        return c;
     }
+
+    // An edit that works on a copy takes the cache along: the original is dropped when the edit succeeds, and when it
+    // does not the original merely loses a cache, which it builds again when it needs one.
+    private MapCache? TakeCache()
+    {
+        MapCache? c = _cache;
+        _cache = null;
+        return c;
+    }
+
+    /// <summary>How many key indexes this state holds: none until a large mapping has been searched often enough.</summary>
+    internal int BuiltIndexes => _cache?.BuiltCount ?? 0;
 
     /// <summary>Makes every use of the remembered layouts and key indexes check itself against a fresh computation: tests turn it on.</summary>
     internal static bool VerifyCaches;
@@ -134,30 +153,15 @@ internal sealed partial class DocState
     /// <returns>The value node, -1 when no key has that text, or <see cref="NotIndexed"/> when the caller must search in order.</returns>
     internal int IndexedFind(int container, ReadOnlySpan<byte> token)
     {
-        KeyTable? t = _cache?.Find(container);
-        if (t is null)
-        {
-            // The first look costs what it always did; only a mapping that is searched again is indexed.
-            (_cache ??= new MapCache()).Note(container);
-            return NotIndexed;
-        }
-
-        if (t.Refused)
+        KeyTable? t = _cache?.FindTable(container);
+        if (t is null || t.Refused || t.Slots is null)
         {
             return NotIndexed;
-        }
-
-        if (t.Slots is null)
-        {
-            if (!BuildTable(t))
-            {
-                return NotIndexed;
-            }
         }
 
         int hash = HashOfText(token);
         int mask = t.Capacity - 1;
-        int[] slots = t.Slots!;
+        int[] slots = t.Slots;
         int[] hashes = t.Hashes!;
         long examined = 0;
         int result = -1;
@@ -181,27 +185,52 @@ internal sealed partial class DocState
             }
         }
 
+        _cache!.Touch(t);
         EditWork.KeysExamined += examined;
         EditWork.IndexedLookups++;
         return result;
     }
 
-    private bool BuildTable(KeyTable t)
+    /// <summary>
+    /// Tells the state that a search in order through a large mapping looked at this many entries. Once the searches of
+    /// one mapping have cost more than building its index would, the index is built. Reads call this, so it touches
+    /// only what a reader may touch: plain arrays, published with a compare-and-swap.
+    /// </summary>
+    internal void NoteScan(int container, int pairsScanned)
     {
-        int container = t.Node;
+        MapCache c = EnsureCache();
+        int slot = c.Charge(container, pairsScanned, out long work);
+        if (slot >= 0 && work >= (long)BuildAfterScans * (_nodes[container].Count / 2))
+        {
+            c.Publish(slot, BuildTable(container, Exclusive));
+        }
+    }
+
+    // The index of a mapping, or a refused one when two of its keys have the same text. A state that only its edit
+    // owns may take the arrays from the pool: a read never does, as several threads can read one document, and an
+    // array that goes back to the pool twice is handed to two renters.
+    private KeyTable BuildTable(int container, bool pooled)
+    {
         int pairs = _nodes[container].Count / 2;
         int capacity = 64;
-        while (capacity < pairs * 2)
+        while (capacity * 5 < pairs * 8)
         {
             capacity <<= 1;
         }
 
-        t.Slots = ArrayPool<int>.Shared.Rent(capacity);
-        t.Hashes = ArrayPool<int>.Shared.Rent(capacity);
-        Array.Clear(t.Slots, 0, capacity);
-        t.Capacity = capacity;
-        t.Used = 0;
-        t.Tombs = 0;
+        var t = new KeyTable { Node = container, Capacity = capacity, Pooled = pooled };
+        if (pooled)
+        {
+            t.Slots = ArrayPool<int>.Shared.Rent(capacity);
+            t.Hashes = ArrayPool<int>.Shared.Rent(capacity);
+            Array.Clear(t.Slots, 0, capacity);
+        }
+        else
+        {
+            t.Slots = new int[capacity];
+            t.Hashes = new int[capacity];
+        }
+
         int c = container + 1;
         for (int i = 0; i < pairs; i++)
         {
@@ -211,14 +240,14 @@ internal sealed partial class DocState
             {
                 t.Release();
                 t.Refused = true;
-                return false;
+                break;
             }
 
             c = value + _nodes[value].Size;
         }
 
         EditWork.KeysExamined += pairs;
-        return true;
+        return t;
     }
 
     // Adds a key to the index. Returns false when another key has the same text: then the first match in the
@@ -279,6 +308,7 @@ internal sealed partial class DocState
             capacity <<= 1;
         }
 
+        // Only an edit grows a table, and an edit's tables are its own: the arrays go through the pool.
         int[] slots = ArrayPool<int>.Shared.Rent(capacity);
         int[] hashes = ArrayPool<int>.Shared.Rent(capacity);
         Array.Clear(slots, 0, capacity);
@@ -302,10 +332,10 @@ internal sealed partial class DocState
             hashes[slot] = hash;
         }
 
-        ArrayPool<int>.Shared.Return(t.Slots!);
-        ArrayPool<int>.Shared.Return(t.Hashes!);
+        t.ReturnArrays();
         t.Slots = slots;
         t.Hashes = hashes;
+        t.Pooled = true;
         t.Capacity = capacity;
         t.Tombs = 0;
     }
@@ -368,15 +398,13 @@ internal sealed partial class DocState
 
     // ---- The layout new text copies ----
 
-    internal bool LayoutRemembered(int scope) => _nodes.Length != 0 && (NodeCount >= LayoutMinNodes || (scope >= 0 && _nodes[scope].Count >= IndexMinNodes));
-
     internal bool TryGetLayoutMemo(int scope, out int step, out int seqOffset)
     {
         step = seqOffset = 0;
         return _cache is not null && _cache.TryGetLayout(scope, out step, out seqOffset);
     }
 
-    internal void StoreLayoutMemo(int scope, int step, int seqOffset) => (_cache ??= new MapCache()).StoreLayout(scope, step, seqOffset);
+    internal void StoreLayoutMemo(int scope, int step, int seqOffset) => EnsureCache().StoreLayout(scope, step, seqOffset);
 
     // ---- Keeping both up to date across a splice ----
 
@@ -406,28 +434,34 @@ internal sealed partial class DocState
 
         bool neutral = !HasCollection(_nodes.AsSpan(first, end - first)) && !HasCollection(sub._nodes.AsSpan(1, sub.NodeCount - 1));
         cache.ShiftLayouts(neutral, end, d);
-        for (int i = cache.TableCount - 1; i >= 0; i--)
+        for (int i = 0; i < MapCache.Slots; i++)
         {
-            KeyTable t = cache.Tables[i];
-            if (t.Node >= end)
+            int node = cache.NodeAt(i);
+            if (node < 0)
             {
-                t.Node += d;
                 continue;
             }
 
-            if (t.Node >= first)
+            if (node >= end)
+            {
+                cache.MoveSlot(i, d);
+                continue;
+            }
+
+            if (node >= first)
             {
                 // The mapping is inside what is replaced; the new text brings its own nodes.
-                cache.RemoveTable(i);
+                cache.ClearSlot(i);
                 continue;
             }
 
-            if (t.Node + _nodes[t.Node].Size <= first || t.Slots is null)
+            KeyTable? t = cache.TableAt(i);
+            if (t is null || node + _nodes[node].Size <= first || t.Slots is null)
             {
                 continue;
             }
 
-            if (t.Node == n)
+            if (node == n)
             {
                 bool ok = true;
                 int c = first;
@@ -452,7 +486,7 @@ internal sealed partial class DocState
                 }
             }
 
-            ShiftTable(t, end - t.Node, d);
+            ShiftTable(t, end - node, d);
         }
     }
 
@@ -461,7 +495,7 @@ internal sealed partial class DocState
     private bool CacheAfterSplice(int n, int first, int newCount)
     {
         MapCache? cache = _cache;
-        KeyTable? t = cache?.Find(n);
+        KeyTable? t = cache?.FindTable(n);
         if (t is null || t.Refused || t.Slots is null)
         {
             return false;
@@ -481,7 +515,8 @@ internal sealed partial class DocState
                     return false;
                 }
 
-                // A key that reads as a number, a boolean or null can equal a key of another spelling.
+                // The index only knows that the text is new. A key that reads as a number, a boolean or null can still equal
+                // a key of another spelling (`1` and `0x1`), so the full duplicate check decides for those.
                 if (!IsPlainlyString(c) && KindOf(c, out _) != ScalarKind.String)
                 {
                     unique = false;
@@ -495,9 +530,6 @@ internal sealed partial class DocState
         return unique;
     }
 
-    // A copy for the state an edit starts from, so that it need not work everything out again.
-    private MapCache? CloneCache() => _cache?.Clone();
-
     /// <summary>Checks the remembered layouts and key indexes against fresh work: for tests.</summary>
     internal void VerifyCache()
     {
@@ -509,9 +541,10 @@ internal sealed partial class DocState
 
         long counted = EditWork.KeysExamined;
         long lookups = EditWork.IndexedLookups;
-        foreach (KeyTable t in cache.Tables.AsSpan(0, cache.TableCount))
+        for (int slotIndex = 0; slotIndex < MapCache.Slots; slotIndex++)
         {
-            if (t.Slots is null || _nodes[t.Node].Count > VerifyMaxNodes)
+            KeyTable? t = cache.TableAt(slotIndex);
+            if (t is null || t.Slots is null || cache.NodeAt(slotIndex) != t.Node || _nodes[t.Node].Count > VerifyMaxNodes)
             {
                 continue;
             }
@@ -571,7 +604,7 @@ internal sealed class KeyTable
     /// <summary>The mapping's node index in the state the table belongs to.</summary>
     public int Node;
 
-    /// <summary>Set when two keys have the same text or the index would not pay: the mapping is searched in order.</summary>
+    /// <summary>Set when two keys have the same text: the mapping is searched in order.</summary>
     public bool Refused;
 
     /// <summary>Per slot: the key's node index minus the mapping's, 0 for a free slot, -1 for a removed key.</summary>
@@ -586,47 +619,61 @@ internal sealed class KeyTable
 
     public int Tombs;
 
-    public KeyTable Clone()
+    /// <summary>When the table last answered a lookup, in the cache's count; only kept up once the cache is full.</summary>
+    public int LastUse;
+
+    /// <summary>Set when the arrays came from the pool and go back to it.</summary>
+    public bool Pooled;
+
+    // Gives the arrays back if they are the pool's. Only the edit side or the disposal of a state calls this.
+    public void ReturnArrays()
     {
-        var copy = new KeyTable { Node = Node, Refused = Refused, Capacity = Capacity, Used = Used, Tombs = Tombs };
-        if (Slots is not null)
+        if (Pooled && Slots is not null)
         {
-            copy.Slots = ArrayPool<int>.Shared.Rent(Capacity);
-            copy.Hashes = ArrayPool<int>.Shared.Rent(Capacity);
-            Array.Copy(Slots, copy.Slots, Capacity);
-            Array.Copy(Hashes!, copy.Hashes, Capacity);
+            ArrayPool<int>.Shared.Return(Slots);
+            ArrayPool<int>.Shared.Return(Hashes!);
         }
 
-        return copy;
+        Pooled = false;
     }
 
     public void Release()
     {
-        if (Slots is not null)
-        {
-            ArrayPool<int>.Shared.Return(Slots);
-            ArrayPool<int>.Shared.Return(Hashes!);
-            Slots = null;
-            Hashes = null;
-        }
-
+        ReturnArrays();
+        Slots = null;
+        Hashes = null;
         Used = Tombs = Capacity = 0;
     }
 }
 
 /// <summary>
-/// What a state remembers besides its tree: the key indexes of its large mappings, the layouts worked out for
-/// them, and the expansion sizes of a read through aliases. One object holds all three, made when the first is
-/// needed, so that a state nobody edits or searches costs one reference.
+/// What a state remembers besides its tree: the work spent searching its large mappings in order and the key indexes
+/// built from it, the layouts worked out for edits, and the expansion sizes of a read through aliases. One object
+/// holds all of it, made when the first is needed, so that a state nobody searches or edits costs one reference.
 /// </summary>
+/// <remarks>
+/// Reads may run on several threads at once, so what they touch is plain arrays of fixed size, written with
+/// compare-and-swap or in a way where a lost update only delays an index. Nothing a read touches goes back to a pool.
+/// Edits are not concurrent with anything and change the tables in place.
+/// </remarks>
 internal sealed class MapCache
 {
-    private const int MaxTables = 6;
+    /// <summary>How many large mappings a state follows at once.</summary>
+    public const int Slots = 16;
+
+    // A full cache gives up a built table only when it has gone unused for this many lookups.
+    private const int StaleAfter = 4096;
+
     private const int MaxLayouts = 4;
 
-    public KeyTable[] Tables = [];
-    public int TableCount;
-    private int _evict;
+    // Per slot: (node + 1) in the high half, the work spent searching that mapping in order in the low half; 0 is free.
+    private long[]? _track;
+
+    private KeyTable?[]? _tables;
+
+    private int _tick;
+
+    private bool _crowded;
 
     // A few remembered layouts, held in fields: one edit of a mid-size document remembers one, and an array would cost more than it saves.
     private LayoutSlot _l0, _l1, _l2, _l3;
@@ -640,6 +687,194 @@ internal sealed class MapCache
         public int Seq;
     }
 
+    /// <summary>The expansion sizes of a read through aliases, returned to the pool with the state.</summary>
+    public NodeReplay.ExpansionSizes? Expansion;
+
+    public int BuiltCount
+    {
+        get
+        {
+            int built = 0;
+            KeyTable?[]? tables = _tables;
+            if (tables is not null)
+            {
+                for (int i = 0; i < Slots; i++)
+                {
+                    built += tables[i]?.Slots is null ? 0 : 1;
+                }
+            }
+
+            return built;
+        }
+    }
+
+    public int NodeAt(int i)
+    {
+        long[]? track = _track;
+        return track is null ? -1 : (int)(track[i] >> 32) - 1;
+    }
+
+    public KeyTable? TableAt(int i) => _tables?[i];
+
+    public void MoveSlot(int i, int delta)
+    {
+        long[] track = _track!;
+        track[i] += (long)delta << 32;
+        KeyTable? t = _tables?[i];
+        if (t is not null)
+        {
+            t.Node += delta;
+        }
+    }
+
+    public void ClearSlot(int i)
+    {
+        _track![i] = 0;
+        if (_tables is not null)
+        {
+            _tables[i]?.Release();
+            _tables[i] = null;
+        }
+    }
+
+    public KeyTable? FindTable(int node)
+    {
+        KeyTable?[]? tables = _tables;
+        long[]? track = _track;
+        if (tables is null || track is null)
+        {
+            return null;
+        }
+
+        long want = (long)(node + 1);
+        for (int i = 0; i < Slots; i++)
+        {
+            if ((track[i] >> 32) == want)
+            {
+                KeyTable? t = tables[i];
+                return t is not null && t.Node == node ? t : null;
+            }
+        }
+
+        return null;
+    }
+
+    public void Touch(KeyTable t)
+    {
+        if (_crowded)
+        {
+            t.LastUse = ++_tick;
+        }
+    }
+
+    // Adds the work of one search in order to the mapping's account and returns its slot, or -1 when the cache is full of
+    // indexes that are in use. A mapping that already has an index, or a refusal, is not charged.
+    public int Charge(int node, int pairs, out long work)
+    {
+        long[] track = _track ?? CreateTrack();
+        KeyTable?[]? tables = _tables;
+        long want = node + 1;
+        int free = -1;
+        int victim = -1;
+        long victimWork = long.MaxValue;
+        for (int i = 0; i < Slots; i++)
+        {
+            long w = track[i];
+            if ((w >> 32) == want)
+            {
+                if (tables?[i] is not null)
+                {
+                    work = 0;
+                    return -1;
+                }
+
+                long sum = Math.Min((long)(w & 0xFFFFFFFFL) + pairs, int.MaxValue);
+                track[i] = (want << 32) | sum;
+                work = sum;
+                return i;
+            }
+
+            if (w == 0)
+            {
+                if (free < 0)
+                {
+                    free = i;
+                }
+            }
+            else if (tables?[i] is null)
+            {
+                long spent = w & 0xFFFFFFFFL;
+                if (spent < victimWork)
+                {
+                    victimWork = spent;
+                    victim = i;
+                }
+            }
+        }
+
+        int at = free >= 0 ? free : victim;
+        if (at < 0)
+        {
+            // Every slot holds an index. One that has gone unused for long gives way, so a changed working set can move in.
+            _crowded = true;
+            int oldest = -1;
+            int age = 0;
+            for (int i = 0; i < Slots; i++)
+            {
+                KeyTable? t = tables![i];
+                int unused = t is null ? 0 : _tick - t.LastUse;
+                if (unused > age)
+                {
+                    age = unused;
+                    oldest = i;
+                }
+            }
+
+            if (oldest < 0 || age < StaleAfter)
+            {
+                work = 0;
+                return -1;
+            }
+
+            at = oldest;
+            tables![at] = null;
+        }
+
+        long first = Math.Min((long)pairs, int.MaxValue);
+        track[at] = (want << 32) | first;
+        work = first;
+        return at;
+    }
+
+    private long[] CreateTrack()
+    {
+        Interlocked.CompareExchange(ref _track, new long[Slots], null);
+        return _track!;
+    }
+
+    // Makes a built table the mapping's index, unless another reader got there first or the slot has moved on.
+    public void Publish(int slot, KeyTable t)
+    {
+        KeyTable?[] tables = _tables ?? CreateTables();
+        long[] track = _track!;
+        if ((track[slot] >> 32) != t.Node + 1L)
+        {
+            return;
+        }
+
+        KeyTable? seen = Interlocked.CompareExchange(ref tables[slot], t, null);
+        if (seen is not null && seen.Node != t.Node)
+        {
+            Interlocked.CompareExchange(ref tables[slot], t, seen);
+        }
+    }
+
+    private KeyTable?[] CreateTables()
+    {
+        Interlocked.CompareExchange(ref _tables, new KeyTable?[Slots], null);
+        return _tables!;
+    }
+
     private ref LayoutSlot Slot(int i)
     {
         switch (i)
@@ -649,50 +884,6 @@ internal sealed class MapCache
             case 2: return ref _l2;
             default: return ref _l3;
         }
-    }
-
-    /// <summary>The expansion sizes of a read through aliases, returned to the pool with the state.</summary>
-    public NodeReplay.ExpansionSizes? Expansion;
-
-    public KeyTable? Find(int node)
-    {
-        for (int i = 0; i < TableCount; i++)
-        {
-            if (Tables[i].Node == node)
-            {
-                return Tables[i];
-            }
-        }
-
-        return null;
-    }
-
-    // Records that a large mapping was searched once.
-    public void Note(int node)
-    {
-        var t = new KeyTable { Node = node };
-        if (TableCount < MaxTables)
-        {
-            // Sized to what is in use: most edited documents note a single mapping.
-            if (TableCount == Tables.Length)
-            {
-                Array.Resize(ref Tables, TableCount == 0 ? 1 : Math.Min(MaxTables, TableCount * 2));
-            }
-
-            Tables[TableCount++] = t;
-            return;
-        }
-
-        Tables[_evict].Release();
-        Tables[_evict] = t;
-        _evict = (_evict + 1) % MaxTables;
-    }
-
-    public void RemoveTable(int i)
-    {
-        Tables[i].Release();
-        Tables[i] = Tables[--TableCount];
-        Tables[TableCount] = null!;
     }
 
     public bool TryGetLayout(int scope, out int step, out int seq)
@@ -750,35 +941,18 @@ internal sealed class MapCache
         }
     }
 
-    // The indexes and layouts, for the state an edit starts from. The expansion sizes belong to the old text and stay behind.
-    public MapCache? Clone()
+    public void Release()
     {
-        if (TableCount == 0 && _layouts == 0)
+        if (_tables is not null)
         {
-            return null;
-        }
-
-        var copy = new MapCache { TableCount = TableCount, _evict = _evict, _layouts = _layouts, _layoutNext = _layoutNext, _l0 = _l0, _l1 = _l1, _l2 = _l2, _l3 = _l3 };
-        if (TableCount > 0)
-        {
-            copy.Tables = new KeyTable[Tables.Length];
-            for (int i = 0; i < TableCount; i++)
+            foreach (KeyTable? t in _tables)
             {
-                copy.Tables[i] = Tables[i].Clone();
+                t?.Release();
             }
         }
 
-        return copy;
-    }
-
-    public void Release()
-    {
-        for (int i = 0; i < TableCount; i++)
-        {
-            Tables[i].Release();
-        }
-
-        TableCount = 0;
+        _track = null;
+        _tables = null;
         _layouts = 0;
         Expansion?.Release();
         Expansion = null;

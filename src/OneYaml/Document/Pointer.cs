@@ -300,13 +300,18 @@ internal static class PointerOps
 
                 return indexed;
             }
+
+            // The state keeps account of what searching this mapping costs, and builds its index when that is worth it.
+            int found = FindInOrder(s, container, token, out int scanned);
+            s.NoteScan(container, scanned);
+            return found;
         }
 
-        return FindInOrder(s, container, token);
+        return FindInOrder(s, container, token, out _);
     }
 
     // The slow way, and the reference the index is held to: every key in the mapping's order.
-    private static int FindInOrder(DocState s, int container, ReadOnlySpan<byte> token)
+    private static int FindInOrder(DocState s, int container, ReadOnlySpan<byte> token, out int scanned)
     {
         int count = s.Node(container).Count;
         int found = -1;
@@ -320,6 +325,7 @@ internal static class PointerOps
                 if (found >= 0)
                 {
                     EditWork.KeysExamined += i / 2;
+                    scanned = i / 2;
                     throw Path(s, YamlErrorCategory.RefusedAmbiguous, $"More than one key matches the pointer token '{MessageText.Bound(token)}'.", k);
                 }
 
@@ -330,6 +336,7 @@ internal static class PointerOps
         }
 
         EditWork.KeysExamined += i / 2;
+        scanned = i / 2;
         return found;
     }
 
@@ -340,7 +347,7 @@ internal static class PointerOps
         int expected;
         try
         {
-            expected = FindInOrder(s, container, token);
+            expected = FindInOrder(s, container, token, out _);
         }
         catch (YamlException)
         {

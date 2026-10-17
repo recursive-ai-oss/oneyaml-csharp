@@ -132,7 +132,7 @@ internal static class SpliceCheck
         // Every remembered layout and key index is held to a fresh computation while the tests run.
         DocState.VerifyCaches = true;
         DocState.IndexMinNodes = 8;
-        DocState.LayoutMinNodes = 0;
+        DocState.LayoutMinSteps = 0;
     }
 #pragma warning restore CA2255
 

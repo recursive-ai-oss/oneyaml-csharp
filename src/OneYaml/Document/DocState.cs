@@ -250,7 +250,7 @@ internal sealed partial class DocState : IDisposable
             // Both live in one object that exists only once either is needed, so a state that is only read carries a single reference.
             if (value is not null || _cache is not null)
             {
-                (_cache ??= new MapCache()).Expansion = value;
+                EnsureCache().Expansion = value;
             }
         }
     }
