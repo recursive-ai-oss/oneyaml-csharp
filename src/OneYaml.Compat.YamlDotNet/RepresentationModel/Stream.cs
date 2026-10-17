@@ -327,7 +327,7 @@ internal static class EventDocumentBuilder
         var building = new HashSet<YamlNode>(ReferenceEqualityComparer.Instance);
         parser.Consume<DocumentStart>();
         var anchors = new Dictionary<string, YamlNode>(StringComparer.Ordinal);
-        var stack = new Stack<(YamlNode Node, YamlNode? PendingKey)>();
+        var stack = new Stack<(YamlNode Node, YamlNode? PendingKey, Mark KeyStart, Mark KeyEnd)>();
         YamlNode? root = null;
         while (true)
         {
@@ -384,27 +384,36 @@ internal static class EventDocumentBuilder
             }
             else
             {
-                (YamlNode parentNode, YamlNode? pending) = stack.Pop();
+                (YamlNode parentNode, YamlNode? pending, Mark keyStart, Mark keyEnd) = stack.Pop();
                 if (parentNode is YamlSequenceNode sequence)
                 {
                     sequence.Children.Add(produced);
-                    stack.Push((parentNode, null));
+                    stack.Push((parentNode, null, default, default));
                 }
                 else if (pending is null)
                 {
-                    stack.Push((parentNode, produced));
+                    stack.Push((parentNode, produced, current.Start, current.End));
                 }
                 else
                 {
-                    ((YamlMappingNode)parentNode).Children.Add(pending, produced);
-                    stack.Push((parentNode, null));
+                    try
+                    {
+                        ((YamlMappingNode)parentNode).Children.Add(pending, produced);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        // A repeated key is a YAML error, reported at the key like the text load does.
+                        throw new Core.YamlException(keyStart, keyEnd, "Duplicate key", ex);
+                    }
+
+                    stack.Push((parentNode, null, default, default));
                 }
             }
 
             if (current is SequenceStart or MappingStart)
             {
                 building.Add(produced);
-                stack.Push((produced, null));
+                stack.Push((produced, null, default, default));
             }
         }
     }

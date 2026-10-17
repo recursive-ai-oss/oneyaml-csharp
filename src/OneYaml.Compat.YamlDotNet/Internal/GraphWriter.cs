@@ -305,6 +305,9 @@ internal sealed class GraphWriter
             case float f:
                 ev.Text = float.IsNaN(f) ? ".nan" : float.IsPositiveInfinity(f) ? ".inf" : float.IsNegativeInfinity(f) ? "-.inf" : ScalarRules.FormatNumber(f);
                 break;
+            case Half h:
+                ev.Text = Half.IsNaN(h) ? ".nan" : Half.IsPositiveInfinity(h) ? ".inf" : Half.IsNegativeInfinity(h) ? "-.inf" : h.ToString(CultureInfo.InvariantCulture);
+                break;
             case DateTime dt:
                 ev.Text = dt.ToString("o", CultureInfo.InvariantCulture);
                 break;

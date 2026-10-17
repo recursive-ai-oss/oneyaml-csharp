@@ -145,6 +145,20 @@ internal static class ScalarRules
         return double.Parse(text.Contains('_', StringComparison.Ordinal) ? text.Replace("_", string.Empty, StringComparison.Ordinal) : text, NumberStyles.Float, CultureInfo.InvariantCulture);
     }
 
+    // A half is rounded once from the text; going through a double first can round twice and land one step off.
+    // A number too large for a half is an overflow rather than a silent infinity, which would change the value.
+    private static Half ParseHalf(string text)
+    {
+        double asDouble = ParseDouble(text);
+        if (double.IsNaN(asDouble) || double.IsInfinity(asDouble))
+        {
+            return (Half)asDouble;
+        }
+
+        Half result = Half.Parse(text.Contains('_', StringComparison.Ordinal) ? text.Replace("_", string.Empty, StringComparison.Ordinal) : text, NumberStyles.Float, CultureInfo.InvariantCulture);
+        return Half.IsInfinity(result) ? throw new OverflowException("Value was either too large or too small for a Half.") : result;
+    }
+
     // Reads the text as a value of a scalar type. Throws FormatException or OverflowException when it does not fit.
     public static object? Convert(string text, Type type, int maxDigits = DefaultDigits)
     {
@@ -220,6 +234,21 @@ internal static class ScalarRules
         if (type == typeof(BigInteger))
         {
             return ParseInteger(text, maxDigits);
+        }
+
+        if (type == typeof(Int128))
+        {
+            return (Int128)ParseInteger(text, maxDigits);
+        }
+
+        if (type == typeof(UInt128))
+        {
+            return (UInt128)ParseInteger(text, maxDigits);
+        }
+
+        if (type == typeof(Half))
+        {
+            return ParseHalf(text);
         }
 
         if (type == typeof(byte[]))
