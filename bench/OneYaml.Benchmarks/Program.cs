@@ -21,6 +21,12 @@ internal static class Program
             return 0;
         }
 
+        if (args.Length > 0 && args[0] == "--emit-gc")
+        {
+            UnchangedEmitBenchmarks.PrintGc(args[1], args.Skip(2).ToArray());
+            return 0;
+        }
+
         if (args.Length > 0 && args[0] == "--dump-hash")
         {
             DumpHash.Print(args.Skip(1).ToArray());

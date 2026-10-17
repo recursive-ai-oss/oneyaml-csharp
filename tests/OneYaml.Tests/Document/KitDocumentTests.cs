@@ -225,7 +225,7 @@ public class KitDocumentTests
         JsonElement root = caseDoc.RootElement;
         JsonElement operation = root.GetProperty("operation");
         bool merge = operation.TryGetProperty("format", out JsonElement format) && format.GetString() == "merge-patch";
-        JsonElement patch = operation.GetProperty("patch");
+        JsonElement patch = operation.TryGetProperty("patch_recipe", out JsonElement recipe) ? ExpandPatchRecipe(recipe, id) : operation.GetProperty("patch");
         int index = operation.TryGetProperty("document", out JsonElement di) ? di.GetInt32() : 0;
         byte[] input = KitInput.Read(dir, root);
         JsonElement expect = root.GetProperty("expect");
@@ -318,6 +318,164 @@ public class KitDocumentTests
                 AssertStructure(model, actual, expand: PatchOracle.NeedsExpansion(patch, merge));
             }
         }
+    }
+
+    // A patch_recipe stands in for a patch of very many identical operations: parts of `ops` written one after another,
+    // each `repeat` times. The count is checked before anything is built, and the result against the kit's pin.
+    private const int MaxRecipeParts = 64;
+    private const int MaxRecipeOperations = 1_000_000;
+
+    private static JsonElement ExpandPatchRecipe(JsonElement recipe, string id)
+    {
+        if (recipe.ValueKind != JsonValueKind.Array || recipe.GetArrayLength() is 0 or > MaxRecipeParts)
+        {
+            throw new InvalidOperationException($"{id}: patch_recipe must be a list of 1 to {MaxRecipeParts} parts");
+        }
+
+        long total = 0;
+        foreach (JsonElement part in recipe.EnumerateArray())
+        {
+            if (part.ValueKind != JsonValueKind.Object
+                || part.EnumerateObject().Any(p => p.Name is not ("ops" or "repeat"))
+                || !part.TryGetProperty("ops", out JsonElement ops) || ops.ValueKind != JsonValueKind.Array || ops.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException($"{id}: a patch_recipe part holds a non-empty list ops and an optional repeat");
+            }
+
+            if (ops.EnumerateArray().Any(o => o.ValueKind != JsonValueKind.Object || !o.TryGetProperty("op", out JsonElement name) || name.ValueKind != JsonValueKind.String))
+            {
+                throw new InvalidOperationException($"{id}: patch_recipe operations must be objects with a string op");
+            }
+
+            int repeat = 1;
+            if (part.TryGetProperty("repeat", out JsonElement r) && (!r.TryGetInt32(out repeat) || repeat < 0))
+            {
+                throw new InvalidOperationException($"{id}: patch_recipe repeat must be a non-negative integer");
+            }
+
+            total += (long)ops.GetArrayLength() * repeat;
+            if (total > MaxRecipeOperations)
+            {
+                throw new InvalidOperationException($"{id}: patch_recipe builds more than {MaxRecipeOperations} operations");
+            }
+        }
+
+        var text = new StringBuilder("[");
+        var canonical = new StringBuilder("[");
+        bool firstOp = true;
+        foreach (JsonElement part in recipe.EnumerateArray())
+        {
+            int repeat = part.TryGetProperty("repeat", out JsonElement r) ? r.GetInt32() : 1;
+            var rawOps = part.GetProperty("ops").EnumerateArray().Select(o => o.GetRawText()).ToArray();
+            var canonicalOps = part.GetProperty("ops").EnumerateArray().Select(o => { var sb = new StringBuilder(); AppendCanonical(sb, o); return sb.ToString(); }).ToArray();
+            for (int i = 0; i < repeat; i++)
+            {
+                for (int k = 0; k < rawOps.Length; k++)
+                {
+                    if (!firstOp)
+                    {
+                        text.Append(',');
+                        canonical.Append(',');
+                    }
+
+                    firstOp = false;
+                    text.Append(rawOps[k]);
+                    canonical.Append(canonicalOps[k]);
+                }
+            }
+        }
+
+        text.Append(']');
+        canonical.Append(']');
+
+        // The kit pins the count and the digest of what it builds (JSON with sorted keys, compact, ASCII only).
+        string pins = Path.Combine(Corpus.KitDirectory!, "tests", "pins.json");
+        if (File.Exists(pins))
+        {
+            using JsonDocument pinDoc = JsonDocument.Parse(File.ReadAllBytes(pins));
+            if (pinDoc.RootElement.GetProperty("own").TryGetProperty("generated_patches", out JsonElement table))
+            {
+                Assert.True(table.TryGetProperty(id, out JsonElement pin), $"{id}: the kit pins no generated patch for this case");
+                Assert.Equal(pin.GetProperty("ops").GetInt64(), total);
+                string digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(canonical.ToString()))).ToLowerInvariant();
+                Assert.Equal(pin.GetProperty("sha256").GetString(), digest);
+            }
+        }
+
+        using JsonDocument built = JsonDocument.Parse(text.ToString());
+        return built.RootElement.Clone();
+    }
+
+    // Python's json.dumps(sort_keys=True, separators=(",", ":")) for the values a patch holds.
+    private static void AppendCanonical(StringBuilder sb, JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                sb.Append('{');
+                bool first = true;
+                foreach (JsonProperty p in value.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    if (!first)
+                    {
+                        sb.Append(',');
+                    }
+
+                    first = false;
+                    AppendCanonicalString(sb, p.Name);
+                    sb.Append(':');
+                    AppendCanonical(sb, p.Value);
+                }
+
+                sb.Append('}');
+                break;
+            case JsonValueKind.Array:
+                sb.Append('[');
+                bool firstItem = true;
+                foreach (JsonElement item in value.EnumerateArray())
+                {
+                    if (!firstItem)
+                    {
+                        sb.Append(',');
+                    }
+
+                    firstItem = false;
+                    AppendCanonical(sb, item);
+                }
+
+                sb.Append(']');
+                break;
+            case JsonValueKind.String:
+                AppendCanonicalString(sb, value.GetString()!);
+                break;
+            default:
+                sb.Append(value.GetRawText());
+                break;
+        }
+    }
+
+    private static void AppendCanonicalString(StringBuilder sb, string s)
+    {
+        sb.Append('"');
+        foreach (char c in s)
+        {
+            switch (c)
+            {
+                case '"': sb.Append("\\\""); break;
+                case '\\': sb.Append("\\\\"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                case '\b': sb.Append("\\b"); break;
+                case '\f': sb.Append("\\f"); break;
+                case < ' ' or > '\u007f':
+                    sb.Append("\\u").Append(((int)c).ToString("x4", CultureInfo.InvariantCulture));
+                    break;
+                default: sb.Append(c); break;
+            }
+        }
+
+        sb.Append('"');
     }
 
     // The bytes a recipe describes: parts in order, each a text repeated some times or a run of numbers.
