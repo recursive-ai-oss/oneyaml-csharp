@@ -141,7 +141,7 @@ public class AnchorNotFoundException : YamlException
 }
 
 /// <summary>The input or the object graph nests deeper than the configured recursion limit, or an expansion limit was exceeded.</summary>
-public sealed class MaximumRecursionLevelReachedException : YamlException
+public class MaximumRecursionLevelReachedException : YamlException
 {
     /// <summary>Creates an exception.</summary>
     /// <param name="message">The message.</param>
@@ -163,6 +163,39 @@ public sealed class MaximumRecursionLevelReachedException : YamlException
     /// <param name="message">The message.</param>
     /// <param name="inner">The cause.</param>
     public MaximumRecursionLevelReachedException(string message, Exception? inner)
+        : base(message, inner)
+    {
+    }
+}
+
+
+/// <summary>
+/// Reading or writing expanded aliases past the alias budget of the configured <c>YamlLimits</c>. It derives from
+/// <see cref="MaximumRecursionLevelReachedException"/>, so code that catches the base type still catches it, and
+/// code that needs to tell a depth problem from an expansion problem can catch this one first.
+/// </summary>
+public sealed class AliasExpansionLimitExceededException : MaximumRecursionLevelReachedException
+{
+    /// <summary>Creates an exception.</summary>
+    /// <param name="message">The message.</param>
+    public AliasExpansionLimitExceededException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Creates an exception for a span of the source.</summary>
+    /// <param name="start">Where the problem starts.</param>
+    /// <param name="end">Where it ends.</param>
+    /// <param name="message">The message.</param>
+    public AliasExpansionLimitExceededException(in Mark start, in Mark end, string message)
+        : base(start, end, message)
+    {
+    }
+
+    /// <summary>Creates an exception with a message and a cause.</summary>
+    /// <param name="message">The message.</param>
+    /// <param name="inner">The cause.</param>
+    public AliasExpansionLimitExceededException(string message, Exception? inner)
         : base(message, inner)
     {
     }

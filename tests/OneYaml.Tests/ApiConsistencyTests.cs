@@ -622,23 +622,33 @@ public class ApiConsistencyTests
             _ => $"- {i}.5",
         })) + "\n";
 
+        const long Bound = 400;
+        const int MaxRounds = 1000;
         List<JsonNode?>? nodes = null;
         long perItem = long.MaxValue;
 
-        // Allocation is counted on this thread only. Rounds repeat and the smallest counts, so one-off
-        // work such as lazy initialisation or compilation on this thread cannot decide the result.
-        for (int round = 0; round < 6; round++)
+        // Allocation is counted on this thread only, so other tests add nothing. Code the runtime has not optimised yet
+        // allocates objects that the optimised code keeps on the stack, and on a busy machine the background thread that
+        // swaps it in can be starved for a long while. So a round over the bound runs again, after a short pause, up to a
+        // round limit and not a warm-up count. The detour through JSON text costs about twice the bound on every round
+        // and never gets under it.
+        for (int round = 0; round < MaxRounds && perItem >= Bound; round++)
         {
             long before = GC.GetAllocatedBytesForCurrentThread();
             nodes = YamlSerializer.Deserialize<List<JsonNode?>>(yaml);
             perItem = Math.Min(perItem, (GC.GetAllocatedBytesForCurrentThread() - before) / items);
+            if (perItem >= Bound)
+            {
+                Thread.Sleep(10);
+            }
         }
 
-        Assert.Equal(items, nodes!.Count);
+        Assert.NotNull(nodes);
+        Assert.Equal(items, nodes.Count);
         Assert.Equal(3, nodes[0]!.GetValue<int>() + 3);
         Assert.Equal("name1", nodes[1]!.GetValue<string>());
         Assert.Equal("4.5", nodes[4]!.ToJsonString());
-        Assert.True(perItem < 400, $"A scalar member took {perItem} bytes.");
+        Assert.True(perItem < Bound, $"A scalar member took {perItem} bytes.");
     }
 
     [Theory, MemberData(nameof(Paths))]

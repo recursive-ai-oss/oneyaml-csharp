@@ -30,8 +30,8 @@ public class SharedGraphWriteTests
         // 8^7 is about 2 million leaves, over the default allowance of one million nodes.
         List<object> graph = Laughs(levels: 7, fanout: 8);
 
-        Assert.Throws<CmCore.MaximumRecursionLevelReachedException>(() => new Cm.SerializerBuilder().DisableAliases().Build().Serialize(graph));
-        Assert.Throws<CmCore.MaximumRecursionLevelReachedException>(() => new Cm.SerializerBuilder().JsonCompatible().Build().Serialize(graph));
+        Assert.Throws<CmCore.AliasExpansionLimitExceededException>(() => new Cm.SerializerBuilder().DisableAliases().Build().Serialize(graph));
+        Assert.Throws<CmCore.AliasExpansionLimitExceededException>(() => new Cm.SerializerBuilder().JsonCompatible().Build().Serialize(graph));
     }
 
     [Fact]
@@ -41,7 +41,7 @@ public class SharedGraphWriteTests
         Cm.ISerializer serializer = new Cm.SerializerBuilder().DisableAliases().WithLimits(tight).Build();
 
         // 5^6 is 15,625 leaves against an allowance of 1,000 nodes.
-        Assert.Throws<CmCore.MaximumRecursionLevelReachedException>(() => serializer.Serialize(Laughs(levels: 6, fanout: 5)));
+        Assert.Throws<CmCore.AliasExpansionLimitExceededException>(() => serializer.Serialize(Laughs(levels: 6, fanout: 5)));
 
         // Sharing within the allowance still writes in full.
         string text = serializer.Serialize(Laughs(levels: 2, fanout: 3));
