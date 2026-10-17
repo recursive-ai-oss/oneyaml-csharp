@@ -328,12 +328,13 @@ The diff of the file holds only the job's changes: the replica count and the ima
 
 ## Errors
 
-A failed edit throws and leaves the document exactly as it was. Problems with the YAML, the pointer or the value are a `YamlException` with a category: `PatchPath` (the pointer names nothing), `RefusedAlias`, `RefusedAmbiguous`, or `Limit`. Mistakes in how the API is used are the usual .NET exceptions listed above (`KeyNotFoundException`, `ArgumentOutOfRangeException`, `InvalidOperationException`, `ObjectDisposedException`), and a value with no YAML form is an `ArgumentException`.
+A failed edit throws and leaves the document exactly as it was. If even putting the document back fails, for example because memory runs out while it is restored, the edit's own exception still reaches you, and from then on the document refuses every use with `InvalidOperationException`; `Dispose` still works. Problems with the YAML, the pointer or the value are a `YamlException` with a category: `PatchPath` (the pointer names nothing), `RefusedAlias`, `RefusedAmbiguous`, or `Limit`. Mistakes in how the API is used are the usual .NET exceptions listed above (`KeyNotFoundException`, `ArgumentOutOfRangeException`, `InvalidOperationException`, `ObjectDisposedException`), and a value with no YAML form is an `ArgumentException`.
 
 ## Input, output and lifetime
 
 - `Parse` takes a `string`, a `ReadOnlySpan<char>`, bytes in UTF-8, UTF-16 or UTF-32 (detected from a byte order mark or the first characters), or a `Stream` (also `ParseAsync`). A seekable stream longer than `MaxInputBytes` is refused before it is read.
 - `ToString()` gives the text; `ToUtf8Bytes()` UTF-8; `ToBytes()`, `WriteTo(...)` and `WriteToAsync(...)` the encoding and byte order mark the input had.
+- `WriteTo(IBufferWriter<byte>)` and `WriteTo(Stream)` write into a buffer you own and can reuse, such as an `ArrayBufferWriter<byte>` cleared with `ResetWrittenCount()` between calls. For a document read as UTF-8 they copy its text straight into that buffer, while `ToUtf8Bytes()` and `ToBytes()` allocate a new array on every call; this matters when you write large documents again and again. A UTF-16 or UTF-32 document is converted first, so writing it allocates either way, and `WriteToAsync` copies the text into a new array before it awaits the write.
 - `YamlDocumentOptions` sets `Limits`, `AllowDuplicateKeys`, `QuoteYaml11Lookalikes` and `SourceName` (the name that starts every error message).
 - A document holds pooled memory; dispose it when you are done. It is not thread-safe.
 - To apply a JSON Patch or a merge patch, see [Patches](patches.md).
