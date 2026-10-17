@@ -31,7 +31,7 @@ behaviour the package does not provide.
 | O6 | `YamlStream.Save` keeps comments and layout of text that was loaded and not changed | load `# c\na:   1`, save: package returns the input; YamlDotNet re-emits `a: 1` | intended (kept comments) |
 | O7 | After an edit `Save` re-emits from the model without comments; YamlDotNet adds `...` after each document, the package does not | `Save` of a built model: YamlDotNet ends with `...`, package does not | gap (no edit-sync into the lossless document; document end marker not written) |
 | O8 | Anchors from `Save(w, assignAnchors: true)` are `o0`, `o1`..; YamlDotNet writes numeric names such as `&466756907` | any shared node | intended (bug not reproduced) |
-| O9 | `Int128`, `UInt128` and `Half` are written and read as numbers | `Serialize((Int128)5)` → YamlDotNet writes `{}` (the value is lost), package `5`; a `Half` uses the float spellings `.inf`, `-.inf` and `.nan`, and a number too large for a `Half` is an error, not infinity | intended (bug not reproduced: data loss) |
+| O9 | `Int128`, `UInt128` and `Half` are written as numbers | `Serialize((Int128)5)` → YamlDotNet writes `{}` (the value is lost), package `5`; the same for `UInt128` and `Half`. Reading them back: decimal numbers read the same in both; the package also reads `0x10` into `Int128` and `UInt128`, and `.inf`, `-.inf` and `.nan` into `Half` (the spellings it writes), where YamlDotNet throws; a number too large for a `Half` is an error here, where YamlDotNet gives infinity | intended (bug not reproduced: data loss) |
 
 ## Input (Deserialize / YamlStream.Load)
 

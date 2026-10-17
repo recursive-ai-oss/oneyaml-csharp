@@ -64,6 +64,8 @@ follows aliases with any value.
 | A stream with bytes that are not valid in its encoding ends in a `SyntaxErrorException`; the real library throws a `DecoderFallbackException` (not a `YamlException`) for UTF-8 input, and for UTF-16 or UTF-32 input with a byte order mark it silently replaces the bad bytes with U+FFFD. The error mark counts characters of the detected encoding | `Deserialize<Plain>(stream)` with a stray `0xFF` byte |
 | Aliases into `object` are refused by the real library unless `ReferenceHandling` is `Preserve`; here they are followed within the alias budget | `a: &x [1]\nb: *x` into `object` |
 
+One `%` case is kept as SharpYaml 3 has it, not as the YAML specification says. A `%` line straight after a block collection, before the next `---`, is taken as a directive of the next document, so `Deserialize<Dictionary<string, int>>("a: 1\n%TAG ! tag:example.com,2000:\n---\nb: 2\n")` gives `{a: 1}` in both. The specification requires a `...` document end marker before a directive, and the `OneYaml` API refuses this text without one. The adapter keeps SharpYaml's reading because it changes no data.
+
 ## Intended differences
 
 | Difference | Repro |
