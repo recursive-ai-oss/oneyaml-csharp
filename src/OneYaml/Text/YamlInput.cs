@@ -303,13 +303,65 @@ internal ref struct YamlInput
 
     private static YamlException EncodingError(ReadOnlySpan<byte> body, int mark, bool bigEndian, bool wide, int index)
     {
-        // Work out the position from the characters that did decode.
+        // Find the first bad unit ourselves: the decoder's own index may point past it (it reports where
+        // it gave up, which for a lone surrogate is the unit after), and the column must name the bad character.
+        index = FirstBadUnit(body, bigEndian, wide);
         int unit = wide ? 4 : 2;
         int good = Math.Clamp(index, 0, body.Length) / unit * unit;
         Encoding lenient = wide ? new UTF32Encoding(bigEndian, false, false) : new UnicodeEncoding(bigEndian, false, false);
         string prefix = lenient.GetString(body[..good]);
         YamlException at = YamlException.Located(YamlErrorCategory.Encoding, wide ? "Malformed UTF-32 input." : "Malformed UTF-16 input.", prefix, prefix.Length);
         return new YamlException(at.Message, YamlErrorCategory.Encoding, at.Line, at.Column, mark + index);
+    }
+
+    // The byte index of the first unit that is not a valid character: a lone surrogate, a UTF-32 value out of
+    // range, or a partial unit at the end. The body is at most the input size limit, so an int index is enough.
+    private static int FirstBadUnit(ReadOnlySpan<byte> body, bool bigEndian, bool wide)
+    {
+        int unit = wide ? 4 : 2;
+        int i = 0;
+        while (i + unit <= body.Length)
+        {
+            if (wide)
+            {
+                uint v = bigEndian
+                    ? System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(body[i..])
+                    : System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(body[i..]);
+                if (v > 0x10FFFF || (v >= 0xD800 && v <= 0xDFFF))
+                {
+                    return i;
+                }
+
+                i += 4;
+                continue;
+            }
+
+            ushort u = bigEndian
+                ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(body[i..])
+                : System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(body[i..]);
+            if (u < 0xD800 || u > 0xDFFF)
+            {
+                i += 2;
+                continue;
+            }
+
+            if (u >= 0xDC00 || i + 4 > body.Length)
+            {
+                return i;
+            }
+
+            ushort low = bigEndian
+                ? System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(body[(i + 2)..])
+                : System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(body[(i + 2)..]);
+            if (low < 0xDC00 || low > 0xDFFF)
+            {
+                return i;
+            }
+
+            i += 4;
+        }
+
+        return i;
     }
 
     private static void Validate(ReadOnlySpan<byte> text)
