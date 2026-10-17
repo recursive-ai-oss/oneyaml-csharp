@@ -803,6 +803,7 @@ internal sealed partial class DocState
         };
         try
         {
+            c._cache = CloneCache();
             c._nodes = ArrayPool<CstNode>.Shared.Rent(Math.Max(NodeCount + Math.Max(extraNodes, 0) + 16, 1));
             _nodes.AsSpan(0, NodeCount).CopyTo(c._nodes);
             c._props = ArrayPool<int>.Shared.Rent(Math.Max(((PropCountRows + extraProps) * PropWidth) + PropWidth, 1));
@@ -829,10 +830,18 @@ internal sealed partial class DocState
         DocState t = Exclusive ? this : CloneForSplice(bd, d, sub.PropCountRows, subComments);
         try
         {
-            t.ApplySplice(sub, n, first, end, oldKids, newKids, regionStart, regionEnd, s, e, text, baseOffset, d, bd, touchesEnd);
-            if (checkKeys)
+            bool unique = t.ApplySplice(sub, n, first, end, oldKids, newKids, regionStart, regionEnd, s, e, text, baseOffset, d, bd, touchesEnd);
+
+            // Taking keys out cannot make two of them equal, and a key the index shows to be new needs no comparison
+            // with the others; every other change to the keys is checked against all of them.
+            if (checkKeys && newKids > 0 && !unique)
             {
                 t.CheckDuplicateKeys(n);
+            }
+
+            if (VerifyCaches)
+            {
+                t.VerifyCache();
             }
 
             return t;
@@ -848,8 +857,11 @@ internal sealed partial class DocState
         }
     }
 
-    private void ApplySplice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, int d, int bd, bool touchesEnd)
+    // Returns whether the keys the region brought are known to differ from all the others in the mapping.
+    private bool ApplySplice(DocState sub, int n, int first, int end, int oldKids, int newKids, int regionStart, int regionEnd, int s, int e, ReadOnlySpan<byte> text, int baseOffset, int d, int bd, bool touchesEnd)
     {
+        CacheBeforeSplice(sub, n, first, end, d);
+
         // Sizes worked out for the text before the edit no longer fit it.
         ExpansionCache?.Release();
         ExpansionCache = null;
@@ -889,31 +901,60 @@ internal sealed partial class DocState
         }
 
         Span<CstNode> nodes = _nodes.AsSpan(0, oldCount + d);
-        for (int i = first + newCount; i < nodes.Length; i++)
+        Span<CstNode> tail = nodes.Slice(first + newCount);
+        if (d == 0)
         {
-            ref CstNode x = ref nodes[i];
-            if (x.Parent >= end)
+            // No node changed place, so only offsets move, and not at all when the text kept its length.
+            if (bd != 0)
             {
-                x.Parent += d;
-            }
+                for (int i = 0; i < tail.Length; i++)
+                {
+                    ref CstNode x = ref tail[i];
 
-            if (x.Kind == NodeKind.Alias && x.Aux >= end)
-            {
-                x.Aux += d;
-            }
+                    // The empty root made up for a document without any node is kept at the end of the array,
+                    // whichever document it belongs to: only those after the region move.
+                    if (x.Start < regionEnd)
+                    {
+                        continue;
+                    }
 
-            // The empty root made up for a document without any node is kept at the end of the array,
-            // whichever document it belongs to: only those after the region move.
-            if (x.Start < regionEnd)
-            {
-                continue;
+                    x.Start += bd;
+                    x.End += bd;
+                    if (x.Kind is NodeKind.Mapping or NodeKind.Sequence || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
+                    {
+                        x.Aux += bd;
+                    }
+                }
             }
-
-            x.Start += bd;
-            x.End += bd;
-            if (x.Kind is NodeKind.Mapping or NodeKind.Sequence || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
+        }
+        else
+        {
+            for (int i = 0; i < tail.Length; i++)
             {
-                x.Aux += bd;
+                ref CstNode x = ref tail[i];
+                if (x.Parent >= end)
+                {
+                    x.Parent += d;
+                }
+
+                if (x.Kind == NodeKind.Alias && x.Aux >= end)
+                {
+                    x.Aux += d;
+                }
+
+                // The empty root made up for a document without any node is kept at the end of the array,
+                // whichever document it belongs to: only those after the region move.
+                if (x.Start < regionEnd)
+                {
+                    continue;
+                }
+
+                x.Start += bd;
+                x.End += bd;
+                if (x.Kind is NodeKind.Mapping or NodeKind.Sequence || (x.Kind == NodeKind.Scalar && (x.Flags & NodeFlags.Empty) != 0))
+                {
+                    x.Aux += bd;
+                }
             }
         }
 
@@ -1083,6 +1124,9 @@ internal sealed partial class DocState
                 x.Aux = SkipTriviaAndMark(all, x.End);
             }
         }
+
+        // The keys of the region are read from the new text, so the index takes them last.
+        return CacheAfterSplice(n, first, newCount);
     }
 
     // Like SkipTrivia, and past a byte order mark at the start of a line as well: the reader does not count one

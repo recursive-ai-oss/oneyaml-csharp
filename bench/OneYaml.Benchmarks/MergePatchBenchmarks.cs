@@ -18,7 +18,7 @@ public class MergePatchBenchmarks
     private byte[] _bytes = [];
     private string _patch = string.Empty;
 
-    [Params("small-config", "mapping-20k-delete-600", "mapping-500k-delete-12000")]
+    [Params("small-config", "mapping-20k-delete-600", "mapping-500k-delete-12000", "mapping-20k-delete-600-alias", "flow-mapping-20k-delete-600")]
     public string Workload { get; set; } = string.Empty;
 
     [GlobalSetup]
@@ -34,6 +34,16 @@ public class MergePatchBenchmarks
                 break;
             case "mapping-20k-delete-600":
                 Build(yaml, patch, 20_000, 600);
+                break;
+            case "mapping-20k-delete-600-alias":
+                // An alias in the stream sends the deletions the slower way: one removal per key.
+                yaml.Append("anchor: &a shared\nref: *a\n");
+                Build(yaml, patch, 20_000, 600);
+                break;
+            case "flow-mapping-20k-delete-600":
+                Build(yaml, patch, 20_000, 600);
+                yaml.Replace("\n", ", ").Insert(0, "{").Length -= 2;
+                yaml.Append('}');
                 break;
             default:
                 Build(yaml, patch, 500_000, 12_000);

@@ -6,6 +6,7 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ### Changed
 
+- **Many edits to one large mapping no longer slow down with its size.** Looking up a key, working out the indentation to write and checking for duplicate keys each walked the whole mapping on every operation, so 100,000 operations on a mapping of 100,000 keys took 94 seconds to remove, 112 seconds to replace and 31 seconds to test; they take about 8, 8 and 0.4 seconds now (`ApplyPatch`, `ApplyMergePatch`, `Set`, `Remove` and the indexers share the change). A mapping of 128 or more entries gets a key index on its second lookup and keeps it up to date across edits; the index is dropped for a mapping that holds two keys with the same text, which are searched in order as before. Output bytes, errors and positions are unchanged, and a document that is only read builds nothing and keeps its size. What still grows with the document is moving the entries after an edit, about 80 microseconds per edit at 100,000 keys.
 - **Faster number reads.** Plain integers of up to 18 digits and plain decimal numbers with a short mantissa and exponent are read in one pass, in typed and generic loads and wherever a float key is compared. Loading number-heavy input is 5 to 14 percent faster; every value, error, category and position is unchanged, and hexadecimal, octal, `.inf`, `.nan`, long and out-of-range numbers take the same path as before.
 
 ### Fixed
