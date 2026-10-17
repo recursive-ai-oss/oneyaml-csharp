@@ -410,6 +410,8 @@ internal static class ErrorMap
         string message = error.Message;
         return error.Category switch
         {
+            // The engine words every refused alias expansion with the same phrase; depth and size limits do not use it.
+            Oy.YamlErrorCategory.Limit when message.Contains("exceeds the budget set by YamlLimits", StringComparison.Ordinal) => new AliasExpansionLimitExceededException(at, at, message),
             Oy.YamlErrorCategory.Limit => new MaximumRecursionLevelReachedException(at, at, message),
             Oy.YamlErrorCategory.UnresolvedTag => new SemanticErrorException(at, at, message),
             Oy.YamlErrorCategory.Syntax when message.Contains("alias", StringComparison.OrdinalIgnoreCase) && message.Contains("anchor", StringComparison.OrdinalIgnoreCase) => new AnchorNotFoundException(at, at, message),

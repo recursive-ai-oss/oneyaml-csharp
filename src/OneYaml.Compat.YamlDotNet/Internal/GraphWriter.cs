@@ -199,7 +199,7 @@ internal sealed class GraphWriter
         long own = _buffer.Count - expanded;
         if (expanded > _settings.Limits.AliasNodeBudget(Math.Max(own, 0)))
         {
-            throw new MaximumRecursionLevelReachedException("The object graph shares its parts so much that writing it without aliases exceeds the configured limit.");
+            throw new AliasExpansionLimitExceededException("The object graph shares its parts so much that writing it without aliases exceeds the configured limit.");
         }
     }
 

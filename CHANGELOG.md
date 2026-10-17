@@ -4,6 +4,10 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Added
+
+- **`OneYaml.Compat.YamlDotNet` tells an alias budget from a depth limit.** `AliasExpansionLimitExceededException` derives from `MaximumRecursionLevelReachedException` and is thrown where reading or writing expanded aliases passes the alias budget. Depth and size limits still throw the base type, and a `catch (MaximumRecursionLevelReachedException)` still catches both. `MaximumRecursionLevelReachedException` is no longer sealed so that this is possible.
+
 ## [1.1.1] - 2026-10-17
 
 ### Changed
