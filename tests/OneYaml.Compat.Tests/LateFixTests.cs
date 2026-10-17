@@ -25,7 +25,9 @@ public class LateFixTests
         var value = new Wide { Big = Int128.MinValue, Huge = UInt128.MaxValue, Small = (Half)1.5 };
         string yaml = new CmS.Serializer().Serialize(value);
 
-        Assert.Equal("Big: -170141183460469231731687303715884105728\nHuge: 340282366920938463463374607431768211455\nSmall: 1.5\n", yaml);
+        // The adapter writes the platform's line break, as YamlDotNet does.
+        string nl = Environment.NewLine;
+        Assert.Equal($"Big: -170141183460469231731687303715884105728{nl}Huge: 340282366920938463463374607431768211455{nl}Small: 1.5{nl}", yaml);
     }
 
     [Fact]
@@ -48,7 +50,7 @@ public class LateFixTests
     {
         Half half = new CmS.Deserializer().Deserialize<Half>(text);
         Assert.Equal(infinite, Half.IsInfinity(half));
-        Assert.Equal(text + "\n", new CmS.Serializer().Serialize(half));
+        Assert.Equal(text + Environment.NewLine, new CmS.Serializer().Serialize(half));
     }
 
     [Fact]
