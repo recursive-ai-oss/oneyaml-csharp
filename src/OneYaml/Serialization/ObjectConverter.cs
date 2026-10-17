@@ -18,6 +18,11 @@ internal struct MemberSet
     private ulong _low;
     private ulong[]? _high;
 
+    // Names of extension entries that came in through a merge key inside a merge source's mapping. Members have a bit for
+    // that; the keys of an extension member are open-ended, so they are kept by name, beside the set and keyed by its word
+    // array (only a merge source has one). A field here would be on the stack once for every level of a nested document.
+    private static readonly ConditionalWeakTable<ulong[], HashSet<string>> ExtensionNames = new();
+
     public MemberSet(int count) => _high = count > 64 ? new ulong[(count - 1) / 64] : null;
 
     // The set of a mapping that is read as a merge source: the words for the members, then the words for merged keys.
@@ -50,10 +55,30 @@ internal struct MemberSet
     [MethodImpl(MethodImplOptions.NoInlining)]
     public void MarkMerged(in MemberSet other)
     {
+        if (other._high is not null && ExtensionNames.TryGetValue(other._high, out HashSet<string>? names))
+        {
+            ExtensionNames.GetOrCreateValue(_high!).UnionWith(names);
+        }
+
         int words = (_high!.Length + 1) / 2;
         for (int k = 0; k < words; k++)
         {
             _high[_high.Length - 1 - k] |= other.Word(k) | other.MergedWord(k);
+        }
+    }
+
+    public readonly bool HasExtension(string name) =>
+        _high is not null && ExtensionNames.TryGetValue(_high, out HashSet<string>? names) && names.Contains(name);
+
+    // Starts keeping names for a merge source that sits inside another one; the outer mapping asks for them afterwards.
+    public readonly void TrackExtensions() => ExtensionNames.GetOrCreateValue(_high!);
+
+    // Names are kept only where they will be asked for, so a merge source at the top pays nothing for them.
+    public readonly void AddExtension(string name)
+    {
+        if (ExtensionNames.TryGetValue(_high!, out HashSet<string>? names))
+        {
+            names.Add(name);
         }
     }
 
@@ -598,7 +623,7 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
 
         if (extra is not null)
         {
-            FlushExtra(ref instance, slots, extra, merging);
+            FlushExtra(ref instance, slots, extra, merging, ref merged);
         }
 
         skipped.Release();
@@ -654,13 +679,21 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         (extra ??= new Dictionary<string, object?>(StringComparer.Ordinal))[name] = value;
     }
 
-    // Hands the collected keys to the member. Entries from a merged mapping give way to a key the mapping has itself.
-    private void FlushExtra(ref T instance, object?[]? slots, Dictionary<string, object?> collected, bool merging)
+    // Hands the collected keys to the member. In a mapping read as a merge source, entries that mapping merged in itself
+    // give way to its own keys, and entries that were there before it began give way to both.
+    private void FlushExtra(ref T instance, object?[]? slots, Dictionary<string, object?> collected, bool merging, ref MemberSet merged)
     {
         YamlPropertyInfo<T> extension = _info.Extension!;
         foreach (KeyValuePair<string, object?> entry in collected)
         {
-            extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: !merging);
+            if (!merging)
+            {
+                extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: true);
+            }
+            else if (extension.AddExtension(ref instance, slots, entry.Key, entry.Value, overwrite: merged.HasExtension(entry.Key)))
+            {
+                merged.AddExtension(entry.Key);
+            }
         }
     }
 
@@ -743,6 +776,11 @@ internal sealed class ObjectConverter<T> : YamlConverter<T>
         }
         else
         {
+            if (inSource)
+            {
+                own.TrackExtensions();
+            }
+
             ReadMembersGeneral(ref reader, options, ref instance, slots, ref decided, ref own, ReadMerging, null);
         }
 
