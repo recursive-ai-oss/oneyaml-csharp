@@ -408,6 +408,22 @@ public class StackHeadroomTests
         OnMegabyteStack(() => Assert.Contains("c:", YamlSerializer.Serialize(root)));
     }
 
+    // Merge keys nested to the limit: each source holds the next merge key.
+    [Fact]
+    public void Nested_merge_sources_reach_the_depth_limit_by_reflection_and_the_generator()
+    {
+        SkipWhenUnoptimised();
+        string yaml = PolymorphicChain(Levels, "{<<: ", "}", "{s: x}");
+        var merging = new YamlSerializerOptions { MergeKeys = true };
+        var info = (YamlTypeInfo<ChainNode>)new HeadroomContext(merging).GetTypeInfo(typeof(ChainNode))!;
+        OnMegabyteStack(() =>
+        {
+            Assert.Equal("x", YamlSerializer.Deserialize<ChainNode>(yaml, merging)!.S);
+            Assert.Equal("x", YamlSerializer.Deserialize(yaml, info)!.S);
+            Assert.Single(YamlSerializer.Deserialize<Dictionary<string, string>>(yaml, merging)!);
+        });
+    }
+
     // Frames are larger on some platforms than on Linux, so the depth limit is checked there on 1 MB with little to spare.
     // Linux has to write extension data on 768 KB, which keeps that path from growing back unnoticed. Reading a key that
     // comes late is checked at the same size, but its frames cost the same on Linux whichever way the code is laid out;

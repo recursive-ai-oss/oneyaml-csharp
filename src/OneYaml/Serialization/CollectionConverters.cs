@@ -321,11 +321,14 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
     {
         // A key twice in one merged mapping is an error, though the entries already there win over both.
         HashSet<TKey>? own = null;
+
+        // Entries that came in through a merge key inside this mapping: an explicit key of the mapping replaces them.
+        HashSet<TKey>? nested = null;
         while (reader.Read() && reader.Type != YamlTokenType.MappingEnd)
         {
             if (ConverterGuards.IsMergeKey(in reader))
             {
-                ReadMerge(ref reader, options, dict, ref merged);
+                ReadMerge(ref reader, options, dict, ref nested);
                 continue;
             }
 
@@ -342,11 +345,21 @@ internal sealed class DictionaryConverter<TKey, TValue> : YamlConverter<Dictiona
                 throw reader.ErrorAtKey(YamlErrorCategory.DuplicateKey, "The key '{0}' appears twice in the mapping.", keyStart);
             }
 
-            // Merged entries never replace an entry that is already there.
-            if (dict.TryAdd(key, value))
+            // Merged entries never replace an entry that is already there, except one this mapping merged in itself.
+            if (nested is not null && nested.Remove(key))
+            {
+                dict[key] = value;
+                (merged ??= []).Add(key);
+            }
+            else if (dict.TryAdd(key, value))
             {
                 (merged ??= []).Add(key);
             }
+        }
+
+        if (nested is not null)
+        {
+            (merged ??= []).UnionWith(nested);
         }
     }
 
