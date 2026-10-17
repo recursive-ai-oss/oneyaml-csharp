@@ -12,6 +12,8 @@
     <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <RestoreLockedMode>false</RestoreLockedMode>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Test runs set this to make reads that skip the held-back check fail loudly. -->
+    <DefineConstants Condition="'$(OneYamlCheckHeld)' == '1'">$(DefineConstants);ONEYAML_CHECK_HELD</DefineConstants>
     <!-- Public API without an XML doc comment is a build error (warnings are errors). -->
   </PropertyGroup>
 

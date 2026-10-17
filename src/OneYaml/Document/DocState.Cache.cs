@@ -191,7 +191,7 @@ internal sealed partial class DocState
                 int key = container + rel;
                 if (KeyTextMatches(key, token))
                 {
-                    result = key + N(key).Size;
+                    result = key + _nodes[key].Size;
                     break;
                 }
             }
@@ -212,7 +212,7 @@ internal sealed partial class DocState
     {
         MapCache c = EnsureCache();
         int slot = c.Charge(container, pairsScanned, out long work);
-        if (slot >= 0 && work >= (long)BuildAfterScans * (N(container).Count / 2))
+        if (slot >= 0 && work >= (long)BuildAfterScans * (_nodes[container].Count / 2))
         {
             c.Publish(slot, BuildTable(container, Exclusive));
         }
@@ -223,7 +223,7 @@ internal sealed partial class DocState
     // array that goes back to the pool twice is handed to two renters.
     private KeyTable BuildTable(int container, bool pooled)
     {
-        int pairs = N(container).Count / 2;
+        int pairs = _nodes[container].Count / 2;
         int capacity = 64;
         while (capacity * 5 < pairs * 8)
         {
@@ -247,15 +247,15 @@ internal sealed partial class DocState
         for (int i = 0; i < pairs; i++)
         {
             int key = c;
-            int value = key + N(key).Size;
-            if (N(key).Kind == NodeKind.Scalar && !InsertKey(t, key))
+            int value = key + _nodes[key].Size;
+            if (_nodes[key].Kind == NodeKind.Scalar && !InsertKey(t, key))
             {
                 t.Release();
                 t.Refused = true;
                 break;
             }
 
-            c = value + N(value).Size;
+            c = value + _nodes[value].Size;
         }
 
         EditWork.KeysExamined += pairs;
@@ -468,7 +468,7 @@ internal sealed partial class DocState
             }
 
             KeyTable? t = cache.TableAt(i);
-            if (t is null || node + N(node).Size <= first || t.Slots is null)
+            if (t is null || node + _nodes[node].Size <= first || t.Slots is null)
             {
                 continue;
             }
@@ -480,14 +480,14 @@ internal sealed partial class DocState
                 while (c < end)
                 {
                     // Children alternate key and value from the region's first node, which is a key.
-                    if (N(c).Kind == NodeKind.Scalar && !RemoveKey(t, c))
+                    if (_nodes[c].Kind == NodeKind.Scalar && !RemoveKey(t, c))
                     {
                         ok = false;
                         break;
                     }
 
-                    c += N(c).Size;
-                    c += N(c).Size;
+                    c += _nodes[c].Size;
+                    c += _nodes[c].Size;
                 }
 
                 if (!ok)
@@ -518,7 +518,7 @@ internal sealed partial class DocState
         int stop = first + newCount;
         while (c < stop)
         {
-            if (N(c).Kind == NodeKind.Scalar)
+            if (_nodes[c].Kind == NodeKind.Scalar)
             {
                 if (!InsertKey(t, c))
                 {
@@ -535,8 +535,8 @@ internal sealed partial class DocState
                 }
             }
 
-            c += N(c).Size;
-            c += N(c).Size;
+            c += _nodes[c].Size;
+            c += _nodes[c].Size;
         }
 
         return unique;
@@ -556,19 +556,19 @@ internal sealed partial class DocState
         for (int slotIndex = 0; slotIndex < MapCache.Slots; slotIndex++)
         {
             KeyTable? t = cache.TableAt(slotIndex);
-            if (t is null || t.Slots is null || cache.NodeAt(slotIndex) != t.Node || N(t.Node).Count > VerifyMaxNodes)
+            if (t is null || t.Slots is null || cache.NodeAt(slotIndex) != t.Node || _nodes[t.Node].Count > VerifyMaxNodes)
             {
                 continue;
             }
 
             int expected = 0;
-            int pairs = N(t.Node).Count / 2;
+            int pairs = _nodes[t.Node].Count / 2;
             int c = t.Node + 1;
             for (int i = 0; i < pairs; i++)
             {
                 int key = c;
-                int value = key + N(key).Size;
-                if (N(key).Kind == NodeKind.Scalar)
+                int value = key + _nodes[key].Size;
+                if (_nodes[key].Kind == NodeKind.Scalar)
                 {
                     expected++;
                     if (IndexedFind(t.Node, RawOrDecoded(key)) != value)
@@ -577,7 +577,7 @@ internal sealed partial class DocState
                     }
                 }
 
-                c = value + N(value).Size;
+                c = value + _nodes[value].Size;
             }
 
             if (t.Used != expected)

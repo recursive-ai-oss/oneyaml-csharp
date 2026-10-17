@@ -279,9 +279,9 @@ internal sealed partial class DocState
     // The child of a collection that a node below it belongs to.
     private int ChildContaining(int node, int collection)
     {
-        while (node >= 0 && N(node).Parent != collection)
+        while (node >= 0 && _nodes[node].Parent != collection)
         {
-            node = N(node).Parent;
+            node = _nodes[node].Parent;
         }
 
         return node;
@@ -305,7 +305,7 @@ internal sealed partial class DocState
         }
 
         // The collection around the last node that starts before the edit, or around a node it contains.
-        int cur = LastStartingBefore(root + 1, root + N(root).Size, s);
+        int cur = LastStartingBefore(root + 1, root + _nodes[root].Size, s);
         if (cur < 0)
         {
             cur = root;
@@ -313,7 +313,7 @@ internal sealed partial class DocState
 
         while (cur != root && !Encloses(cur, s, e))
         {
-            cur = N(cur).Parent;
+            cur = _nodes[cur].Parent;
         }
 
         return cur;
@@ -369,7 +369,7 @@ internal sealed partial class DocState
             }
 
             int cur = old.InnermostEnclosing(s, e);
-            for (int attempt = 0; cur >= 0 && attempt < MaxSpliceAttempts; attempt++, cur = old.N(cur).Parent)
+            for (int attempt = 0; cur >= 0 && attempt < MaxSpliceAttempts; attempt++, cur = old._nodes[cur].Parent)
             {
                 if (old.IsRegionRoot(cur))
                 {
@@ -396,7 +396,7 @@ internal sealed partial class DocState
     // collection the item's own start (or just after the opening bracket for the first item).
     private int ItemStart(int collection, int index, int firstNode, int previousEnd)
     {
-        if (N(collection).IsFlow)
+        if (_nodes[collection].IsFlow)
         {
             return index == 0 ? N(collection).Start + 1 : PropStart(firstNode);
         }
@@ -407,7 +407,7 @@ internal sealed partial class DocState
     // The first node of the item that a node of a collection belongs to: the key of a mapping's pair.
     private int ItemFirst(int collection, int child)
     {
-        return N(collection).Kind == NodeKind.Mapping && (N(child).Flags & NodeFlags.IsKey) == 0 ? PrevSibling(child) : child;
+        return _nodes[collection].Kind == NodeKind.Mapping && (_nodes[child].Flags & NodeFlags.IsKey) == 0 ? PrevSibling(child) : child;
     }
 
     private static DocState? TryRegion(DocState old, int n, int s, int e, ReadOnlySpan<byte> text, YamlLimits limits, out int reparsed)
@@ -425,9 +425,9 @@ internal sealed partial class DocState
         }
 
         int ancestors = 0;
-        for (int p = nn.Parent; p >= 0; p = old.N(p).Parent)
+        for (int p = nn.Parent; p >= 0; p = old._nodes[p].Parent)
         {
-            if ((old.N(p).Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0)
+            if ((old._nodes[p].Flags & (NodeFlags.IsKey | NodeFlags.Pair)) != 0)
             {
                 return null;
             }
@@ -487,15 +487,15 @@ internal sealed partial class DocState
                 jFirst = kFirst;
             }
 
-            int jLast = map ? jFirst + old.N(jFirst).Size : jFirst;
-            tNode = jLast + old.N(jLast).Size;
+            int jLast = map ? jFirst + old._nodes[jFirst].Size : jFirst;
+            tNode = jLast + old._nodes[jLast].Size;
             int jEnd = old.N(jLast).End;
             if (e > jEnd && tNode < end)
             {
                 // The edit ends in the gap before the next item, which then belongs to the region.
                 jFirst = tNode;
-                jLast = map ? jFirst + old.N(jFirst).Size : jFirst;
-                tNode = jLast + old.N(jLast).Size;
+                jLast = map ? jFirst + old._nodes[jFirst].Size : jFirst;
+                tNode = jLast + old._nodes[jLast].Size;
                 jEnd = old.N(jLast).End;
                 if (e > jEnd)
                 {
@@ -508,7 +508,7 @@ internal sealed partial class DocState
             // Only a block scalar at the end can read the comment lines after it as its own, so only then are they all included.
             regionEnd = tNode == end ? (flow ? nn.Aux : TrailingTriviaEnd(src, Math.Max(jEnd, e), EndsInBlockScalar(old, kFirst, tNode, text))) : jEnd;
             oldKids = 0;
-            for (int c = kFirst; c < tNode; c += old.N(c).Size)
+            for (int c = kFirst; c < tNode; c += old._nodes[c].Size)
             {
                 oldKids++;
             }
@@ -651,7 +651,7 @@ internal sealed partial class DocState
 
         for (int i = firstNode; i < endNode; i++)
         {
-            if (old.N(i).Kind == NodeKind.Scalar && (ScalarStyle)old.N(i).Style is ScalarStyle.Literal or ScalarStyle.Folded)
+            if (old._nodes[i].Kind == NodeKind.Scalar && (ScalarStyle)old._nodes[i].Style is ScalarStyle.Literal or ScalarStyle.Folded)
             {
                 return true;
             }
@@ -793,7 +793,7 @@ internal sealed partial class DocState
             }
 
             o += a.Size;
-            o += N(o).Size;
+            o += _nodes[o].Size;
             m += b.Size;
             m += sub._nodes[m].Size;
         }
@@ -963,7 +963,7 @@ internal sealed partial class DocState
         // The collections around the region get a different size, and every offset beyond the region moves.
         int oldEnd = N(n).End;
         int newEnd = sub._nodes[0].End + baseOffset;
-        for (int a = n; a >= 0; a = N(a).Parent)
+        for (int a = n; a >= 0; a = _nodes[a].Parent)
         {
             ref CstNode an = ref N(a);
             an.Size += d;
@@ -1185,7 +1185,7 @@ internal sealed partial class DocState
 
         // Where the next token starts after a node can only be told from the text that follows it.
         ReadOnlySpan<byte> all = Text;
-        for (int a = n; a >= 0; a = N(a).Parent)
+        for (int a = n; a >= 0; a = _nodes[a].Parent)
         {
             ref CstNode an = ref N(a);
             if (!an.IsFlow)

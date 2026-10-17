@@ -19,6 +19,17 @@ internal sealed partial class DocState
     // that is only read takes no more room.
     private bool _held;
 
+    // Fails a test run that built the library with ONEYAML_CHECK_HELD when code that reads nodes as they are meets a state
+    // with moves held back.
+    [System.Diagnostics.Conditional("ONEYAML_CHECK_HELD")]
+    private void AssertNotHeld()
+    {
+        if (_held)
+        {
+            throw new InvalidOperationException("Nodes were read as they are while a move of offsets is held back.");
+        }
+    }
+
     /// <summary>The node at an index, with true offsets.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref CstNode N(int index)
@@ -56,8 +67,14 @@ internal sealed partial class DocState
     /// <summary>Brings every chunk up to date.</summary>
     internal void SettleNodes()
     {
-        if (!_held || _cache?.Behind is not int[] behind)
+        if (!_held)
         {
+            return;
+        }
+
+        if (_cache?.Behind is not int[] behind)
+        {
+            _held = false;
             return;
         }
 
@@ -69,6 +86,8 @@ internal sealed partial class DocState
             }
         }
 
+        // Nothing is behind now; the next move held back sets the flag again.
+        _held = false;
         EditWork.FullSettles++;
     }
 

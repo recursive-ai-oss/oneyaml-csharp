@@ -33,7 +33,7 @@ internal sealed partial class DocState
     }
 
     /// <summary>Whether the scalar's raw content is its value.</summary>
-    public bool IsRaw(int node) => (N(node).Flags & NodeFlags.Escaped) == 0;
+    public bool IsRaw(int node) => (_nodes[node].Flags & NodeFlags.Escaped) == 0;
 
     /// <summary>The scalar's value as UTF-8 bytes, in a buffer the caller must return with <see cref="ReleaseDecoded"/>.</summary>
     /// <param name="node">A scalar node.</param>
@@ -48,7 +48,7 @@ internal sealed partial class DocState
             return raw;
         }
 
-        ref readonly CstNode n = ref N(node);
+        ref readonly CstNode n = ref _nodes[node];
         buffer = ArrayPool<byte>.Shared.Rent(ScalarDecoder.MaxDecodedLength(raw, (ScalarStyle)n.Style));
         int len = ScalarDecoder.Decode(raw, (ScalarStyle)n.Style, n.Aux, (Chomping)n.Chomp, buffer);
         return buffer.AsSpan(0, len);
@@ -87,7 +87,7 @@ internal sealed partial class DocState
     public ScalarKind KindOf(int node, out bool valid)
     {
         valid = true;
-        ref readonly CstNode n = ref N(node);
+        ref readonly CstNode n = ref _nodes[node];
         ReadOnlySpan<byte> tag = RawTag(node);
         if (!tag.IsEmpty)
         {
@@ -155,7 +155,7 @@ internal sealed partial class DocState
     /// <summary>Follows an alias to the node it names. Other nodes are returned as they are.</summary>
     /// <param name="node">Any node.</param>
     /// <returns>The node to read.</returns>
-    public int Resolve(int node) => N(node).Kind == NodeKind.Alias ? N(node).Aux : node;
+    public int Resolve(int node) => _nodes[node].Kind == NodeKind.Alias ? _nodes[node].Aux : node;
 
     // ---- Tree navigation ----
 
@@ -163,7 +163,7 @@ internal sealed partial class DocState
     public static int FirstChild(int node) => node + 1;
 
     /// <summary>The node after a node's subtree.</summary>
-    public int After(int node) => node + N(node).Size;
+    public int After(int node) => node + _nodes[node].Size;
 
     /// <summary>Finds the child at a position.</summary>
     /// <param name="collection">A collection.</param>
@@ -171,7 +171,7 @@ internal sealed partial class DocState
     /// <returns>The child's node index.</returns>
     public int ChildAt(int collection, int index)
     {
-        if (index > 0 && index == N(collection).Count - 1)
+        if (index > 0 && index == _nodes[collection].Count - 1)
         {
             return LastChildOf(collection);
         }
@@ -179,7 +179,7 @@ internal sealed partial class DocState
         int c = collection + 1;
         for (int i = 0; i < index; i++)
         {
-            c += N(c).Size;
+            c += _nodes[c].Size;
         }
 
         return c;
@@ -190,16 +190,16 @@ internal sealed partial class DocState
     /// <returns>The child's node index.</returns>
     public int LastChildOf(int collection)
     {
-        if (N(collection).Count == 0)
+        if (_nodes[collection].Count == 0)
         {
             return -1;
         }
 
         // The last node of the subtree is the last of its last child's subtree.
-        int c = collection + N(collection).Size - 1;
-        while (N(c).Parent != collection)
+        int c = collection + _nodes[collection].Size - 1;
+        while (_nodes[c].Parent != collection)
         {
-            c = N(c).Parent;
+            c = _nodes[c].Parent;
         }
 
         return c;
@@ -213,7 +213,7 @@ internal sealed partial class DocState
     /// <param name="node">A node.</param>
     /// <returns><see langword="true"/> for such a root.</returns>
     public bool IsEmptyRoot(int node)
-        => N(node).Parent < 0 && (N(node).Flags & NodeFlags.Empty) != 0 && N(node).Kind == NodeKind.Scalar && !HasTag(node) && !HasAnchor(node);
+        => _nodes[node].Parent < 0 && (_nodes[node].Flags & NodeFlags.Empty) != 0 && _nodes[node].Kind == NodeKind.Scalar && !HasTag(node) && !HasAnchor(node);
 
     /// <summary>The offset where the line holding <paramref name="pos"/> starts.</summary>
     public int LineStart(int pos)
@@ -422,8 +422,8 @@ internal sealed partial class DocState
             return true;
         }
 
-        int parent = N(key).Parent;
-        return parent >= 0 && N(parent).IsFlow;
+        int parent = _nodes[key].Parent;
+        return parent >= 0 && _nodes[parent].IsFlow;
     }
 
     /// <summary>The offset of the <c>-</c> that introduces a sequence item.</summary>
@@ -432,7 +432,7 @@ internal sealed partial class DocState
     /// <returns>The dash's offset.</returns>
     public int DashOf(int item, int previous)
     {
-        int parent = N(item).Parent;
+        int parent = _nodes[item].Parent;
         int from = previous >= 0 ? N(previous).End : N(parent).Start;
         return SkipTrivia(Text, from);
     }
@@ -445,7 +445,7 @@ internal sealed partial class DocState
         ReadOnlySpan<byte> src = Text;
         int prop = PropStart(key);
         int prev = PrevSibling(key);
-        int parent = N(key).Parent;
+        int parent = _nodes[key].Parent;
         int from = prev >= 0 ? N(prev).End : (parent >= 0 ? N(parent).Start : prop);
         int at = SkipTrivia(src, from);
         if (at < prop && at < src.Length && src[at] == (byte)'?' && (at + 1 >= src.Length || src[at + 1] is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t'))
@@ -466,7 +466,7 @@ internal sealed partial class DocState
         ReadOnlySpan<byte> src = Text;
         int prop = PropStart(key);
         int prev = PrevSibling(key);
-        int parent = N(key).Parent;
+        int parent = _nodes[key].Parent;
         int from = prev >= 0 ? N(prev).End : N(parent).Start + 1;
         int at = SkipTrivia(src, from);
         if (at < src.Length && src[at] == (byte)',')

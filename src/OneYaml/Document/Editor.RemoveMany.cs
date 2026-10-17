@@ -22,7 +22,7 @@ internal static partial class Editor
     public static bool TryRemoveMany(DocState s, YamlLimits limits, int map, List<byte[]> keys, out DocState next)
     {
         next = s;
-        ref readonly CstNode m = ref s.Node(map);
+        ref readonly CstNode m = ref s.NodeH(map);
         if (m.Kind != NodeKind.Mapping || m.IsFlow || (m.Flags & NodeFlags.Pair) != 0 || s.AliasCount != 0 || keys.Count == 0)
         {
             return false;
@@ -43,9 +43,9 @@ internal static partial class Editor
         int k = map + 1;
         for (int i = 0; i < items; i++)
         {
-            int v = k + s.Node(k).Size;
-            int after = v + s.Node(v).Size;
-            ref readonly CstNode last = ref s.Node(after - 1);
+            int v = k + s.NodeS(k).Size;
+            int after = v + s.NodeS(v).Size;
+            ref readonly CstNode last = ref s.NodeH(after - 1);
             bool keepHere = IsKeepBlock(last);
             bool blockHere = last.Kind == NodeKind.Scalar && (ScalarStyle)last.Style is ScalarStyle.Literal or ScalarStyle.Folded;
             if (gapMatters && s.LineStart(s.EntryStart(k)) != previousStop)
@@ -55,7 +55,7 @@ internal static partial class Editor
             }
 
             gapMatters = false;
-            int wanted = s.Node(k).Kind == NodeKind.Scalar ? index.Find(s, k) : -1;
+            int wanted = s.NodeS(k).Kind == NodeKind.Scalar ? index.Find(s, k) : -1;
             if (wanted == KeyIndex.Twice)
             {
                 return false;
@@ -65,7 +65,7 @@ internal static partial class Editor
             {
                 // A key with no value, cuts, then an entry that starts with a colon: with the entries between gone the
                 // colon would turn into the key's value. The one-at-a-time removal knows how to keep both.
-                if (cutSincePrevious && keptBare && (s.Node(k).Flags & NodeFlags.Empty) != 0)
+                if (cutSincePrevious && keptBare && (s.NodeS(k).Flags & NodeFlags.Empty) != 0)
                 {
                     return false;
                 }
@@ -132,7 +132,7 @@ internal static partial class Editor
     {
         next = s;
         DocState mid = s;
-        if (s.Node(map).Count > 2)
+        if (s.NodeS(map).Count > 2)
         {
             var rest = new List<byte[]>(keys.Count - 1);
             for (int i = 0; i < keys.Count; i++)
@@ -152,7 +152,7 @@ internal static partial class Editor
         try
         {
             int value = map + 1;
-            value += mid.Node(value).Size;
+            value += mid.NodeS(value).Size;
             next = Remove(mid, limits, value);
             return true;
         }
@@ -178,7 +178,7 @@ internal static partial class Editor
         }
 
         start = s.OwnedCommentsStart(s.LineStart(entryStart));
-        stop = s.PastLine(s.Node(value).End);
+        stop = s.PastLine(s.NodeH(value).End);
         if (start < previousStop)
         {
             return false;
