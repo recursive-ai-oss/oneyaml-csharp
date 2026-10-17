@@ -148,6 +148,13 @@ public class KitValueTests
             return JsonDocument.Parse(File.ReadAllBytes(Path.Combine(dir, file.GetString()!)), ValueModel.Deep).RootElement;
         }
 
+        if (expect.TryGetProperty("recipe", out JsonElement recipe))
+        {
+            // A value too large to store is described by parts; build the JSON bytes and parse them once, the
+            // same way as a stored file, without going through a string.
+            return JsonDocument.Parse(KitInput.Build(recipe), ValueModel.Deep).RootElement;
+        }
+
         return expect.GetProperty("value");
     }
 
