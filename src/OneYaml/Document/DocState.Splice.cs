@@ -23,7 +23,9 @@ internal sealed partial class DocState
 
     private static long s_nextId;
 
-    private readonly long _id = System.Threading.Interlocked.Increment(ref s_nextId);
+    // Changes with every edit made to the text in place, so that a thread's cached line break, made for the text as it
+    // was, is never taken for one of the text as it is.
+    private long _id = System.Threading.Interlocked.Increment(ref s_nextId);
 
     [ThreadStatic]
     private static int s_breakFrom;
@@ -55,6 +57,12 @@ internal sealed partial class DocState
             {
                 // Readers of a shared state never bring a chunk up to date, so nothing may be held back from here on.
                 ReleaseHeld();
+
+                // A state handed back to its readers, by a patch or by a single edit, does not go on holding moves back.
+                if (_moveState != 0)
+                {
+                    _moveState = 0;
+                }
             }
 
             _exclusive = value;
@@ -80,6 +88,10 @@ internal sealed partial class DocState
     [ThreadStatic]
     internal static int FaultStage;
 
+    // Makes the restore of a failed edit fail too, to show that the document then refuses further use.
+    [ThreadStatic]
+    internal static bool FaultInRestore;
+
     private static void Fault(int stage)
     {
         if (FaultStage == stage)
@@ -87,6 +99,9 @@ internal sealed partial class DocState
             throw new InvalidOperationException("Injected failure at step " + stage + " of a splice.");
         }
     }
+
+    /// <summary>Set when a failed edit could not be undone: the state must not be used again.</summary>
+    internal bool Poisoned { get; private set; }
 
     /// <summary>
     /// Whether an edit has changed this state in place since the last call, which clears the answer. A caller that
@@ -106,6 +121,7 @@ internal sealed partial class DocState
     internal void BeginSingleEdit()
     {
         _editFlags = SingleEditFlag;
+
         Exclusive = true;
     }
 
@@ -909,9 +925,10 @@ internal sealed partial class DocState
         int bd = text.Length - (e - s);
         int subComments = sub.CommentCount;
 
-        // An edit that works in place and must leave the state whole when it fails keeps the bytes it replaces. Room for
-        // everything the edit adds is made first, while nothing has changed, so that running out of memory cannot
-        // happen halfway through.
+        // An edit that works in place keeps the bytes it replaces, in case it fails. Room in the text, node, property and
+        // comment arrays is made first, while nothing has changed, so that they do not grow halfway through. The key
+        // index and the duplicate check may still allocate; a failure there is put right like any other, unless memory
+        // runs out again while the old text is parsed.
         byte[]? undo = null;
         if (_exclusive && _singleEdit)
         {
@@ -956,7 +973,16 @@ internal sealed partial class DocState
             {
                 // The edit found out too late that it is not allowed (a key twice, say). The text before it is parsed
                 // again: the state is the same as before the edit, and only the error path pays for it.
-                RestoreBeforeSplice(undo, s, e - s, text.Length, limits);
+                try
+                {
+                    RestoreBeforeSplice(undo, s, e - s, text.Length, limits);
+                }
+                catch
+                {
+                    // Not even the old text could be read again, so what the state holds is half an edit. The document
+                    // refuses further use rather than show it; the edit's own error is the one the caller gets.
+                    Poisoned = true;
+                }
             }
 
             throw;
@@ -996,6 +1022,11 @@ internal sealed partial class DocState
     // that were replaced, parsed again, and its arrays take the place of this state's.
     private void RestoreBeforeSplice(byte[] undo, int at, int undoLength, int newTextLength, YamlLimits limits)
     {
+        if (FaultInRestore)
+        {
+            throw new InvalidOperationException("Injected failure while the old text was parsed again.");
+        }
+
         bool spliced = (_editFlags & TextSplicedFlag) != 0;
         int oldLength = spliced ? Length - newTextLength + undoLength : Length;
         byte[] buf = ArrayPool<byte>.Shared.Rent(Math.Max(oldLength, 1));
@@ -1040,6 +1071,7 @@ internal sealed partial class DocState
         _moveState = 0;
         _held = false;
         s_breakOwner = 0;
+        _id = System.Threading.Interlocked.Increment(ref s_nextId);
         fresh.Dispose();
     }
 
@@ -1315,11 +1347,15 @@ internal sealed partial class DocState
         CommentCount = newComments;
 
         // The cached line break stays right when the edit is on that line and adds no break.
-        if (s_breakOwner == _id)
+        // Other threads' entries keep the old identity and so go stale with the text.
+        long oldId = _id;
+        _id = System.Threading.Interlocked.Increment(ref s_nextId);
+        if (s_breakOwner == oldId)
         {
             if (s_breakFrom <= s && e <= s_breakAt && text.IndexOfAny((byte)'\n', (byte)'\r') < 0)
             {
                 s_breakAt += bd;
+                s_breakOwner = _id;
             }
             else
             {

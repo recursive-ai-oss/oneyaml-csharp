@@ -31,13 +31,36 @@ public class AliasBudgetMarkerTests
         Assert.True(e.IsAliasBudget);
     }
 
-    [Fact]
-    public void Merging_mappings_marks_a_refused_expansion()
+    public sealed class Holder
     {
-        string yaml = "base: &b {a: 1, b: 2, c: 3, d: 4, e: 5, f: 6}\nm: {<<: [*b, *b, *b, *b, *b, *b, *b, *b]}\n";
-        var options = new YamlSerializerOptions { MergeKeys = true, Limits = Tiny };
-        YamlException e = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(yaml, options));
+        public object? E { get; set; }
+    }
+
+    // A chain of mappings that merge the one before: the aliases are charged for what they stand for, and the copies the
+    // merges make are charged on top of that. Read into a member of type object, so that aliases are expanded.
+    private static string MergeChain()
+    {
+        string keys = string.Join(", ", Enumerable.Range(1, 20).Select(i => "k" + i + ": 1"));
+        return "e:\n  a: &a {" + keys + "}\n  b: &b {<<: *a}\n  c: &c {<<: *b}\n  d: &d {<<: *c}\n  f: {<<: *d}\n";
+    }
+
+    [Fact]
+    public void Merging_mappings_marks_a_refused_merge_and_says_so()
+    {
+        var options = new YamlSerializerOptions { MergeKeys = true, Limits = new YamlLimits { AliasNodeFactor = 0, AliasNodeFloor = 50, AliasByteFloor = 100_000 } };
+        YamlException e = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<Holder>(MergeChain(), options));
         Assert.Equal(YamlErrorCategory.Limit, e.Category);
+        Assert.Contains("Merging mappings", e.Message, StringComparison.Ordinal);
+        Assert.True(e.IsAliasBudget);
+    }
+
+    [Fact]
+    public void Reading_a_node_that_holds_aliases_marks_a_refused_expansion_on_the_replay()
+    {
+        using YamlDocument doc = YamlDocument.Parse(Fan, new YamlDocumentOptions { Limits = Tiny });
+        YamlException e = Assert.Throws<YamlException>(() => doc.Root["b"].Deserialize<object>());
+        Assert.Equal(YamlErrorCategory.Limit, e.Category);
+        Assert.Contains("Expanding the aliases", e.Message, StringComparison.Ordinal);
         Assert.True(e.IsAliasBudget);
     }
 

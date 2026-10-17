@@ -131,7 +131,14 @@ public sealed class YamlDocument : IDisposable
         return _head is not null && _head.TryGetTarget(out head);
     }
 
-    internal DocState State => _state ?? throw new ObjectDisposedException(nameof(YamlDocument));
+    internal DocState State
+    {
+        get
+        {
+            DocState s = _state ?? throw new ObjectDisposedException(nameof(YamlDocument));
+            return s.Poisoned ? throw new InvalidOperationException("The document could not be restored after a failed edit and cannot be used.") : s;
+        }
+    }
 
     // ---- Reading ----
 

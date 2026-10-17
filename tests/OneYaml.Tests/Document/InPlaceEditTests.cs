@@ -296,4 +296,97 @@ public class InPlaceEditTests
         Assert.False(doc.State.Exclusive);
         Assert.Equal(0, doc.EditCount);
     }
+
+    [Fact]
+    public void Edits_made_in_turn_by_two_threads_write_the_line_breaks_one_thread_would()
+    {
+        // The thread that made an edit remembers where the line it edited ends. Another thread's memory of the same line
+        // must not survive an edit it did not see: thread 0 edits, thread 1 edits, thread 0 edits the same line again.
+        string src = "a: 1\nc:\n  k: " + new string('a', 44) + "\n  m: 2\n";
+        Action<YamlDocument>[] sequence =
+        [
+            d => d.Set("/c/k", new string('b', 44)),
+            d => d.Set("/a", "1234"),
+            d => d.Set("/c/k", new Dictionary<string, int> { ["x"] = 1, ["y"] = 2 }),
+        ];
+        using YamlDocument alone = YamlDocument.Parse(src);
+        foreach (Action<YamlDocument> step in sequence)
+        {
+            step(alone);
+        }
+
+        using YamlDocument shared = YamlDocument.Parse(src);
+        SemaphoreSlim[] turn = [new(1), new(0)];
+        int next = 0;
+        Exception? failure = null;
+        Thread Worker(int me) => new(() =>
+        {
+            while (true)
+            {
+                turn[me].Wait();
+                if (next >= sequence.Length)
+                {
+                    turn[1 - me].Release();
+                    return;
+                }
+
+                try
+                {
+                    sequence[next++](shared);
+                }
+                catch (Exception ex)
+                {
+                    failure = ex;
+                    next = sequence.Length;
+                }
+
+                turn[1 - me].Release();
+            }
+        });
+        // Steps run in order, and the turns alternate: the first and third on thread 0, the second on thread 1.
+        Thread a = Worker(0), b = Worker(1);
+        a.Start();
+        b.Start();
+        a.Join();
+        b.Join();
+        Assert.Null(failure);
+        Assert.Equal(Reference(alone), Reference(shared));
+        Assert.DoesNotContain('\r', Reference(shared));
+    }
+
+    [Fact]
+    public void A_single_edit_after_a_patch_holds_no_move_back()
+    {
+        const int Keys = 3_000;
+        using YamlDocument doc = YamlDocument.Parse(Mapping(Keys));
+        doc.ApplyPatch("""[{"op":"replace","path":"/big/key1","value":"a"},{"op":"replace","path":"/big/key2","value":"bb"},{"op":"replace","path":"/big/key3","value":"ccc"}]""");
+        EditWork.ChunksMoved = 0;
+        doc.Set("/big/key10", "a longer value than before");
+        doc.Set("/big/key11", "x");
+        Assert.Equal(0, EditWork.ChunksMoved);
+    }
+
+    [Fact]
+    public void A_document_whose_failed_edit_could_not_be_undone_refuses_further_use_and_the_caller_gets_the_edit_error()
+    {
+        using YamlDocument doc = YamlDocument.Parse(Mapping(50));
+        YamlNode root = doc.Root;
+        DocState.FaultStage = 2;
+        DocState.FaultInRestore = true;
+        try
+        {
+            InvalidOperationException e = Assert.Throws<InvalidOperationException>(() => doc.Set("/big/key3", "different"));
+            Assert.StartsWith("Injected failure at step 2", e.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DocState.FaultStage = 0;
+            DocState.FaultInRestore = false;
+        }
+
+        Assert.Contains("could not be restored", Assert.Throws<InvalidOperationException>(() => doc.ToUtf8Bytes()).Message, StringComparison.Ordinal);
+        Assert.Throws<InvalidOperationException>(() => doc.Get<string>("/name"));
+        Assert.Throws<InvalidOperationException>(() => root.ToString());
+        Assert.Throws<InvalidOperationException>(() => doc.Set("/name", "x"));
+    }
 }
