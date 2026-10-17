@@ -175,7 +175,7 @@ internal sealed partial class DocState
         {
             const string Message = "The integer has more digits than the configured limit.";
             throw where is not null && node >= 0
-                ? YamlException.At(YamlErrorCategory.Limit, Message, where.Text, where._nodes[node].Start)
+                ? YamlException.At(YamlErrorCategory.Limit, Message, where.Text, where.N(node).Start)
                 : new YamlException(Message, YamlErrorCategory.Limit, 0, 0, 0);
         }
     }

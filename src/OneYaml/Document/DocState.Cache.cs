@@ -793,6 +793,7 @@ internal sealed class MapCache
         KeyTable?[]? tables = _tables;
         long want = node + 1;
         int free = -1;
+        KeyTable? freeLeftover = null;
         int victim = -1;
         long victimWork = long.MaxValue;
         for (int i = 0; i < Slots; i++)
@@ -811,6 +812,12 @@ internal sealed class MapCache
                     return -1;
                 }
 
+                if (stale)
+                {
+                    // Take the leftover out for good, so that it can never be found again without a Publish check.
+                    Interlocked.CompareExchange(ref tables![i], null, table);
+                }
+
                 long sum = Math.Min((long)(w & 0xFFFFFFFFL) + pairs, int.MaxValue);
                 track[i] = (want << 32) | sum;
                 work = sum;
@@ -822,6 +829,7 @@ internal sealed class MapCache
                 if (free < 0)
                 {
                     free = i;
+                    freeLeftover = stale ? table : null;
                 }
             }
             else if (table is null)
@@ -861,6 +869,11 @@ internal sealed class MapCache
 
             at = oldest;
             tables![at] = null;
+        }
+
+        if (freeLeftover is not null && at == free)
+        {
+            Interlocked.CompareExchange(ref tables![at], null, freeLeftover);
         }
 
         long first = Math.Min((long)pairs, int.MaxValue);
@@ -971,6 +984,16 @@ internal sealed class MapCache
         }
     }
 
+    /// <summary>Gives the chunk counts back to the pool; they are cleared when next rented.</summary>
+    public void ReturnBehind()
+    {
+        if (Behind is int[] counts)
+        {
+            Behind = null;
+            ArrayPool<int>.Shared.Return(counts);
+        }
+    }
+
     public void Release()
     {
         if (_tables is not null)
@@ -983,7 +1006,7 @@ internal sealed class MapCache
 
         _track = null;
         _tables = null;
-        Behind = null;
+        ReturnBehind();
         _layouts = 0;
         Expansion?.Release();
         Expansion = null;

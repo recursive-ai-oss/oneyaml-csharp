@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 
@@ -96,10 +97,7 @@ internal sealed partial class DocState
     {
         SettleNodes();
         _held = false;
-        if (_cache is not null)
-        {
-            _cache.Behind = null;
-        }
+        _cache?.ReturnBehind();
     }
 
     /// <summary>
@@ -119,7 +117,13 @@ internal sealed partial class DocState
         {
             // Counts that do not reach the last chunk belong to an array that has since grown.
             SettleNodes();
-            behind = EnsureCache().Behind = new int[(_nodes.Length >> ChunkShift) + 1];
+            MapCache cache = EnsureCache();
+            cache.ReturnBehind();
+
+            // Pooled and cleared here, so that the counts of a patch on a large document cost no allocation.
+            behind = ArrayPool<int>.Shared.Rent((_nodes.Length >> ChunkShift) + 1);
+            Array.Clear(behind);
+            cache.Behind = behind;
         }
 
         _held = true;

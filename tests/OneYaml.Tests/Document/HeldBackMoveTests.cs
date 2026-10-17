@@ -165,11 +165,55 @@ public class HeldBackMoveTests
     public void Views_taken_before_a_run_of_replaces_read_the_right_values_afterwards()
     {
         const int Keys = 8_000;
+        string first = Patch(Keys, 400, 9);
+        string second = Patch(Keys, 300, 13, "{\"op\":\"replace\",\"path\":\"/tail/1/two\",\"value\":\"changed\"}");
+
         using YamlDocument doc = YamlDocument.Parse(Mapping(Keys));
         YamlNode last = doc.Root["big"]["key7999"];
         YamlNode tail = doc.Root["tail"];
-        doc.ApplyPatch(Patch(Keys, 400, 9));
+        YamlNode three = doc.Root["tail"][1]["three"];
+        doc.ApplyPatch(first);
         Assert.Equal("value7999", last.GetValue<string>());
         Assert.Equal(2, tail[1]["two"].GetValue<int>());
+
+        // The reference parses the whole text again after every operation.
+        using YamlDocument reference = YamlDocument.Parse(Mapping(Keys));
+        YamlNode refLast = reference.Root["big"]["key7999"];
+        YamlNode refTail = reference.Root["tail"];
+        YamlNode refThree = reference.Root["tail"][1]["three"];
+        DocState.NoSplice = true;
+        try
+        {
+            reference.ApplyPatch(first);
+        }
+        finally
+        {
+            DocState.NoSplice = false;
+        }
+
+        // Positions and whole values come from the offsets of the nodes, which a move held back must not leave behind.
+        Assert.Equal(refLast.Position, last.Position);
+        Assert.Equal(refTail.Position, tail.Position);
+        Assert.Equal(refThree.Position, three.Position);
+        Assert.Equal(Canon(refTail.Deserialize<object>()), Canon(tail.Deserialize<object>()));
+        Assert.Equal(Canon(reference.Root["big"].Deserialize<object>()), Canon(doc.Root["big"].Deserialize<object>()));
+
+        // A second patch on the published document must write where a fresh parse would.
+        doc.ApplyPatch(second);
+        DocState.NoSplice = true;
+        try
+        {
+            reference.ApplyPatch(second);
+        }
+        finally
+        {
+            DocState.NoSplice = false;
+        }
+
+        Assert.Equal(Encoding.UTF8.GetString(reference.ToUtf8Bytes()), Encoding.UTF8.GetString(doc.ToUtf8Bytes()));
+        Assert.Equal(refLast.Position, last.Position);
+        Assert.Equal(Canon(reference.Root.Deserialize<object>()), Canon(doc.Root.Deserialize<object>()));
     }
+
+    private static string Canon(object? value) => System.Text.Json.JsonSerializer.Serialize(value);
 }
