@@ -74,6 +74,9 @@ public ref partial struct Utf8YamlReader
         return dest[..n];
     }
 
+    // True for an untagged plain scalar whose text is the source bytes themselves (no folding or escapes).
+    private readonly bool HasPlainSourceText => TagKind == TagClass.None && Style == ScalarStyle.Plain && !Escaped;
+
     private readonly bool TryResolve(ReadOnlySpan<byte> text, out ScalarKind kind)
     {
         switch (TagKind)
@@ -246,6 +249,12 @@ public ref partial struct Utf8YamlReader
             return NumberStatus.NotNumber;
         }
 
+        // An untagged plain integer of up to 18 digits: the value is the answer, no scratch buffer or resolver needed.
+        if (HasPlainSourceText && CoreSchema.TryParseSimpleInt64(_src.Slice(ContentStart, ContentEnd - ContentStart), out value))
+        {
+            return NumberStatus.Ok;
+        }
+
         byte[]? rented = null;
         try
         {
@@ -344,6 +353,23 @@ public ref partial struct Utf8YamlReader
         if (Type != YamlTokenType.Scalar)
         {
             return NumberStatus.NotNumber;
+        }
+
+        // An untagged plain number the fast path settles. A bare integer keeps the integer route (-0 reads as +0).
+        if (HasPlainSourceText && CoreSchema.TryParseSimpleDouble(_src.Slice(ContentStart, ContentEnd - ContentStart), out value, out bool isInteger))
+        {
+            if (!isInteger)
+            {
+                return NumberStatus.Ok;
+            }
+
+            if (CoreSchema.TryParseSimpleInt64(_src.Slice(ContentStart, ContentEnd - ContentStart), out long whole))
+            {
+                value = whole;
+                return NumberStatus.Ok;
+            }
+
+            value = 0;
         }
 
         byte[]? rented = null;
@@ -632,6 +658,20 @@ public ref partial struct Utf8YamlReader
         if (IsPlainlyText())
         {
             return GetSharedString();
+        }
+
+        if (!numberText && HasPlainSourceText)
+        {
+            ReadOnlySpan<byte> raw = _src.Slice(ContentStart, ContentEnd - ContentStart);
+            if (CoreSchema.TryParseSimpleInt64(raw, out long whole))
+            {
+                return whole;
+            }
+
+            if (CoreSchema.TryParseSimpleDouble(raw, out double fast, out bool isInteger) && !isInteger)
+            {
+                return fast;
+            }
         }
 
         byte[]? rented = null;

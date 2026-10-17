@@ -294,7 +294,184 @@ internal static class CoreSchema
     /// <param name="text">The scalar's text.</param>
     /// <param name="value">The value on success.</param>
     /// <returns><see langword="false"/> when the text is not a Core float spelling.</returns>
-    public static bool TryParseDouble(ReadOnlySpan<byte> text, out double value)
+    public static bool TryParseDouble(ReadOnlySpan<byte> text, out double value) =>
+        TryParseSimpleDouble(text, out value, out _) || TryParseDoubleExact(text, out value);
+
+    // Powers of ten that a double holds exactly (10^0 to 10^22).
+    private static readonly double[] s_exactPowersOfTen =
+    [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11,
+        1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+    ];
+
+    /// <summary>
+    /// Parses the common plain forms in one pass: an optional sign, digits, an optional fraction and an
+    /// optional exponent, with at most 19 mantissa digits. A mantissa up to 2^53 and a decimal exponent
+    /// within +-22 are both exact doubles, so one multiplication or division gives the correctly rounded
+    /// result and no digit-by-digit conversion is needed. Anything else returns <see langword="false"/>
+    /// and goes through the exact path.
+    /// </summary>
+    /// <param name="s">The scalar's text.</param>
+    /// <param name="value">The value on success.</param>
+    /// <param name="isInteger">Set when the text has neither a fraction nor an exponent.</param>
+    /// <returns><see langword="true"/> when the fast path handled the text.</returns>
+    internal static bool TryParseSimpleDouble(ReadOnlySpan<byte> s, out double value, out bool isInteger)
+    {
+        value = 0;
+        isInteger = false;
+        int len = s.Length;
+        if (len == 0)
+        {
+            return false;
+        }
+
+        int i = 0;
+        bool negative = false;
+        if (s[0] is (byte)'-' or (byte)'+')
+        {
+            negative = s[0] == (byte)'-';
+            i = 1;
+        }
+
+        ulong mantissa = 0;
+        int start = i;
+        while (i < len && (uint)(s[i] - '0') <= 9)
+        {
+            // 19 digits always fit in 64 bits, so stop before a 20th.
+            if (i - start == 19)
+            {
+                return false;
+            }
+
+            mantissa = (mantissa * 10) + (uint)(s[i] - '0');
+            i++;
+        }
+
+        int intDigits = i - start;
+        int fracDigits = 0;
+        bool hasPoint = false;
+        if (i < len && s[i] == (byte)'.')
+        {
+            hasPoint = true;
+            i++;
+            int fracStart = i;
+            while (i < len && (uint)(s[i] - '0') <= 9)
+            {
+                if (intDigits + (i - fracStart) == 19)
+                {
+                    return false;
+                }
+
+                mantissa = (mantissa * 10) + (uint)(s[i] - '0');
+                i++;
+            }
+
+            fracDigits = i - fracStart;
+            if (fracDigits == 0)
+            {
+                return false;
+            }
+        }
+        else if (intDigits == 0)
+        {
+            return false;
+        }
+
+        int exponent = 0;
+        bool hasExponent = false;
+        if (i < len && (s[i] == (byte)'e' || s[i] == (byte)'E'))
+        {
+            hasExponent = true;
+            i++;
+            bool expNegative = false;
+            if (i < len && s[i] is (byte)'-' or (byte)'+')
+            {
+                expNegative = s[i] == (byte)'-';
+                i++;
+            }
+
+            int expStart = i;
+            while (i < len && (uint)(s[i] - '0') <= 9)
+            {
+                exponent = (exponent * 10) + (s[i] - '0');
+                i++;
+                if (i - expStart > 4)
+                {
+                    return false;
+                }
+            }
+
+            if (i == expStart)
+            {
+                return false;
+            }
+
+            if (expNegative)
+            {
+                exponent = -exponent;
+            }
+        }
+
+        if (i != len)
+        {
+            return false;
+        }
+
+        exponent -= fracDigits;
+        if (mantissa > (1UL << 53) || exponent < -22 || exponent > 22)
+        {
+            return false;
+        }
+
+        double v = mantissa;
+        v = exponent < 0 ? v / s_exactPowersOfTen[-exponent] : v * s_exactPowersOfTen[exponent];
+        value = negative ? -v : v;
+        isInteger = !hasPoint && !hasExponent;
+        return true;
+    }
+
+    /// <summary>
+    /// Parses an integer of 1 to 18 decimal digits with an optional sign, which cannot overflow
+    /// 64 bits. Everything else, including hexadecimal, returns <see langword="false"/>.
+    /// </summary>
+    /// <param name="s">The scalar's text.</param>
+    /// <param name="value">The value on success.</param>
+    /// <returns><see langword="true"/> when the text is such an integer.</returns>
+    internal static bool TryParseSimpleInt64(ReadOnlySpan<byte> s, out long value)
+    {
+        value = 0;
+        int i = 0;
+        bool negative = false;
+        if (s.Length > 0 && s[0] is (byte)'-' or (byte)'+')
+        {
+            negative = s[0] == (byte)'-';
+            i = 1;
+        }
+
+        int digits = s.Length - i;
+        if (digits is < 1 or > 18)
+        {
+            return false;
+        }
+
+        long acc = 0;
+        for (; i < s.Length; i++)
+        {
+            uint d = (uint)(s[i] - '0');
+            if (d > 9)
+            {
+                return false;
+            }
+
+            acc = (acc * 10) + d;
+        }
+
+        value = negative ? -acc : acc;
+        return true;
+    }
+
+    // The full check and the BCL parsers; the reference the fast path is tested against.
+    internal static bool TryParseDoubleExact(ReadOnlySpan<byte> text, out double value)
     {
         value = 0;
         if (text.IsEmpty)

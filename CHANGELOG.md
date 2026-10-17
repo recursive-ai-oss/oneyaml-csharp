@@ -4,6 +4,10 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Changed
+
+- **Faster number reads.** Plain integers of up to 18 digits and plain decimal numbers with a short mantissa and exponent are read in one pass, in typed and generic loads and wherever a float key is compared. Loading number-heavy input is 5 to 14 percent faster; every value, error, category and position is unchanged, and hexadecimal, octal, `.inf`, `.nan`, long and out-of-range numbers take the same path as before.
+
 ### Fixed
 
 - **Error positions in UTF-16 and UTF-32 input.** A malformed UTF-16 or UTF-32 input, a lone surrogate for example, was reported one column too far, with or without a byte order mark; the column now names the bad character. The `Offset` of such an error still counts bytes of the original input, the byte order mark included. Other errors in these encodings already had the column and offset of the same text read as UTF-8, and a test now holds that.
