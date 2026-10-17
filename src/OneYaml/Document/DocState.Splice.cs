@@ -88,9 +88,9 @@ internal sealed partial class DocState
     [ThreadStatic]
     internal static int FaultStage;
 
-    // Makes the restore of a failed edit fail too, to show that the document then refuses further use.
+    // Makes the restore of a failed edit fail too with this exception, to show that the document then refuses further use.
     [ThreadStatic]
-    internal static bool FaultInRestore;
+    internal static Exception? FaultInRestore;
 
     private static void Fault(int stage)
     {
@@ -977,11 +977,18 @@ internal sealed partial class DocState
                 {
                     RestoreBeforeSplice(undo, s, e - s, text.Length, limits);
                 }
-                catch
+                catch (OutOfMemoryException)
                 {
                     // Not even the old text could be read again, so what the state holds is half an edit. The document
                     // refuses further use rather than show it; the edit's own error is the one the caller gets.
                     Poisoned = true;
+                }
+                catch
+                {
+                    // The old text parsed before, with the same limits, so any other failure here is a defect. It must
+                    // stay visible rather than be taken for the edit's error; the state is half an edit all the same.
+                    Poisoned = true;
+                    throw;
                 }
             }
 
@@ -1022,9 +1029,9 @@ internal sealed partial class DocState
     // that were replaced, parsed again, and its arrays take the place of this state's.
     private void RestoreBeforeSplice(byte[] undo, int at, int undoLength, int newTextLength, YamlLimits limits)
     {
-        if (FaultInRestore)
+        if (FaultInRestore is { } injected)
         {
-            throw new InvalidOperationException("Injected failure while the old text was parsed again.");
+            throw injected;
         }
 
         bool spliced = (_editFlags & TextSplicedFlag) != 0;
