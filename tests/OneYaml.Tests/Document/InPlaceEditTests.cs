@@ -367,12 +367,12 @@ public class InPlaceEditTests
     }
 
     [Fact]
-    public void A_document_whose_failed_edit_could_not_be_undone_refuses_further_use_and_the_caller_gets_the_edit_error()
+    public void A_document_whose_failed_edit_could_not_be_undone_for_lack_of_memory_refuses_further_use_and_the_caller_gets_the_edit_error()
     {
         using YamlDocument doc = YamlDocument.Parse(Mapping(50));
         YamlNode root = doc.Root;
         DocState.FaultStage = 2;
-        DocState.FaultInRestore = true;
+        DocState.FaultInRestore = new InsufficientMemoryException();
         try
         {
             InvalidOperationException e = Assert.Throws<InvalidOperationException>(() => doc.Set("/big/key3", "different"));
@@ -381,12 +381,33 @@ public class InPlaceEditTests
         finally
         {
             DocState.FaultStage = 0;
-            DocState.FaultInRestore = false;
+            DocState.FaultInRestore = null;
         }
 
         Assert.Contains("could not be restored", Assert.Throws<InvalidOperationException>(() => doc.ToUtf8Bytes()).Message, StringComparison.Ordinal);
         Assert.Throws<InvalidOperationException>(() => doc.Get<string>("/name"));
         Assert.Throws<InvalidOperationException>(() => root.ToString());
+        Assert.Throws<InvalidOperationException>(() => doc.Set("/name", "x"));
+    }
+
+    [Fact]
+    public void Any_other_failure_while_a_failed_edit_is_undone_is_not_hidden_and_the_document_refuses_further_use()
+    {
+        using YamlDocument doc = YamlDocument.Parse(Mapping(50));
+        DocState.FaultStage = 2;
+        DocState.FaultInRestore = new ArithmeticException("restore defect");
+        try
+        {
+            ArithmeticException e = Assert.Throws<ArithmeticException>(() => doc.Set("/big/key3", "different"));
+            Assert.Equal("restore defect", e.Message);
+        }
+        finally
+        {
+            DocState.FaultStage = 0;
+            DocState.FaultInRestore = null;
+        }
+
+        Assert.Contains("could not be restored", Assert.Throws<InvalidOperationException>(() => doc.ToUtf8Bytes()).Message, StringComparison.Ordinal);
         Assert.Throws<InvalidOperationException>(() => doc.Set("/name", "x"));
     }
 }

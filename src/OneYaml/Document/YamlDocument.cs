@@ -23,7 +23,9 @@ namespace OneYaml;
 /// Pointer methods address a value with an RFC 6901 JSON Pointer. A pointer token names a mapping
 /// key by the key's text (so <c>/80</c> reaches the key <c>80</c>, <c>"80"</c> and <c>0x50</c> alike
 /// only when their text is the same), and a sequence item by its index. Reads follow aliases;
-/// writes through an alias are refused.
+/// writes through an alias are refused. A failed edit leaves the document as it was. If memory runs out while
+/// the document is being restored after a failed edit, the document refuses further use with an
+/// <see cref="InvalidOperationException"/>; <see cref="Dispose"/> still works.
 /// </remarks>
 public sealed class YamlDocument : IDisposable
 {
