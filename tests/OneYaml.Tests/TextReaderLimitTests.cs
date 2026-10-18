@@ -143,14 +143,16 @@ public class TextReaderLimitTests
         Assert.Equal("config.yaml", ex.SourceName);
     }
 
+    // One read-to-end call cannot be stopped when the text is larger than a buffer can hold, so with no limit the reader
+    // is read in pieces as under a limit; the value is the same.
     [Fact]
-    public void With_no_input_limit_the_reader_is_read_to_its_end_in_one_call()
+    public void With_no_input_limit_the_reader_is_not_read_to_its_end_in_one_call()
     {
         var options = new YamlSerializerOptions { Limits = YamlLimits.None };
         var reader = new CountingReader("k: v\n", 1 << 20, endless: false);
         Assert.NotNull(YamlSerializer.Deserialize<object>(reader, options));
         Assert.Equal(5, reader.Supplied);
-        Assert.Equal(1, reader.ReadToEndCalls);
+        Assert.Equal(0, reader.ReadToEndCalls);
     }
 
     [Fact]

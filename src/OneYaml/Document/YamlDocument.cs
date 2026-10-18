@@ -214,16 +214,23 @@ public sealed class YamlDocument : IDisposable
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
         CheckRemaining(stream, max, options?.SourceName);
         using var buffer = new ByteBuffer(4096);
-        while (true)
+        try
         {
-            int n = stream.Read(buffer.GetSpan(4096));
-            if (n <= 0)
+            while (true)
             {
-                break;
-            }
+                int n = stream.Read(buffer.GetSpan(4096));
+                if (n <= 0)
+                {
+                    break;
+                }
 
-            buffer.Advance(n);
-            CheckSize(buffer.Count, max, options?.SourceName);
+                buffer.Advance(n);
+                CheckSize(buffer.Count, max, options?.SourceName);
+            }
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options?.SourceName))
+        {
+            throw;
         }
 
         return Parse(buffer.WrittenSpan, options);
@@ -241,16 +248,23 @@ public sealed class YamlDocument : IDisposable
         long max = (options?.Limits ?? YamlLimits.Default).MaxInputBytes;
         CheckRemaining(stream, max, options?.SourceName);
         using var buffer = new ByteBuffer(4096);
-        while (true)
+        try
         {
-            int n = await stream.ReadAsync(buffer.GetMemory(4096), cancellationToken).ConfigureAwait(false);
-            if (n <= 0)
+            while (true)
             {
-                break;
-            }
+                int n = await stream.ReadAsync(buffer.GetMemory(4096), cancellationToken).ConfigureAwait(false);
+                if (n <= 0)
+                {
+                    break;
+                }
 
-            buffer.Advance(n);
-            CheckSize(buffer.Count, max, options?.SourceName);
+                buffer.Advance(n);
+                CheckSize(buffer.Count, max, options?.SourceName);
+            }
+        }
+        catch (YamlException e) when (YamlException.Tag(e, options?.SourceName))
+        {
+            throw;
         }
 
         return Parse(buffer.WrittenSpan, options);
