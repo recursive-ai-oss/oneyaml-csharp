@@ -480,7 +480,7 @@ internal ref struct YamlInput
 
     // The UTF-8 length of text, counting an unpaired surrogate as the three bytes of its
     // replacement character (an upper bound for it). The sum is a long and never overflows.
-    private static long CountUtf8(ReadOnlySpan<char> text)
+    internal static long CountUtf8(ReadOnlySpan<char> text)
     {
         const int Chunk = 1 << 24;
         if (text.Length <= Chunk)

@@ -128,6 +128,96 @@ public class ByteOrderMarkAndInputLimitTests
         }
     }
 
+    // Directives, comments and document ends around the first document: a leading mark must not change which part is read, what
+    // it gives, or where an error is. The first three texts are the ones that once failed after a mark.
+    public static TheoryData<string> DirectiveTexts() =>
+    [
+        "%YAML 1.2\n---\na: 1\n...\n%TAG ! tag:x,2000:\n---\nb: 2\n",
+        "# c😀\n---\n&a x\n*a\n!!str \"x😀\n- x\n{a: [b\n",
+        "# c😀\n\n...\n- x\n\t",
+        "a: 1\n...\n# note\n%YAML 1.2\n---\nb\n",
+        "a: 1\n%YAML 1.2\n---\nb: 2\n",
+        "a: 1\nc: 2\n%YAML 1.2\n---\nb: 2\n",
+        "a\n%x\n---\nb\n",
+    ];
+
+    private static string Outcome(Func<object?> read)
+    {
+        try
+        {
+            return Differ.Dump(read());
+        }
+        catch (Cs.YamlException error)
+        {
+            return $"{error.GetType().Name} {error.Start}";
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(DirectiveTexts))]
+    public void SharpYaml_a_text_gives_the_same_outcome_with_a_leading_byte_order_mark_when_it_has_directives_and_document_ends(string text)
+    {
+        string bom = "\uFEFF" + text;
+        string expected = Outcome(() => Cs.YamlSerializer.Deserialize<object>(text));
+
+        Assert.Equal(expected, Outcome(() => Cs.YamlSerializer.Deserialize<object>(bom)));
+        Assert.Equal(expected, Outcome(() => Cs.YamlSerializer.Deserialize<object>(bom.AsSpan())));
+        Assert.Equal(expected, Outcome(() => Cs.YamlSerializer.Deserialize(bom, Target)));
+        Assert.Equal(expected, Outcome(() => Cs.YamlSerializer.Deserialize<object>(new StringReader(bom))));
+    }
+
+    [Fact]
+    public void SharpYaml_a_percent_line_after_a_block_collection_is_cut_off_after_a_leading_mark_too()
+    {
+        // The cut is placed from the error's offset, which does not count the mark; the first column of a line is where an
+        // off-by-one would land on the line before.
+        foreach (string text in new[] { "a: 1\n%YAML 1.2\n---\nb: 2\n", "a: 1\nc: 2\n%YAML 1.2\n---\nb: 2\n" })
+        {
+            var map = Assert.IsAssignableFrom<System.Collections.IDictionary>(Cs.YamlSerializer.Deserialize<object>("\uFEFF" + text));
+            Assert.Equal(1L, map["a"]);
+            Assert.DoesNotContain("b", map.Keys.Cast<object>());
+        }
+    }
+
+    // ---- SharpYaml: counting a very long text ----
+
+    [Fact]
+    [Trait("Category", "Slow")]
+    public void SharpYaml_a_text_with_more_bytes_than_an_int_holds_is_counted_in_a_long()
+    {
+        // 720 million three-byte characters: 2.16 billion bytes, which an int cannot hold.
+        string text = "a: 1\n---\n" + new string('中', 720_000_000);
+        var none = new Cs.YamlSerializerOptions { Limits = Oy.YamlLimits.None };
+        var map = Assert.IsAssignableFrom<System.Collections.IDictionary>(Cs.YamlSerializer.Deserialize<object>(text, none));
+        Assert.Equal(1L, map["a"]);
+
+        // Under the limit by characters but over it by bytes: counted, and refused as a limit error, not an argument error.
+        Cs.YamlSerializerOptions bytesOver = Limited(1_500_000_000);
+        Assert.IsAssignableFrom<Cs.YamlException>(Record.Exception(() => Cs.YamlSerializer.Deserialize<object>(text, bytesOver)));
+        Assert.IsAssignableFrom<Cs.YamlException>(Record.Exception(() => Cs.YamlSerializer.Deserialize<object>(text.AsSpan(), bytesOver)));
+        Assert.IsAssignableFrom<Cs.YamlException>(Record.Exception(() => Cs.YamlSerializer.Deserialize(text, Target, bytesOver)));
+        Assert.False(Cs.YamlSerializer.TryDeserialize(text, out object? value, bytesOver));
+        Assert.Null(value);
+
+        // Over the limit by characters alone.
+        Cs.YamlSerializerOptions charsOver = Limited(64L * 1024 * 1024);
+        Assert.IsAssignableFrom<Cs.YamlException>(Record.Exception(() => Cs.YamlSerializer.Deserialize<object>(text, charsOver)));
+        Assert.False(Cs.YamlSerializer.TryDeserialize(text, out object? value2, charsOver));
+        Assert.Null(value2);
+
+        // Room for three bytes per character: not counted at all, and the first document is read.
+        var roomy = Limited(2_200_000_000);
+        Assert.IsAssignableFrom<System.Collections.IDictionary>(Cs.YamlSerializer.Deserialize<object>(text, roomy));
+    }
+
+    [Fact]
+    public void SharpYaml_the_stream_refusal_names_the_source()
+    {
+        var options = new Cs.YamlSerializerOptions { Limits = Oy.YamlLimits.Default with { MaxInputBytes = 13 }, SourceName = "doc.yaml" };
+        var error = Assert.IsAssignableFrom<Cs.YamlException>(Record.Exception(() => Cs.YamlSerializer.Deserialize<object>(Utf8Stream(TwoDocuments, false), options)));
+        Assert.Equal("doc.yaml", error.SourceName);
+    }
+
     // ---- YamlDotNet: marks do not depend on a leading mark ----
 
     private static string Shape(YdnRep.YamlStream stream) =>

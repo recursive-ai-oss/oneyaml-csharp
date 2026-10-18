@@ -98,7 +98,16 @@ public static class YamlSerializer
     {
         long max = info.Options.Limits.MaxInputBytes;
         ReadOnlySpan<char> counted = yaml.Length > 0 && yaml[0] == '\uFEFF' ? yaml[1..] : yaml;
-        if (System.Text.Encoding.UTF8.GetByteCount(counted) > max)
+
+        // Most texts need no counting: no limit set, or even three bytes per character fit. A character takes at least one
+        // byte, so a text with more characters than the limit is over it. Only what is left is counted, in a long (a text
+        // of a few hundred million characters has more bytes than an int holds).
+        if (max == long.MaxValue || 3L * counted.Length <= max)
+        {
+            return;
+        }
+
+        if (counted.Length > max || global::OneYaml.Text.YamlInput.CountUtf8(counted) > max)
         {
             throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({max}).") { Category = Oy.YamlErrorCategory.Limit }, default, source);
         }
@@ -246,7 +255,7 @@ public static class YamlSerializer
         }
     }
 
-    private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, null, MaxInput(options));
+    private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, options?.SourceName, MaxInput(options));
 
     private static string Write<T>(T value, Oy.YamlTypeInfo<T> info)
     {
