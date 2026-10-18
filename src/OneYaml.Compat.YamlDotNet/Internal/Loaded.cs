@@ -319,12 +319,18 @@ internal sealed class LineMap
     private readonly List<int> _lineByte = [0];
     private readonly List<int> _lineChar = [0];
     private readonly int _byteLength;
+    private readonly int _skip;
 
     public LineMap(string text)
     {
         _text = text;
+
+        // The engine leaves a leading byte order mark out of the text it reads, so its offsets do not count it. Marks do not
+        // either: the same text from a stream has no mark in it, and must give the same positions.
+        _skip = text.Length > 0 && text[0] == '\uFEFF' ? 1 : 0;
+        _lineChar[0] = _skip;
         int bytes = 0;
-        for (int i = 0; i < text.Length; i++)
+        for (int i = _skip; i < text.Length; i++)
         {
             char ch = text[i];
             bytes += ByteCount(text, i);
@@ -392,7 +398,7 @@ internal sealed class LineMap
             chars++;
         }
 
-        return new Mark(chars, lo + 1, chars - _lineChar[lo] + 1);
+        return new Mark(chars - _skip, lo + 1, chars - _lineChar[lo] + 1);
     }
 }
 

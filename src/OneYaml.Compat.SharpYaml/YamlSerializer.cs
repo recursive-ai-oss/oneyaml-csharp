@@ -66,6 +66,7 @@ public static class YamlSerializer
         int cut = Documents.FirstDocumentEnd(yaml);
         if (cut > 0)
         {
+            RefuseOverInputLimit(yaml, info, source);
             try
             {
                 return ReadPrefix(yaml, cut, info);
@@ -87,6 +88,28 @@ public static class YamlSerializer
         catch (Oy.YamlException error)
         {
             throw ErrorMap.Translate(error, yaml, source);
+        }
+    }
+
+    // Only the first document is handed to the engine, so the engine cannot see that the whole text is over the input size
+    // limit. A text is held to the limit as a whole, counted in UTF-8 bytes without a leading byte order mark, as the engine
+    // counts a string.
+    private static void RefuseOverInputLimit(ReadOnlySpan<char> yaml, Oy.YamlTypeInfo info, string? source)
+    {
+        long max = info.Options.Limits.MaxInputBytes;
+        ReadOnlySpan<char> counted = yaml.Length > 0 && yaml[0] == '\uFEFF' ? yaml[1..] : yaml;
+
+        // Most texts need no counting: no limit set, or even three bytes per character fit. A character takes at least one
+        // byte, so a text with more characters than the limit is over it. Only what is left is counted, in a long (a text
+        // of a few hundred million characters has more bytes than an int holds).
+        if (max == long.MaxValue || 3L * counted.Length <= max)
+        {
+            return;
+        }
+
+        if (counted.Length > max || global::OneYaml.Text.YamlInput.CountUtf8(counted) > max)
+        {
+            throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({max}).") { Category = Oy.YamlErrorCategory.Limit }, default, source);
         }
     }
 
@@ -170,6 +193,7 @@ public static class YamlSerializer
         int cut = Documents.FirstDocumentEnd(yaml);
         if (cut > 0)
         {
+            RefuseOverInputLimit(yaml, info, source);
             bool retried = false;
             while (true)
             {
@@ -231,7 +255,7 @@ public static class YamlSerializer
         }
     }
 
-    private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, null, MaxInput(options));
+    private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, options?.SourceName, MaxInput(options));
 
     private static string Write<T>(T value, Oy.YamlTypeInfo<T> info)
     {

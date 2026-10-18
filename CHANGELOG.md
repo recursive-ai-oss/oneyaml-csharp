@@ -4,6 +4,12 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+### Fixed
+
+- **`OneYaml.Compat.SharpYaml` holds a whole text to `MaxInputBytes`, not just its first document.** A string, span, reader or stream with several documents was cut at the second document before the limit was checked, so `Deserialize<object>("a: 1\n---\nb: 2\n", ...)` with `MaxInputBytes = 13` returned the first document instead of the limit error. For a string, span or reader the size is the UTF-8 size of the text without a leading byte order mark, as the core counts a string; a stream is held to its encoded size without the mark, and is read only to the limit plus one buffer.
+- **`OneYaml.Compat.SharpYaml` marks of an error in a string that starts with a byte order mark are no longer shifted.** The marks (line, column and index) counted the mark as a character and its bytes in the wrong place, so the same text gave different positions as a string and as a stream or reader. A string that began with a mark, a directive and more than one document could also read a wrong value (`a: 1` came back as `a: null`). The mark is not a column now, whatever the input.
+- **`OneYaml.Compat.YamlDotNet` marks of nodes and errors on a text with a leading byte order mark are no longer shifted.** `Start` and `End` of a node after the first, and of an error, were off by the mark when the text came from a string or a reader that keeps the mark. They now equal the marks of the same text without it.
+
 ## [1.2.0] - 2026-10-18
 
 ### Added

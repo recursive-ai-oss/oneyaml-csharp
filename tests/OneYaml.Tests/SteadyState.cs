@@ -23,7 +23,17 @@ internal static class SteadyState
     /// </remarks>
     /// <param name="work">The steady-state operation; it must cover all the inputs of interest.</param>
     /// <param name="calls">How many calls make up a round.</param>
-    public static void AssertAllocatesNothing(Action work, int calls)
+    public static void AssertAllocatesNothing(Action work, int calls) => AssertAllocatesAtMost(work, calls, 0);
+
+    /// <summary>
+    /// Requires that calling <paramref name="work"/> <paramref name="calls"/> times allocates at most <paramref name="bytes"/> on this
+    /// thread, with the same wait for optimised code as <see cref="AssertAllocatesNothing"/>: the code passes after two rounds in a
+    /// row at or under the bound, and fails with the bytes of the last round when the round limit is reached first.
+    /// </summary>
+    /// <param name="work">The steady-state operation; it must cover all the inputs of interest.</param>
+    /// <param name="calls">How many calls make up a round.</param>
+    /// <param name="bytes">The most a round may allocate.</param>
+    public static void AssertAllocatesAtMost(Action work, int calls, long bytes)
     {
         ArgumentNullException.ThrowIfNull(work);
         long last;
@@ -39,7 +49,7 @@ internal static class SteadyState
 
             last = GC.GetAllocatedBytesForCurrentThread() - before;
             rounds++;
-            if (last == 0)
+            if (last <= bytes)
             {
                 if (++quiet == 2)
                 {
@@ -54,6 +64,6 @@ internal static class SteadyState
         }
         while (rounds < MaxRounds);
 
-        Assert.Fail($"Still allocating after {rounds} rounds of {calls} calls; the last round allocated {last} bytes.");
+        Assert.Fail($"Still allocating after {rounds} rounds of {calls} calls; the last round allocated {last} bytes (bound {bytes}).");
     }
 }

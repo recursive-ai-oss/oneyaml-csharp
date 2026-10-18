@@ -19,7 +19,8 @@ internal static class Documents
         }
 
         bool started = false;
-        int pos = 0;
+        // A leading byte order mark is not part of the first line, so a directive after it is still a directive.
+        int pos = yaml[0] == '\uFEFF' ? 1 : 0;
         while (pos < yaml.Length)
         {
             int eol = yaml[pos..].IndexOfAny('\n', '\r');
