@@ -8,6 +8,11 @@ namespace OneYaml;
 public sealed record YamlLimits
 {
     /// <summary>The limits used when none are given. Generous enough for real-world files.</summary>
+    /// <remarks>
+    /// Bounds nesting depth, alias expansion and the digits of an integer. It sets no cap on input size, scalar size or
+    /// documents per stream; use <see cref="Untrusted"/> for input you do not control. A stream or reader too large for
+    /// one buffer is still refused with category <see cref="YamlErrorCategory.Limit"/>.
+    /// </remarks>
     public static YamlLimits Default { get; } = new();
 
     /// <summary>Tighter limits for input from an untrusted source.</summary>
@@ -37,7 +42,11 @@ public sealed record YamlLimits
         MaxIntegerDigits = 4_300,
     };
 
-    /// <summary>No limits at all. Only for input that is fully trusted.</summary>
+    /// <summary>No configurable limits at all. Only for input that is fully trusted.</summary>
+    /// <remarks>
+    /// Every bound you can set is lifted, alias expansion included. A stream or reader too large for one buffer is still
+    /// refused with category <see cref="YamlErrorCategory.Limit"/>, since the runtime cannot hold it.
+    /// </remarks>
     public static YamlLimits None { get; } = new()
     {
         MaxDepth = int.MaxValue,
@@ -55,6 +64,10 @@ public sealed record YamlLimits
     public int MaxDepth { get; init; } = 1_000;
 
     /// <summary>The largest input, in bytes. The limit is checked against the input as given and again against its UTF-8 form.</summary>
+    /// <remarks>
+    /// <see cref="long.MaxValue"/>, the default, sets no cap. Even then, a stream or reader too large for one buffer is
+    /// refused with category <see cref="YamlErrorCategory.Limit"/> rather than failing with an out-of-memory or I/O error.
+    /// </remarks>
     public long MaxInputBytes { get; init; } = long.MaxValue;
 
     /// <summary>The largest scalar, in bytes of its source text.</summary>

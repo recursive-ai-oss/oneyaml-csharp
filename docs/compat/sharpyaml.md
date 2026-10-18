@@ -97,11 +97,12 @@ One `%` case is kept as SharpYaml 3 has it, not as the YAML specification says. 
 | Enums are written by name regardless of the naming policy | `Serialize(Mood.Happy, new() { PropertyNamingPolicy = CamelCase })` |
 | `MaxDepth` defaults to 64 as in the real library and is never raised above the depth limit of `Limits`; the property reads back the value set, and the lower of the two applies | `YamlSerializerOptions { MaxDepth = 100000 }` reads back 100000 and still stops at the limit |
 | Error marks are a point (`Start == End`), normally at the real library's line and column but not always | `Deserialize<object>("a: [")` |
+| A leading byte order mark (U+FEFF) is never counted in error marks, so a text gets the marks it would have without the mark from a string, a span, a `TextReader` or a `Stream`. The real library counts the mark as a character and a column when the text is a string or a `TextReader`, but not when it reads a `Stream`, so the same text gets different marks from different inputs | `Deserialize<object>("\uFEFFa: 1\nb: [x\n")`: `Index` 12 in the real library, 11 here, as for the same text read from a stream |
 | Syntax errors are `SyntaxErrorException`; every other category is `YamlException` (the real `SemanticErrorException` is never raised) | `Deserialize<object>("a: [")` is a syntax error; `Deserialize<int>("x")` is a `YamlException` |
-| `Stream` input is read to the end, with UTF-8, UTF-16 and UTF-32 detected, and left open | `Deserialize<Plain>(stream)` |
+| `Stream` input is read to the end, or until it passes `Limits.MaxInputBytes`, with UTF-8, UTF-16 and UTF-32 detected, and left open | `Deserialize<Plain>(stream)` |
 | `BlockSequenceMappingStyle`, `BlockSequenceSequenceStyle`, `ScalarStylePreferences` and `WriteIndented` are accepted at their default values and refused at any value that asks for another layout | `Serialize(x, new() { BlockSequenceMappingStyle = YamlSequenceItemStyle.Expanded })` throws `NotSupportedException` |
 | `GetTypeInfo` returns a nullable `YamlTypeInfo` | |
-| Only the first document is read, as in the real library; the rest of the stream is not parsed unless the first fails | `Deserialize<Plain>("a: 1\n---\n[")` |
+| Only the first document is read, as in the real library; the rest of the stream is not parsed unless the first fails. `Limits.MaxInputBytes` still applies to the whole text, every document included | `Deserialize<Plain>("a: 1\n---\n[")` |
 
 ## Gaps
 

@@ -16,7 +16,7 @@ The samples on this page are complete programs that assume implicit usings (the 
 | `MaxScalarBytes` | none | 16 MiB |
 | `MaxDocuments`: documents per stream | none | 10,000 |
 
-`Default` applies whenever you pass no limits. It bounds the work that grows faster than the input (depth, alias expansion, long integers) and is meant never to get in the way of a real file. It leaves input size, scalar size and the number of documents unbounded: those are bounded only when you set `MaxInputBytes`, `MaxScalarBytes` and `MaxDocuments`, which `Untrusted` does, and `Untrusted` also tightens the default bounds. `YamlLimits.None` removes every bound, alias expansion included; use it only for input you fully trust.
+`Default` applies whenever you pass no limits. It bounds the work that grows faster than the input (depth, alias expansion, long integers) and is meant never to get in the way of a real file. It sets no cap on input size, scalar size or the number of documents: those are capped only when you set `MaxInputBytes`, `MaxScalarBytes` and `MaxDocuments`, which `Untrusted` does, and `Untrusted` also tightens the default bounds. `YamlLimits.None` removes every bound you can set, alias expansion included; use it only for input you fully trust. Under any limits, a stream or reader too large for one buffer is still refused ([Input size](#input-size)).
 
 Integers that fit in 64 bits are not affected by `MaxIntegerDigits`; the bound exists because converting a very long integer to a `BigInteger` takes more than linear time.
 
@@ -84,7 +84,11 @@ catch (YamlException e)
 }
 ```
 
-`MaxInputBytes` is checked against the input as given and again against its UTF-8 form. `YamlDocument.Parse(Stream)` refuses a seekable stream that is longer than the limit before reading it, and stops reading any other stream as soon as it passes the limit. `YamlSerializer.Deserialize` and `DeserializeAll` over a `TextReader` count the text in UTF-8 bytes while they read it and stop with the `Limit` error after at most 4,096 characters past the limit, so a very large or endless reader does not fill memory first; with no `MaxInputBytes` set, the reader is read to its end. The compatibility adapters' `TextReader` overloads also stop reading once the text is over the limit.
+## Input size
+
+`MaxInputBytes` is checked against the input as given and again against its UTF-8 form. `YamlDocument.Parse(Stream)` refuses a seekable stream that is longer than the limit before reading it, and stops reading any other stream as soon as it passes the limit. `YamlSerializer.Deserialize` and `DeserializeAll` over a `TextReader` count the text in UTF-8 bytes while they read it and stop with the `Limit` error after at most 4,096 characters past the limit, so a very large or endless reader does not fill memory first. A `StringReader` is taken whole, since its text is already in memory, and counted as a string is. The compatibility adapters' `TextReader` overloads, and the SharpYaml adapter's `Stream` overloads, also stop reading once the text is over the limit. The SharpYaml adapter reads only the first document, as SharpYaml does, but holds the whole text, every document included, to `MaxInputBytes`.
+
+With no `MaxInputBytes` set, a stream or a reader other than a `StringReader` is still read in pieces, to its end. A stream or reader too large for one buffer, that is more than the runtime can keep in one array or string, ends in the `Limit` error as well (in the adapters, the exception type each one uses for a limit), not in an out-of-memory or I/O error.
 
 ## The compatibility adapters
 
