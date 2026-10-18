@@ -3,7 +3,8 @@
 **Lossless, comment-preserving editing and a System.Text.Json-style
 serializer for YAML 1.2, in one .NET package.** Both run on one parser,
 so a typed read and an edit never disagree about what a file means.
-Pure C#, correct YAML 1.2 by default, bounded on any input.
+Pure C#, correct YAML 1.2 by default; nesting, alias expansion and
+integer size are bounded unless you lift the limits.
 
 [![NuGet](https://img.shields.io/nuget/v/OneYaml)](https://www.nuget.org/packages/OneYaml)
 [![CI](https://github.com/recursive-ai-oss/oneyaml-csharp/actions/workflows/ci.yml/badge.svg)](https://github.com/recursive-ai-oss/oneyaml-csharp/actions/workflows/ci.yml)
@@ -17,11 +18,11 @@ slower shows as a slower bar):
 
 <!-- generated:bench-chart -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-dark.svg">
-  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-dark.svg">
+  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable. Speeds are over real-world workloads. A mark counts every workload. Loses only outside the real-world workloads: unchanged emit." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-light.svg">
 </picture>
 
-[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.1.1/docs/performance.md)
+[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/performance.md)
 <!-- end generated -->
 
 ## Why oneyaml-csharp
@@ -39,16 +40,17 @@ slower shows as a slower bar):
   compatibility packages. Checked against the full yaml-test-suite,
   with every deviation listed ([conformance](docs/conformance.md)).
 - **Safe on outside input.** Depth, alias expansion and integer size
-  are bounded by default, and `YamlLimits.Untrusted` bounds the rest
+  are bounded by default; input size, scalar size and document count
+  are bounded when you set them, and `YamlLimits.Untrusted` sets them
   ([limits](docs/limits.md)). No unsafe code, no dependencies outside
   .NET, and fuzzed ([fuzzing](tests/OneYaml.Fuzz/README.md)).
 - **Fast, with the losses shown.** Ahead of every other .NET YAML
   library at typed load, generic load, dump, document parse, editing
   and writing back an unedited file, through reflection and generated
   metadata alike, and level or lower on memory throughout. Not on
-  every file: writing back three unedited files (about 32 KB to
-  256 KB) was up to 1.6 times slower than SharpYaml's syntax tree in
-  our run, and a few files are level
+  every file: writing back some unedited files was slower than
+  SharpYaml's syntax tree in our run, the generated-metadata column
+  was slower on a few tiny files, and a few files are level
   ([every loss](docs/performance.md#results-at-a-glance)).
 
 [How oneyaml-csharp compares](docs/comparison.md) with YamlDotNet,
@@ -61,7 +63,8 @@ dotnet add package OneYaml
 ```
 
 Moving from YamlDotNet or SharpYaml? A [compatibility package](#packages)
-keeps most call sites as they are; its guide lists what differs.
+covers the common serializer and model calls; its guide lists what it
+leaves out and what differs.
 
 ## Quick start
 
@@ -127,8 +130,8 @@ for native AOT, use [generated metadata](docs/serializer.md#source-generation-an
 | Package | What it is |
 |---|---|
 | [`OneYaml`](https://www.nuget.org/packages/OneYaml) | The library: `YamlSerializer`, `YamlDocument`, patches, limits. Start here. |
-| [`OneYaml.Compat.YamlDotNet`](https://www.nuget.org/packages/OneYaml.Compat.YamlDotNet) | YamlDotNet 18's builders and representation model on top of `OneYaml`, with [every difference](docs/compat/yamldotnet.md) listed. |
-| [`OneYaml.Compat.SharpYaml`](https://www.nuget.org/packages/OneYaml.Compat.SharpYaml) | SharpYaml 3's serializer API on top of `OneYaml`, with [every difference](docs/compat/sharpyaml.md) listed. |
+| [`OneYaml.Compat.YamlDotNet`](https://www.nuget.org/packages/OneYaml.Compat.YamlDotNet) | A subset of YamlDotNet's API on top of `OneYaml`: the serializer builders and the representation model, tested against YamlDotNet 18.1.0. Not covered: static contexts, type inspectors, node deserializers, the scanner and comment events; [what is covered and every difference](docs/compat/yamldotnet.md). |
+| [`OneYaml.Compat.SharpYaml`](https://www.nuget.org/packages/OneYaml.Compat.SharpYaml) | A subset of SharpYaml's API on top of `OneYaml`: the serializer, its options and attributes, tested against SharpYaml 3.14.0. Not covered: custom converters, polymorphism, generated contexts, the `Model` and `Syntax` namespaces; [what is covered and every difference](docs/compat/sharpyaml.md). |
 
 ## License
 

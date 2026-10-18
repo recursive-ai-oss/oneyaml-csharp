@@ -28,4 +28,11 @@ The packages target `net8.0` and `net10.0`. CI builds and tests both on
 Linux, macOS and Windows. Dropping a target framework takes a new major
 version.
 
+Microsoft ends support for .NET 8 on 10 November 2026
+([.NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy/dotnet-core)).
+The `net8.0` target stays in every 1.x release all the same; it can go
+only in a new major version.
+After that date .NET 8 itself gets no more security fixes from
+Microsoft, so move to .NET 10 when you can.
+
 Security fixes go into the latest release; see [Security](../SECURITY.md).
