@@ -18,9 +18,11 @@ Within a major version:
   except to fix output that is incorrect. Such a fix is listed in the
   changelog.
 
-A change that can break your code comes only in a new major version,
-and the [changelog](../CHANGELOG.md) marks it **Breaking**, with what to
-write instead.
+The public API and documented behaviour change only in a new major
+version. A fix for wrong behaviour can come in a minor or patch release,
+including a change to the exception an error path throws. When code
+could depend on the old behaviour, the [changelog](../CHANGELOG.md)
+marks the fix **Breaking**, with what to write instead.
 
 ## Supported .NET versions
 
