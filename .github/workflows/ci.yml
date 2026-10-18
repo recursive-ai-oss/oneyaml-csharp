@@ -94,7 +94,7 @@ jobs:
     env:
       # The kit commit the conformance tests run against. To move it, put the full SHA of a
       # commit of recursive-ai-oss/oneyaml-kit here, run the tests, and fix what changed.
-      KIT_REF: 6cc83d12fbc6d993bc489aa5712e114bb4c40b83
+      KIT_REF: c1647a46aa6d8f75fe734e61145095e95507a98e
     steps:
       # Windows runners check out with line-ending conversion on by default. The kit cases and
       # the YAML under test need their exact bytes, so conversion is off before any checkout.

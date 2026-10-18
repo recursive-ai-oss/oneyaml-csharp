@@ -16,15 +16,16 @@ internal static class StreamText
         byte[] bytes;
         using (var copy = new MemoryStream())
         {
-            // Stop one byte past the limit: the stream may be endless, and the engine reports the excess.
+            // Stop a few bytes past the limit (room for a byte order mark, which is not part of the size): the stream may
+            // be endless, and the check below reports the excess exactly.
             byte[] chunk = new byte[8192];
             int n;
             while ((n = stream.Read(chunk, 0, chunk.Length)) > 0)
             {
                 copy.Write(chunk, 0, n);
-                if (copy.Length > maxBytes)
+                if (copy.Length - 4 > maxBytes)
                 {
-                    throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({maxBytes}).") { Category = Oy.YamlErrorCategory.Limit }, default, sourceName);
+                    throw TooLarge(maxBytes, sourceName);
                 }
             }
 
@@ -32,6 +33,11 @@ internal static class StreamText
         }
 
         (Encoding encoding, int mark) = Detect(bytes);
+        if (bytes.Length - mark > maxBytes)
+        {
+            throw TooLarge(maxBytes, sourceName);
+        }
+
         try
         {
             return encoding.GetString(bytes, mark, bytes.Length - mark);
@@ -60,6 +66,9 @@ internal static class StreamText
             throw new SyntaxErrorException(sourceName, at, at, "The input is not valid in its character encoding.");
         }
     }
+
+    private static YamlException TooLarge(long maxBytes, string? sourceName) =>
+        ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({maxBytes}).") { Category = Oy.YamlErrorCategory.Limit }, default, sourceName);
 
     private static (Encoding Encoding, int Mark) Detect(byte[] b)
     {

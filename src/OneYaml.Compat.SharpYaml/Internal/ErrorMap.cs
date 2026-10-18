@@ -49,7 +49,9 @@ internal static class ErrorMap
 
     // The index in the text of the place the engine names, or -1 when it names none.
     public static int CharIndexOf(Oy.YamlException error, ReadOnlySpan<char> text) =>
-        error.Offset < 0 ? -1 : MarkOf(error, text).Index;
+        error.Offset < 0 ? -1 : MarkOf(error, text).Index + (StartsWithByteOrderMark(text) ? 1 : 0);
+
+    private static bool StartsWithByteOrderMark(ReadOnlySpan<char> text) => !text.IsEmpty && text[0] == '\uFEFF';
 
     // Marks count characters of the text and start at zero; the engine reports a UTF-8 offset.
     private static Mark MarkOf(Oy.YamlException error, ReadOnlySpan<char> text)
@@ -59,10 +61,13 @@ internal static class ErrorMap
             return error.Line >= 1 ? new Mark(0, error.Line - 1, Math.Max(error.Column - 1, 0)) : Mark.Empty;
         }
 
+        // The engine leaves a leading byte order mark out of the text it reads, so its offsets do not count it. Neither do
+        // the marks: a text read from a stream or a reader has no mark in it, and the same text as a string must say the same.
+        int skip = StartsWithByteOrderMark(text) ? 1 : 0;
         long bytes = 0;
         int line = 0;
-        int lineStart = 0;
-        int i = 0;
+        int lineStart = skip;
+        int i = skip;
         while (i < text.Length && bytes < error.Offset)
         {
             char ch = text[i];
@@ -92,6 +97,6 @@ internal static class ErrorMap
             }
         }
 
-        return new Mark(i, line, i - lineStart);
+        return new Mark(i - skip, line, i - lineStart);
     }
 }

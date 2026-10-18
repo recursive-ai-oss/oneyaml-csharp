@@ -130,4 +130,45 @@ public class EncodingErrorPositionTests
         Assert.Equal(4, ex.Column);
         Assert.Equal(8, ex.Offset);
     }
+
+    // The same text as the case above in all four wide encodings: a mark ahead of the text is never a column, so the
+    // error is at column 4 whichever entry point reads it, and the offset counts the mark's bytes.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void A_lone_surrogate_after_a_mark_is_at_column_four_in_every_wide_encoding(int encodingIndex)
+    {
+        Encoding encoding = s_wide[encodingIndex];
+        bool wide = encodingIndex >= 2;
+        bool big = encodingIndex is 1 or 3;
+        var list = new List<byte>(encoding.GetPreamble());
+        foreach (int c in new[] { 0xE9, ':', ' ', 0xD800, 'b', '\n' })
+        {
+            byte[] v = wide ? [(byte)c, (byte)(c >> 8), 0, 0] : [(byte)c, (byte)(c >> 8)];
+            if (big)
+            {
+                Array.Reverse(v);
+            }
+
+            list.AddRange(v);
+        }
+
+        byte[] input = [.. list];
+        foreach (Action act in new Action[]
+        {
+            () => YamlSerializer.Deserialize<object>(input),
+            () => YamlSerializer.Deserialize<object>(new MemoryStream(input)),
+            () => YamlDocument.Parse(input),
+            () => YamlDocument.Parse(new MemoryStream(input)),
+        })
+        {
+            var ex = Assert.Throws<YamlException>(act);
+            Assert.Equal(YamlErrorCategory.Encoding, ex.Category);
+            Assert.Equal(1, ex.Line);
+            Assert.Equal(4, ex.Column);
+            Assert.Equal(encoding.GetPreamble().Length + (3 * (wide ? 4 : 2)), ex.Offset);
+        }
+    }
 }
