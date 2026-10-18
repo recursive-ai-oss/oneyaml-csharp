@@ -207,15 +207,15 @@ internal ref struct YamlInput
     public static YamlInput FromReader(TextReader reader, YamlLimits limits)
     {
         long max = limits.MaxInputBytes;
-        // A string reader holds its whole text already and hands it over without a copy, so reading it first costs no
-        // memory the caller has not spent; FromChars then checks the size before it rents anything.
+        // A string reader already holds its whole text. Read from the start, it hands that string over without a copy;
+        // read part way, it copies the rest, which is never larger than the string the caller holds. FromChars then
+        // checks the size before it rents anything.
         if (max == long.MaxValue || reader.GetType() == typeof(StringReader))
         {
             return FromChars(reader.ReadToEnd(), limits);
         }
 
-        // The buffer never needs to hold more than the limit plus what one chunk can add before the limit trips.
-        long cap = Math.Min(max + (ReaderChunk * 3L), Array.MaxLength);
+        long cap = GrowthCap(max);
         byte[]? bytes = Array.Empty<byte>();
         try
         {
@@ -254,6 +254,12 @@ internal ref struct YamlInput
                 {
                     // What this chunk needs, exactly (a lone surrogate counts as 3 here, which is at least what it would take).
                     long need = written + (long)System.Text.Encoding.UTF8.GetByteCount(text);
+                    if (need > max)
+                    {
+                        // Over the limit: refuse before renting a buffer that will never be used.
+                        throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+                    }
+
                     if (need > Array.MaxLength)
                     {
                         counting = true;
@@ -340,6 +346,11 @@ internal ref struct YamlInput
         }
     }
 
+    // The buffer never needs to hold more than the limit plus what one chunk can add before the limit trips. The sum
+    // saturates: a limit close to long.MaxValue must not wrap around to a small cap.
+    internal static long GrowthCap(long max)
+        => max >= Array.MaxLength - (3L * ReaderChunk) ? Array.MaxLength : max + (3L * ReaderChunk);
+
     // Counts a piece of text in UTF-8 bytes. A high surrogate at its end is left for the next piece, so a pair is one
     // character; the caller's chunk holds it in the first place.
     private static long CountPiece(ReadOnlySpan<char> text, Span<char> chunk, ref int carry)
@@ -355,20 +366,86 @@ internal ref struct YamlInput
         return System.Text.Encoding.UTF8.GetByteCount(text);
     }
 
-    /// <summary>Reads a text reader to its end as a string, within the input size limit, with a leading byte order mark left out.</summary>
+    /// <summary>
+    /// Reads a text reader to its end as a string, exactly as given (a byte order mark, unpaired surrogates and control
+    /// characters included), but stops with the limit error as soon as the text is over the input size limit. The size
+    /// is counted in UTF-8 bytes without the leading byte order mark. Checking the text itself is left to the caller.
+    /// </summary>
     /// <param name="reader">The reader.</param>
     /// <param name="limits">The limits to enforce on the input size.</param>
     /// <returns>The text.</returns>
-    /// <exception cref="YamlException">The text has an unpaired surrogate, a control character or is too large.</exception>
+    /// <exception cref="YamlException">The text is over the input size limit.</exception>
     public static string ReadToString(TextReader reader, YamlLimits limits)
     {
-        if (limits.MaxInputBytes == long.MaxValue)
+        long max = limits.MaxInputBytes;
+        if (max == long.MaxValue || reader.GetType() == typeof(StringReader))
         {
             return reader.ReadToEnd();
         }
 
-        using YamlInput input = FromReader(reader, limits);
-        return System.Text.Encoding.UTF8.GetString(input.Utf8Text);
+        // A character is at least one byte, so the text never needs more characters than the limit plus one chunk.
+        long cap = Math.Min(max + ReaderChunk, Array.MaxLength);
+        char[] buffer = ArrayPool<char>.Shared.Rent(ReaderChunk * 2);
+        try
+        {
+            int length = 0;
+            int counted = 0;
+            long bytes = 0;
+            while (true)
+            {
+                if (buffer.Length - length < ReaderChunk)
+                {
+                    long wanted = Math.Min(Math.Max(buffer.Length * 2L, length + (long)ReaderChunk), Math.Max(cap, length + (long)ReaderChunk));
+                    if (wanted > Array.MaxLength)
+                    {
+                        throw TooLarge(limits);
+                    }
+
+                    char[] bigger = ArrayPool<char>.Shared.Rent((int)wanted);
+                    Array.Copy(buffer, bigger, length);
+                    ArrayPool<char>.Shared.Return(buffer);
+                    buffer = bigger;
+                }
+
+                int n = reader.Read(buffer, length, ReaderChunk);
+                if (n <= 0)
+                {
+                    break;
+                }
+
+                length += n;
+
+                // A high surrogate at the end waits for its partner, so a pair is counted once, as 4 bytes.
+                int end = char.IsHighSurrogate(buffer[length - 1]) ? length - 1 : length;
+                if (end > counted)
+                {
+                    int from = counted;
+                    if (from == 0 && buffer[0] == '\uFEFF')
+                    {
+                        from = 1; // a leading byte order mark is not part of the size
+                    }
+
+                    bytes += System.Text.Encoding.UTF8.GetByteCount(buffer.AsSpan(from, end - from));
+                    counted = end;
+                }
+
+                if (bytes > max)
+                {
+                    throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+                }
+            }
+
+            if (counted < length && bytes + 3 > max)
+            {
+                throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+            }
+
+            return new string(buffer, 0, length);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>Returns the pooled buffer, if any.</summary>

@@ -1,4 +1,5 @@
 using System.Text;
+using OneYaml.Text;
 using Xunit;
 
 namespace OneYaml.Tests;
@@ -164,7 +165,7 @@ public class TextReaderLimitTests
     [Fact]
     public void An_unpaired_surrogate_is_an_encoding_error_at_the_same_place_as_from_a_string()
     {
-        foreach (string text in new[] { "a: 1\nb: x\uD800y\n", "a: 1\nb: x\uDC00\n", "k: \uD83D", "\uFEFFab\r\n\uD800", "é€😀: \uD800" })
+        foreach (string text in new[] { "a: 1\nb: x\uD800y\n", "a: 1\nb: x\uDC00\n", "k: \uD83D", "\uFEFFab\r\n\uD800", "a: 1\rb: \uD800", "é€😀: \uD800" })
         {
             foreach (int piece in new[] { 1, 2, 3, 4096 })
             {
@@ -191,5 +192,15 @@ public class TextReaderLimitTests
         YamlException viaString = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(Text, Limited));
         YamlException viaReader = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(new CountingReader(Text, 2, endless: false), Limited));
         Assert.Equal((viaString.Category, viaString.Message, viaString.Line, viaString.Column), (viaReader.Category, viaReader.Message, viaReader.Line, viaReader.Column));
+    }
+
+    [Fact]
+    public void The_buffer_cap_saturates_for_limits_near_the_top_of_the_range()
+    {
+        Assert.Equal(1000 + (3L * 4096), YamlInput.GrowthCap(1000));
+        Assert.Equal(Array.MaxLength, YamlInput.GrowthCap(Array.MaxLength));
+        Assert.Equal(Array.MaxLength, YamlInput.GrowthCap(long.MaxValue - 1));
+        Assert.Equal(Array.MaxLength, YamlInput.GrowthCap(long.MaxValue - (3L * 4096)));
+        Assert.Equal(Array.MaxLength, YamlInput.GrowthCap(long.MaxValue));
     }
 }
