@@ -1,9 +1,22 @@
-# OneYaml.Compat.SharpYaml: differences from SharpYaml 3
+# OneYaml.Compat.SharpYaml: differences from SharpYaml 3.14.0
 
-The package reproduces the documented behaviour and API of SharpYaml 3.14.0 for the serializer, never its defects.
-Every difference below is checked against the real library by a differential test in `tests/OneYaml.Compat.Tests`.
-Switching is a package swap and a `using` change: `using SharpYaml;` becomes `using OneYaml.Compat.SharpYaml;`
-(and `SharpYaml.Serialization` becomes `OneYaml.Compat.SharpYaml.Serialization`).
+The package covers a subset of SharpYaml's API: the common serializer paths (`YamlSerializer`, `YamlSerializerOptions`,
+the attributes and the exceptions), listed in [What is covered](#what-is-covered). It reproduces the documented behaviour of
+SharpYaml for those paths, never its defects. It is tested against SharpYaml 3.14.0: every difference below is checked
+against that version by a differential test in `tests/OneYaml.Compat.Tests`. Newer SharpYaml releases are not tested.
+
+Not covered, so code that uses it does not build:
+
+- custom converters, the `IYamlOn*` hooks, polymorphism and extension data;
+- generated contexts: a `YamlSerializerContext` compiles, but nothing is generated for it;
+- the `Model` and `Syntax` namespaces, schemas, the scanner, parser and emitter;
+- the rest of [What is left out](#what-is-left-out), which also lists the options that compile but fail at first use.
+
+The adapter's types are its own, in the `OneYaml.Compat.SharpYaml` namespaces; they are not SharpYaml's types. Code you
+control switches with a package swap and a `using` change: `using SharpYaml;` becomes `using OneYaml.Compat.SharpYaml;`
+(and `SharpYaml.Serialization` becomes `OneYaml.Compat.SharpYaml.Serialization`). A third-party library that takes or
+returns SharpYaml types (options, a type info, a context) still needs SharpYaml itself and cannot be handed the adapter's
+types.
 
 For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
 [Migrating from SharpYaml](../migrate-sharpyaml.md). The adapter reads with the library's default limits

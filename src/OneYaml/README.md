@@ -3,7 +3,8 @@
 **Lossless, comment-preserving editing and a System.Text.Json-style
 serializer for YAML 1.2, in one .NET package.** Both run on one parser,
 so a typed read and an edit never disagree about what a file means.
-Pure C#, correct YAML 1.2 by default, bounded on any input.
+Pure C#, correct YAML 1.2 by default; nesting, alias expansion and
+integer size are bounded unless you lift the limits.
 
 How many times faster OneYaml is than the strongest other .NET YAML
 library on each task (wall-clock time, log scale, higher is better; a

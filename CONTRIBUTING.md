@@ -53,7 +53,7 @@ Before you send a pull request, run the local checks:
 tools/gate
 ```
 
-`tools/gate` runs the same checks as CI: build, tests, format, public text, secret scan. In detail, it restores and builds the solution in Release for both target frameworks (warnings are errors, and the trimming and AOT analyzers are on), runs the tests except those in the `Slow` category, checks formatting with `dotnet format`, checks the text of the files you changed against `main` (set `GATE_BASE` to compare with another branch), scans for secrets, and checks that `src/` has no unsafe code. CI runs the same checks, and all the tests, on Linux, macOS and Windows.
+`tools/gate` runs the same checks as CI: build, tests, format, public text, secret scan. In detail, it restores and builds the solution in Release for both target frameworks (warnings are errors, and the trimming and AOT analyzers are on), runs the tests except those in the `Slow` category, runs the `tests/OneYaml.Tests` tests (again without `Slow`) on a second build with the edit engine's internal held-back check switched on (`-p:OneYamlCheckHeld=1`, in its own build output), checks formatting with `dotnet format`, checks the text of the files you changed against `main` (set `GATE_BASE` to compare with another branch), scans for secrets, and checks that `src/` has no unsafe code. CI runs the same checks, and all the tests, on Linux, macOS and Windows, except the held-back check build, which CI runs on Linux only.
 
 ## What a good pull request has
 

@@ -1,9 +1,23 @@
 # OneYaml.Compat.YamlDotNet: differences from YamlDotNet 18.1.0
 
-The package reproduces the documented behaviour and API of YamlDotNet 18.1.0 for the serializer builders and the
-representation model, never its defects. Every difference below is checked against the real library by a differential test
-in `tests/OneYaml.Compat.Tests`. Switching is a package swap and a `using` change: `using YamlDotNet.Serialization;` becomes
-`using OneYaml.Compat.YamlDotNet.Serialization;` (and likewise for `RepresentationModel` and `Core`).
+The package covers a subset of YamlDotNet's API: the common paths through the serializer builders (`SerializerBuilder`,
+`DeserializerBuilder`, naming conventions, `IYamlTypeConverter`, the attributes) and the representation model (`YamlStream`
+and its nodes), with the parser events they use. It reproduces the documented behaviour of YamlDotNet for those paths,
+never its defects. It is tested against YamlDotNet 18.1.0: every difference below is checked against that version by a
+differential test in `tests/OneYaml.Compat.Tests`. Newer YamlDotNet releases are not tested.
+
+Not covered, so code that uses it does not build:
+
+- static contexts (`StaticSerializerBuilder`) and other generated serializer code;
+- type inspectors, node deserializers, object factories, event emitters and object-graph visitors;
+- the scanner, `MergingParser` and comment events;
+- the rest of the [surface not provided](#surface-not-provided-gap).
+
+The adapter's types are its own, in the `OneYaml.Compat.YamlDotNet` namespaces; they are not YamlDotNet's types. Code you
+control switches with a package swap and a `using` change: `using YamlDotNet.Serialization;` becomes
+`using OneYaml.Compat.YamlDotNet.Serialization;` (and likewise for `RepresentationModel` and `Core`). A third-party
+library that takes or returns YamlDotNet types (a converter, a node, a builder) still needs YamlDotNet itself and cannot be
+handed the adapter's types.
 
 For the steps of a migration, what to check after the swap, and the move to the `OneYaml` API, see
 [Migrating from YamlDotNet](../migrate-yamldotnet.md). The adapter reads with the library's default limits

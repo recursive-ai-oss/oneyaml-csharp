@@ -16,7 +16,7 @@ The samples on this page are complete programs that assume implicit usings (the 
 | `MaxScalarBytes` | none | 16 MiB |
 | `MaxDocuments`: documents per stream | none | 10,000 |
 
-`Default` applies whenever you pass no limits. It bounds the work that grows faster than the input (depth, alias expansion, long integers) and is meant never to get in the way of a real file. `Untrusted` also bounds the input itself and tightens the rest. `YamlLimits.None` removes every bound, alias expansion included; use it only for input you fully trust.
+`Default` applies whenever you pass no limits. It bounds the work that grows faster than the input (depth, alias expansion, long integers) and is meant never to get in the way of a real file. It leaves input size, scalar size and the number of documents unbounded: those are bounded only when you set `MaxInputBytes`, `MaxScalarBytes` and `MaxDocuments`, which `Untrusted` does, and `Untrusted` also tightens the default bounds. `YamlLimits.None` removes every bound, alias expansion included; use it only for input you fully trust.
 
 Integers that fit in 64 bits are not affected by `MaxIntegerDigits`; the bound exists because converting a very long integer to a `BigInteger` takes more than linear time.
 
@@ -84,7 +84,7 @@ catch (YamlException e)
 }
 ```
 
-`MaxInputBytes` is checked against the input as given and again against its UTF-8 form. `YamlDocument.Parse(Stream)` refuses a seekable stream that is longer than the limit before reading it, and stops reading any other stream as soon as it passes the limit.
+`MaxInputBytes` is checked against the input as given and again against its UTF-8 form. `YamlDocument.Parse(Stream)` refuses a seekable stream that is longer than the limit before reading it, and stops reading any other stream as soon as it passes the limit. `YamlSerializer.Deserialize` and `DeserializeAll` over a `TextReader` count the text in UTF-8 bytes while they read it and stop with the `Limit` error after at most 4,096 characters past the limit, so a very large or endless reader does not fill memory first; with no `MaxInputBytes` set, the reader is read to its end. The compatibility adapters' `TextReader` overloads also stop reading once the text is over the limit.
 
 ## The compatibility adapters
 

@@ -14,7 +14,7 @@
 
   <PropertyGroup Label="Package">
     <PackageId>OneYaml.Compat.SharpYaml</PackageId>
-    <Description>A compatibility adapter for code written against the SharpYaml 3 serializer (YamlSerializer, YamlSerializerOptions, attributes), running on OneYaml. Every difference is listed.</Description>
+    <Description>A compatibility adapter covering a subset of the SharpYaml serializer API (YamlSerializer, YamlSerializerOptions, attributes), tested against SharpYaml 3.14.0, running on OneYaml. Every difference is listed.</Description>
     <Authors>Recursive AI, LLC</Authors>
     <Copyright>Copyright (c) 2026 Recursive AI, LLC</Copyright>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>

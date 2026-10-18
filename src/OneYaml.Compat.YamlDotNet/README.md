@@ -2,6 +2,8 @@
 
 **A compatibility adapter for code written against YamlDotNet 18, running on OneYaml.**
 
+It covers a subset of YamlDotNet's API, tested against YamlDotNet 18.1.0; code that takes or returns YamlDotNet types from other libraries still needs YamlDotNet itself. Every difference and every part not covered is listed in the compatibility notes.
+
 It provides the YamlDotNet serializer builders (`DeserializerBuilder`, `SerializerBuilder`, naming conventions, `YamlMember`, `IYamlTypeConverter`) and the representation model (`YamlStream`, `YamlMappingNode` and the other nodes) under the `OneYaml.Compat.YamlDotNet` namespaces. For the API the migration guide lists, changing the package and the `using` lines keeps your call sites:
 
 ```text

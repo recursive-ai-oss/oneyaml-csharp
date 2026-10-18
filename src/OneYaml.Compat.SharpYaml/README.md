@@ -2,6 +2,8 @@
 
 **A compatibility adapter for code written against the SharpYaml 3 serializer, running on OneYaml.**
 
+It covers a subset of SharpYaml's API, tested against SharpYaml 3.14.0; code that takes or returns SharpYaml types from other libraries still needs SharpYaml itself. Every difference and every part not covered is listed in the compatibility notes.
+
 It provides SharpYaml's `YamlSerializer`, `YamlSerializerOptions`, its attributes and exceptions under the `OneYaml.Compat.SharpYaml` namespace. For the API the migration guide lists, changing the package and the `using` lines keeps your call sites:
 
 ```text
