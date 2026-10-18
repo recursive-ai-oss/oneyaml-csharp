@@ -13,7 +13,12 @@ internal static class StreamText
     public static string Read(Stream stream, string? sourceName, long maxBytes = long.MaxValue) => Read(stream, sourceName, maxBytes, Array.MaxLength);
 
     // The ceiling is a parameter so a test can reach it without a two-gigabyte input.
-    internal static string Read(Stream stream, string? sourceName, long maxBytes, int ceiling)
+    internal static string Read(Stream stream, string? sourceName, long maxBytes, int ceiling) => Read(stream, sourceName, maxBytes, ceiling, Oy.Text.YamlInput.StringMaxLength);
+
+    private const int ReadChunk = 8192;
+
+    // The string ceiling is a parameter too, so a test can reach it without a billion characters.
+    internal static string Read(Stream stream, string? sourceName, long maxBytes, int ceiling, int stringCeiling)
     {
         ArgumentNullException.ThrowIfNull(stream);
         // Grown here and not in a MemoryStream, which fails with an IOException at two gigabytes instead of naming the limit.
@@ -31,7 +36,9 @@ internal static class StreamText
                 Array.Resize(ref bytes, (int)Math.Min(bytes.Length * 2L, ceiling));
             }
 
-            int n = stream.Read(bytes, count, bytes.Length - count);
+            // Ask for one chunk, not for all the room left: an endless stream is then read to the limit plus a chunk, not to
+            // the end of a doubled buffer.
+            int n = stream.Read(bytes, count, Math.Min(bytes.Length - count, ReadChunk));
             if (n <= 0)
             {
                 break;
@@ -57,7 +64,7 @@ internal static class StreamText
         {
             // A string holds fewer characters than an array holds bytes; count before decoding so a text that decodes
             // to more is a limit error, not an out-of-memory error from the decoder.
-            if (count - mark > Oy.Text.YamlInput.StringMaxLength && encoding.GetCharCount(bytes, mark, count - mark) > Oy.Text.YamlInput.StringMaxLength)
+            if (count - mark > stringCeiling && encoding.GetCharCount(bytes, mark, count - mark) > stringCeiling)
             {
                 throw TooLarge(maxBytes, sourceName, "The text is longer than a string can hold");
             }

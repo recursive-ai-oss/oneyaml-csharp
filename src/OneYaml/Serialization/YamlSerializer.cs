@@ -576,10 +576,11 @@ public static partial class YamlSerializer
             throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
 
-        // Doubling would pass what one array can hold: say so, as the limit it is, not as a failure of the runtime.
+        // Doubling would pass what one array can hold, so this reader stops at half the ceiling. Say so as its own buffer
+        // limit, which is what it is, and not as the runtime's.
         if (buffer.Length >= ceiling / 2)
         {
-            throw new YamlException($"The input is larger than the largest buffer the runtime can hold (limit MaxInputBytes is {max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
+            throw new YamlException($"The input is larger than the largest buffer this reader holds ({ceiling / 2} bytes; limit MaxInputBytes is {max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
         }
 
         byte[] bigger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);

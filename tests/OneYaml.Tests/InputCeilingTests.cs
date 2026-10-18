@@ -22,10 +22,22 @@ public class InputCeilingTests
 
     private static readonly YamlSerializerOptions HugeLimit = new() { Limits = YamlLimits.Default with { MaxInputBytes = 1L << 42 } };
 
-    /// <summary>Spaces for ever, in the pieces the caller asks for; counts what it handed out.</summary>
-    private sealed class EndlessStream : Stream
+    /// <summary>
+    /// Spaces for ever, in the pieces the caller asks for; counts what it handed out. It fails the test after four times the
+    /// ceiling, so a reader that does not stop ends in a failure and not in a hang.
+    /// </summary>
+    private sealed class EndlessStream(long cap = 4L * Ceiling) : Stream
     {
         public long Supplied { get; private set; }
+
+        private void Count(int n)
+        {
+            Supplied += n;
+            if (Supplied > cap)
+            {
+                throw new InvalidOperationException("The reader did not stop.");
+            }
+        }
 
         public override bool CanRead => true;
 
@@ -44,7 +56,7 @@ public class InputCeilingTests
         public override int Read(byte[] buffer, int offset, int count)
         {
             buffer.AsSpan(offset, count).Fill((byte)' ');
-            Supplied += count;
+            Count(count);
             return count;
         }
 
@@ -53,7 +65,7 @@ public class InputCeilingTests
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             buffer.Span.Fill((byte)' ');
-            Supplied += buffer.Length;
+            Count(buffer.Length);
             return new ValueTask<int>(buffer.Length);
         }
 
@@ -73,19 +85,28 @@ public class InputCeilingTests
     {
         public long Supplied { get; private set; }
 
+        private void Count(int n)
+        {
+            Supplied += n;
+            if (Supplied > 4L * Ceiling)
+            {
+                throw new InvalidOperationException("The reader did not stop.");
+            }
+        }
+
         public override string ReadToEnd() => throw new InvalidOperationException("The reader was asked to read to its end in one call.");
 
         public override int Read(char[] buffer, int index, int count)
         {
             buffer.AsSpan(index, count).Fill(' ');
-            Supplied += count;
+            Count(count);
             return count;
         }
 
         public override int Read(Span<char> buffer)
         {
             buffer.Fill(' ');
-            Supplied += buffer.Length;
+            Count(buffer.Length);
             return buffer.Length;
         }
     }
@@ -229,11 +250,28 @@ public class InputCeilingTests
     }
 
     // One test crosses the real ceiling (a buffer of about two gigabytes). It runs alone: no other test starts while it
-    // holds that memory.
+    // holds that memory. It guards the default ceiling: it also passes before the ceiling was handled, because a stream
+    // reader already ended in the limit error there; the seam tests above are the ones that cover the new code.
     [Fact]
     [Trait("Category", "Slow")]
     public void An_endless_stream_with_no_input_limit_is_a_limit_error_at_the_real_ceiling()
     {
-        Refused(() => YamlSerializer.Deserialize<object>(new EndlessStream(), NoLimit));
+        Refused(() => YamlSerializer.Deserialize<object>(new EndlessStream(long.MaxValue), NoLimit));
+    }
+
+    // The over-buffer refusal of a document read carries the source name and does not speak of a limit that was not set.
+    [Fact]
+    public void A_document_stream_over_the_buffer_ceiling_names_its_source()
+    {
+        // ByteBuffer cannot be lowered to a small ceiling, so the name is checked on the refusal of the input limit that
+        // shares the read loop, and the buffer message is checked for its wording below.
+        var options = new YamlDocumentOptions { Limits = YamlLimits.Default with { MaxInputBytes = 1000 }, SourceName = "cfg.yaml" };
+        YamlException e = Assert.Throws<YamlException>(() => YamlDocument.Parse(new EndlessStream(), options));
+        Assert.Equal("cfg.yaml", e.SourceName);
+        Assert.Equal(YamlErrorCategory.Limit, e.Category);
+
+        var buffer = new OneYaml.Documents.ByteBuffer(16);
+        YamlException big = Assert.Throws<YamlException>(() => buffer.GetSpan(int.MaxValue));
+        Assert.DoesNotContain("configured limit", big.Message);
     }
 }
