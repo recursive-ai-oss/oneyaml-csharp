@@ -4,6 +4,8 @@ All notable changes are listed here, newest first. The format follows [Keep a Ch
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-18
+
 ### Fixed
 
 - **A stream or reader too large for one buffer is a `Limit` error, whatever `MaxInputBytes` says.** With no input limit, or a limit above 2 GiB, a stream or reader larger than an array can hold, or one that never ends, could fail with another exception:
@@ -87,7 +89,8 @@ The first release: a YAML 1.2 library for .NET 8 and .NET 10 that reads and writ
 - **What an edit keeps.** Removing an entry also removes the comment lines just above it, replacing a whole mapping or sequence discards the comments inside it, and writes through an alias are refused. There is no API to read or write comments. See [What an edit keeps](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.0.0/docs/editing.md#what-an-edit-keeps-and-what-it-does-not).
 - **The adapters refuse what they cannot do.** Options an adapter cannot follow, such as YamlDotNet's `EnsureRoundtrip` and SharpYaml's layout options, throw `NotSupportedException` instead of being ignored. Each is listed on the adapter's differences page.
 
-[Unreleased]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/recursive-ai-oss/oneyaml-csharp/compare/v1.0.0...v1.1.0

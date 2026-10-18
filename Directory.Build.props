@@ -17,14 +17,14 @@
   </PropertyGroup>
 
   <!-- The three packages check their own shape when packed (EnablePackageValidation) and compare their
-       public API with the published 1.1.0 packages, so a pack fails on a breaking change. -->
+       public API with the published packages of the baseline version below, so a pack fails on a breaking change. -->
   <PropertyGroup>
     <PackageValidationBaselineVersion>1.2.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- One version for the three packages. -->
   <PropertyGroup>
-    <VersionPrefix>1.2.0</VersionPrefix>
+    <VersionPrefix>1.2.1</VersionPrefix>
     <PackageProjectUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</PackageProjectUrl>
     <RepositoryUrl>https://github.com/recursive-ai-oss/oneyaml-csharp</RepositoryUrl>
   </PropertyGroup>

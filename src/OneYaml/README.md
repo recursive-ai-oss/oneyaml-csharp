@@ -10,9 +10,9 @@ How many times faster OneYaml is than the strongest other .NET YAML
 library on each task (wall-clock time, log scale, higher is better; a
 task where OneYaml is slower shows as a slower bar):
 
-![Bar chart: how many times faster OneYaml is than the strongest other .NET YAML library on each task, wall-clock time, log scale, higher is better. The numbers are in the linked results.](https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-light.svg)
+![Bar chart: how many times faster OneYaml is than the strongest other .NET YAML library on each task, wall-clock time, log scale, higher is better. The numbers are in the linked results.](https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.1/docs/img/oneyaml-csharp-hero-light.svg)
 
-[Full results, with every loss and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/performance.md#results-at-a-glance)
+[Full results, with every loss and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/performance.md#results-at-a-glance)
 
 ## Install
 
@@ -54,13 +54,13 @@ record Config(int Replicas, string Script);
 
 ## Documentation
 
-- [README](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/README.md): why OneYaml and where to go;
-  [stability and supported .NET versions](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/stability.md)
-- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/editing.md),
-  [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/limits.md)
-- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/migrate-yamldotnet.md) or
-  [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/migrate-sharpyaml.md);
-  [how OneYaml compares](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/comparison.md)
+- [README](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/README.md): why OneYaml and where to go;
+  [stability and supported .NET versions](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/stability.md)
+- [Serializer](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/serializer.md), [Editing](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/editing.md),
+  [Patches](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/patches.md), [Limits](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/limits.md)
+- Migrating from [YamlDotNet](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/migrate-yamldotnet.md) or
+  [SharpYaml](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/migrate-sharpyaml.md);
+  [how OneYaml compares](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.1/docs/comparison.md)
 - [Changelog](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/CHANGELOG.md) and [security policy](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/main/SECURITY.md)
 
 Report problems at [GitHub issues](https://github.com/recursive-ai-oss/oneyaml-csharp/issues).
