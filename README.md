@@ -17,11 +17,11 @@ slower shows as a slower bar):
 
 <!-- generated:bench-chart -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-dark.svg">
-  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-dark.svg">
+  <img alt="Bar chart: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable. Speeds are over real-world workloads. A mark counts every workload. Loses only outside the real-world workloads: unchanged emit." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-light.svg">
 </picture>
 
-[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.1.1/docs/performance.md)
+[Full results, with memory and the method →](https://github.com/recursive-ai-oss/oneyaml-csharp/blob/v1.2.0/docs/performance.md)
 <!-- end generated -->
 
 ## Why oneyaml-csharp

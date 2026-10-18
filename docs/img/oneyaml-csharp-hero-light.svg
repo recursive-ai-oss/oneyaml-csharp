@@ -1,47 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="281" viewBox="0 0 920 281" role="img" aria-label="Bar chart of the table below: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable.">
-<title>oneyaml-csharp: speed per task against the strongest competitor</title><desc>oneyaml-csharp: speed per task against the strongest competitor. Times faster than the strongest competitor on each task (geometric mean over its workloads), log scale: bars to the right are faster, higher is better, bars to the left are slower. Unchanged emit times the write path of a document that was not edited; a library that keeps the text returns it without rendering, so it is not a rendering speed. A † marks a cell measured differently from the task as specified. typed load 1.24× faster win (ours 45.8 µs vs 56.8 µs; workloads: 1 better, 0 level, 0 worse of 1); generic load 1.33× faster win (ours 22.5 µs vs 30 µs; workloads: 7 better, 0 level, 0 worse of 7); dump 2.40× faster win (ours 5.21 µs vs 12.5 µs; workloads: 6 better, 0 level, 0 worse of 6); document parse 11.6× faster win (ours 16.4 µs vs 191 µs; workloads: 7 better, 0 level, 0 worse of 7); unchanged emit (write-back of an unedited document; not a rendering speed) 2.41× faster win (ours 515 ns vs 1.24 µs; workloads: 7 better, 0 level, 0 worse of 7); edit script 67.1× faster win (ours 8.38 µs vs 563 µs; workloads: 6 better, 0 level, 0 worse of 6); patch (RFC 6902) no rival.</desc>
-<rect width="920" height="281" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="296" viewBox="0 0 920 296" role="img" aria-label="Bar chart of the table below: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable. Speeds are over real-world workloads. A mark counts every workload. Loses only outside the real-world workloads: unchanged emit.">
+<title>oneyaml-csharp: speed per task against the strongest competitor</title><desc>oneyaml-csharp: speed per task against the strongest competitor. Times faster than the strongest competitor on each task (geometric mean over its real-world workloads), log scale: bars to the right are faster, higher is better, bars to the left are slower. The mark beside a bar counts every workload of the task, generated and reference ones included. Unchanged emit times the write path of a document that was not edited; a library that keeps the text returns it without rendering, so it is not a rendering speed. A † marks a cell measured differently from the task as specified. typed load 1.28× faster win (ours 47.5 µs vs 60.7 µs; workloads: 5 better, 0 level, 0 worse of 5; the speed is over the 1 real-world workloads and the mark counts all 5); generic load 1.33× faster win (ours 22.2 µs vs 29.5 µs; workloads: 31 better, 0 level, 0 worse of 31; the speed is over the 7 real-world workloads and the mark counts all 31); dump 2.63× faster win (ours 4.77 µs vs 12.6 µs; workloads: 28 better, 0 level, 0 worse of 28; the speed is over the 6 real-world workloads and the mark counts all 28); document parse 10.8× faster win (ours 17.8 µs vs 193 µs; workloads: 29 better, 0 level, 0 worse of 29; the speed is over the 7 real-world workloads and the mark counts all 29); unchanged emit (write-back of an unedited document; not a rendering speed) 2.48× faster mixed (ours 504 ns vs 1.25 µs; workloads: 26 better, 1 level, 2 worse of 29; the speed is over the 7 real-world workloads and the mark counts all 29, loses 2 of 20 generated workloads); edit script 74.0× faster win (ours 7.48 µs vs 554 µs; workloads: 21 better, 0 level, 0 worse of 21; the speed is over the 6 real-world workloads and the mark counts all 21); patch (RFC 6902) no rival.</desc>
+<rect width="920" height="296" fill="#ffffff"/>
 <g font-family="system-ui, -apple-system, Segoe UI, sans-serif" fill="#1f2328">
 <text x="16" y="24" font-size="15" font-weight="600">oneyaml-csharp: speed per task against the strongest competitor</text>
-<text x="16" y="44" font-size="12" fill="#59636e"><tspan x="16" dy="0">Times faster than the strongest competitor on each task (geometric mean over its workloads), log scale: bars to the right</tspan><tspan x="16" dy="15">are faster, higher is better, bars to the left are slower.</tspan></text>
-<line x1="240.0" y1="73" x2="240.0" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="240.0" y="263" font-size="11" text-anchor="middle" fill="#59636e">1/64×</text>
-<line x1="293.3" y1="73" x2="293.3" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="293.3" y="263" font-size="11" text-anchor="middle" fill="#59636e">1/16×</text>
-<line x1="346.7" y1="73" x2="346.7" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="346.7" y="263" font-size="11" text-anchor="middle" fill="#59636e">1/4×</text>
-<line x1="400.0" y1="73" x2="400.0" y2="247" stroke="#d1d9e0" stroke-width="2" stroke-dasharray="4 3"/>
-<text x="400.0" y="263" font-size="11" text-anchor="middle" fill="#59636e">1×</text>
-<line x1="453.3" y1="73" x2="453.3" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="453.3" y="263" font-size="11" text-anchor="middle" fill="#59636e">4×</text>
-<line x1="506.7" y1="73" x2="506.7" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="506.7" y="263" font-size="11" text-anchor="middle" fill="#59636e">16×</text>
-<line x1="560.0" y1="73" x2="560.0" y2="247" stroke="#d1d9e0" stroke-width="1"/>
-<text x="560.0" y="263" font-size="11" text-anchor="middle" fill="#59636e">64×</text>
-<text x="232" y="94" font-size="12" text-anchor="end">typed load</text>
-<rect x="400.0" y="82" width="8.3" height="16" fill="#1a7f37"/>
-<text x="572.0" y="94" font-size="11" text-anchor="start">1.24× faster  ▲ win</text>
-<text x="742" y="94" font-size="10" fill="#59636e" text-anchor="start">45.8 µs vs 56.8 µs</text>
-<text x="232" y="118" font-size="12" text-anchor="end">generic load</text>
-<rect x="400.0" y="106" width="11.1" height="16" fill="#1a7f37"/>
-<text x="572.0" y="118" font-size="11" text-anchor="start">1.33× faster  ▲ win</text>
-<text x="742" y="118" font-size="10" fill="#59636e" text-anchor="start">22.5 µs vs 30 µs</text>
-<text x="232" y="142" font-size="12" text-anchor="end">dump</text>
-<rect x="400.0" y="130" width="33.7" height="16" fill="#1a7f37"/>
-<text x="572.0" y="142" font-size="11" text-anchor="start">2.40× faster  ▲ win</text>
-<text x="742" y="142" font-size="10" fill="#59636e" text-anchor="start">5.21 µs vs 12.5 µs</text>
-<text x="232" y="166" font-size="12" text-anchor="end">document parse</text>
-<rect x="400.0" y="154" width="94.4" height="16" fill="#1a7f37"/>
-<text x="572.0" y="166" font-size="11" text-anchor="start">11.6× faster  ▲ win</text>
-<text x="742" y="166" font-size="10" fill="#59636e" text-anchor="start">16.4 µs vs 191 µs</text>
-<text x="232" y="190" font-size="12" text-anchor="end">unchanged emit (not rendering)</text>
-<rect x="400.0" y="178" width="33.8" height="16" fill="#1a7f37"/>
-<text x="572.0" y="190" font-size="11" text-anchor="start">2.41× faster  ▲ win</text>
-<text x="742" y="190" font-size="10" fill="#59636e" text-anchor="start">515 ns vs 1.24 µs</text>
-<text x="232" y="214" font-size="12" text-anchor="end">edit script</text>
-<rect x="400.0" y="202" width="160.0" height="16" fill="#1a7f37"/>
-<text x="572.0" y="214" font-size="11" text-anchor="start">67.1× faster ▸  ▲ win</text>
-<text x="742" y="214" font-size="10" fill="#59636e" text-anchor="start">8.38 µs vs 563 µs</text>
-<text x="232" y="238" font-size="12" text-anchor="end">patch (RFC 6902)</text>
-<text x="406.0" y="238" font-size="11">no rival</text>
+<text x="16" y="44" font-size="12" fill="#59636e"><tspan x="16" dy="0">Times faster than the strongest competitor on each task (geometric mean over its real-world workloads), log scale: bars to</tspan><tspan x="16" dy="15">the right are faster, higher is better, bars to the left are slower. The mark beside a bar counts every workload of the</tspan><tspan x="16" dy="15">task, generated and reference ones included.</tspan></text>
+<line x1="240.0" y1="88" x2="240.0" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="240.0" y="278" font-size="11" text-anchor="middle" fill="#59636e">1/64×</text>
+<line x1="293.3" y1="88" x2="293.3" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="293.3" y="278" font-size="11" text-anchor="middle" fill="#59636e">1/16×</text>
+<line x1="346.7" y1="88" x2="346.7" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="346.7" y="278" font-size="11" text-anchor="middle" fill="#59636e">1/4×</text>
+<line x1="400.0" y1="88" x2="400.0" y2="262" stroke="#d1d9e0" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="400.0" y="278" font-size="11" text-anchor="middle" fill="#59636e">1×</text>
+<line x1="453.3" y1="88" x2="453.3" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="453.3" y="278" font-size="11" text-anchor="middle" fill="#59636e">4×</text>
+<line x1="506.7" y1="88" x2="506.7" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="506.7" y="278" font-size="11" text-anchor="middle" fill="#59636e">16×</text>
+<line x1="560.0" y1="88" x2="560.0" y2="262" stroke="#d1d9e0" stroke-width="1"/>
+<text x="560.0" y="278" font-size="11" text-anchor="middle" fill="#59636e">64×</text>
+<text x="232" y="109" font-size="12" text-anchor="end">typed load</text>
+<rect x="400.0" y="97" width="9.4" height="16" fill="#1a7f37"/>
+<text x="572.0" y="109" font-size="11" text-anchor="start">1.28× faster  ▲ win</text>
+<text x="742" y="109" font-size="10" fill="#59636e" text-anchor="start">47.5 µs vs 60.7 µs</text>
+<text x="232" y="133" font-size="12" text-anchor="end">generic load</text>
+<rect x="400.0" y="121" width="10.8" height="16" fill="#1a7f37"/>
+<text x="572.0" y="133" font-size="11" text-anchor="start">1.33× faster  ▲ win</text>
+<text x="742" y="133" font-size="10" fill="#59636e" text-anchor="start">22.2 µs vs 29.5 µs</text>
+<text x="232" y="157" font-size="12" text-anchor="end">dump</text>
+<rect x="400.0" y="145" width="37.2" height="16" fill="#1a7f37"/>
+<text x="572.0" y="157" font-size="11" text-anchor="start">2.63× faster  ▲ win</text>
+<text x="742" y="157" font-size="10" fill="#59636e" text-anchor="start">4.77 µs vs 12.6 µs</text>
+<text x="232" y="181" font-size="12" text-anchor="end">document parse</text>
+<rect x="400.0" y="169" width="91.6" height="16" fill="#1a7f37"/>
+<text x="572.0" y="181" font-size="11" text-anchor="start">10.8× faster  ▲ win</text>
+<text x="742" y="181" font-size="10" fill="#59636e" text-anchor="start">17.8 µs vs 193 µs</text>
+<text x="232" y="205" font-size="12" text-anchor="end">unchanged emit (not rendering)</text>
+<rect x="400.0" y="193" width="35.0" height="16" fill="#9a6700"/>
+<text x="572.0" y="205" font-size="11" text-anchor="start">2.48× faster  ◆ mixed (loses 2 of 20 generated workloads)</text>
+<text x="742" y="205" font-size="10" fill="#59636e" text-anchor="start">504 ns vs 1.25 µs</text>
+<text x="232" y="229" font-size="12" text-anchor="end">edit script</text>
+<rect x="400.0" y="217" width="160.0" height="16" fill="#1a7f37"/>
+<text x="572.0" y="229" font-size="11" text-anchor="start">74.0× faster ▸  ▲ win</text>
+<text x="742" y="229" font-size="10" fill="#59636e" text-anchor="start">7.48 µs vs 554 µs</text>
+<text x="232" y="253" font-size="12" text-anchor="end">patch (RFC 6902)</text>
+<text x="406.0" y="253" font-size="11">no rival</text>
 </g></svg>

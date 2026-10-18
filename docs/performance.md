@@ -20,25 +20,25 @@ One row per task: our time and the strongest competitor's, each the geometric me
 
 <!-- generated:bench-hero -->
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-dark.svg">
-  <img alt="Bar chart of the table below: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 6 better, 0 level, 0 mixed, 0 worse, 1 not comparable." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.1.1/docs/img/oneyaml-csharp-hero-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-dark.svg">
+  <img alt="Bar chart of the table below: how many times faster oneyaml-csharp is than the strongest competitor on each task, log scale, higher is better. 7 tasks: 5 better, 0 level, 1 mixed, 0 worse, 1 not comparable. Speeds are over real-world workloads. A mark counts every workload. Loses only outside the real-world workloads: unchanged emit." src="https://raw.githubusercontent.com/recursive-ai-oss/oneyaml-csharp/v1.2.0/docs/img/oneyaml-csharp-hero-light.svg">
 </picture>
 
 | Task | `oneyaml-csharp` time (geometric mean) | Strongest competitor | Its time (geometric mean) | Speed against it (its time ÷ ours; higher is better) | Verdict |
 |---|---|---|---|---|---|
-| typed load | 45.8 µs | `vyaml 1.4.1` | 56.8 µs | 1.24× faster | ▲ win |
-| generic load | 22.5 µs | `vyaml 1.4.1` | 30 µs | 1.33× faster | ▲ win |
-| dump | 5.21 µs | `sharpyaml 3.16.0` (3 of 6), `vyaml 1.4.1` (3 of 6) | 12.5 µs | 2.40× faster | ▲ win |
-| document parse | 16.4 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: bytes-only) | 191 µs | 11.6× faster | ▲ win |
-| unchanged emit (write-back of an unedited document; not a rendering speed) | 515 ns | `sharpyaml-syntax 3.16.0` | 1.24 µs | 2.41× faster | ▲ win |
-| edit script | 8.38 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: harness-rendered) | 563 µs | 67.1× faster | ▲ win |
+| typed load | 47.5 µs | `vyaml 1.4.1` | 60.7 µs | 1.28× faster | ▲ win |
+| generic load | 22.2 µs | `vyaml 1.4.1` | 29.5 µs | 1.33× faster | ▲ win |
+| dump | 4.77 µs | `sharpyaml 3.16.0` (4 of 6), `vyaml 1.4.1` (2 of 6) | 12.6 µs | 2.63× faster | ▲ win |
+| document parse | 17.8 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: bytes-only) | 193 µs | 10.8× faster | ▲ win |
+| unchanged emit (write-back of an unedited document; not a rendering speed) | 504 ns | `sharpyaml-syntax 3.16.0` | 1.25 µs | 2.48× faster | ◆ mixed (loses 2 of 20 generated workloads) |
+| edit script | 7.48 µs | `sharpyaml-syntax 3.16.0` † (sharpyaml-syntax: harness-rendered) | 554 µs | 74.0× faster | ▲ win |
 | patch (RFC 6902) | — | — | — | — | no rival |
 
 Not in a row's mean: patch (RFC 6902): no competitor answer: `compose-wordpress`, `gha-workflow`.
 
-Each row is the geometric mean, over the real-world workloads the task has, of our time and of the time of the strongest competitor in each workload. Speed is the competitor's time divided by ours: 2× faster means half the time, and a loss is stated as slower. Where several competitors were strongest the column names them all, with how often. A † marks a cell measured differently from the task as specified; the note beside each mark says how. A marked competitor still counts. A workload where our library has no number is listed and the row is marked as partial, never counted as a win. The verdict is never better than the per-workload verdicts allow: a row with a losing workload is marked mixed or loss, and a row with no winning workload is never marked a win. Memory and the count of better, level and worse workloads in each row are on the full page.
+Each row is the geometric mean, over the real-world workloads the task has, of our time and of the time of the strongest competitor in each workload. Speed is the competitor's time divided by ours: 2× faster means half the time, and a loss is stated as slower. Where several competitors were strongest the column names them all, with how often. A † marks a cell measured differently from the task as specified; the note beside each mark says how. A marked competitor still counts. A workload where our library has no number is listed and the row is marked as partial, never counted as a win. The verdict is never better than the per-workload verdicts allow: a row with a losing workload is marked mixed or loss, and a row with no winning workload is never marked a win. The speed is over the real-world workloads. The verdict is never better than the real-world workloads allow, nor better than all of the task's workloads allow, generated and reference ones included: a loss on any of them keeps a row from being a clean win and the row says how many it lost, and a win on them cannot lift a row the real-world workloads do not win. Memory and the count of better, level and worse workloads in each row are on the full page.
 
-Method: **full run** of 2026-10-17T14:35:16Z. Kit 0.1.0 (revision 621332b49f74). `oneyaml-csharp 68c7df1aecb0`; competitors `yamldotnet 18.1.0`, `sharpyaml 3.16.0`, `sharpyaml-model 3.16.0`, `sharpyaml-syntax 3.16.0`, `vyaml 1.4.1`, `yaml2jsonnode 3.0.1`, `oneyaml-csharp-gen 68c7df1aecb0`. Runtime .NET 10.0.11 (target linux-x64), measured with BenchmarkDotNet 0.15.8: mean time per task from BenchmarkDotNet's ShortRun job (3 warm-up and 3 measured iterations) run in process; one invocation per iteration runs a batch of prepared tasks and the time is divided by the batch size; every cell is measured in a process of its own, because the heap that earlier cells leave behind changed the result. Each process runs with DOTNET_TC_CallCountingDelayMs=0 (call counting starts immediately instead of after the default delay), and no other DOTNET_ or COMPlus_ variable set, and every cell is first warmed up for 1000 ms of whole batches before BenchmarkDotNet's own warm-up, because a new process starts at the runtime's unoptimised tier. Memory: bytes allocated per task from BenchmarkDotNet's MemoryDiagnoser; allocation calls are not available. AMD Ryzen 9 7950X3D 16-Core Processor (125.0 GiB), Linux 7.0.0-34-generic (x86_64), measured on a shared workstation (32 logical CPUs; load 3.62 before, 4.84 after, at most 11.25 during).
+Method: **full run** of 2026-10-18T00:48:41Z. Kit 0.1.0 (revision 6cc83d12fbc6); text generated by kit revision c1647a46aa6d. `oneyaml-csharp c23a19250217`; competitors `yamldotnet 18.1.0`, `sharpyaml 3.16.0`, `sharpyaml-model 3.16.0`, `sharpyaml-syntax 3.16.0`, `vyaml 1.4.1`, `yaml2jsonnode 3.0.1`, `oneyaml-csharp-gen c23a19250217`. Runtime .NET 10.0.11 (target linux-x64), measured with BenchmarkDotNet 0.15.8: mean time per task from BenchmarkDotNet's ShortRun job (3 warm-up and 3 measured iterations) run in process; one invocation per iteration runs a batch of prepared tasks and the time is divided by the batch size; every cell is measured in a process of its own, because the heap that earlier cells leave behind changed the result. Each process runs with DOTNET_TC_CallCountingDelayMs=0 (call counting starts immediately instead of after the default delay), and no other DOTNET_ or COMPlus_ variable set, and every cell is first warmed up for 1000 ms of whole batches before BenchmarkDotNet's own warm-up, because a new process starts at the runtime's unoptimised tier. Memory: bytes allocated per task from BenchmarkDotNet's MemoryDiagnoser; allocation calls are not available. AMD Ryzen 9 7950X3D 16-Core Processor (125.0 GiB), Linux 7.0.0-34-generic (x86_64), measured on a shared workstation (32 logical CPUs; load 3.72 before, 4.52 after, at most 8.48 during).
 <!-- end generated -->
 
 ## Results
@@ -50,201 +50,201 @@ Every task and workload, time and memory, from the same run.
 
 | Task | Workload | Input | `oneyaml-csharp` | `yamldotnet` | `sharpyaml` | `sharpyaml-model` | `sharpyaml-syntax` | `vyaml` | `yaml2jsonnode` | `oneyaml-csharp-gen` | Ours vs strongest competitor |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| typed load | `gha-workflow` | 9.43 KiB | 45.8 µs | 346 µs | 148 µs | unsupported | unsupported | 56.8 µs | 257 µs | 44.5 µs | 0.81× of `vyaml` ▲ win |
-| typed load | `records-4k` | 4.14 KiB | 34.2 µs | 294 µs | 102 µs | unsupported | unsupported | 43.4 µs | 188 µs | 35.2 µs | 0.79× of `vyaml` ▲ win |
-| typed load | `records-64k` | 64.2 KiB | 538 µs | 4.39 ms | 1.62 ms | unsupported | unsupported | 657 µs | 3.15 ms | 533 µs | 0.82× of `vyaml` ▲ win |
-| typed load | `records-1m` | 1 MiB | 8.69 ms | 72.3 ms | 27.5 ms | unsupported | unsupported | 10.2 ms | 91.9 ms | 8.17 ms | 0.85× of `vyaml` ▲ win |
-| typed load | `records-8m` | 8 MiB | 69.5 ms | 648 ms | 256 ms | unsupported | unsupported | 82.8 ms | 943 ms | 68.6 ms | 0.84× of `vyaml` ▲ win |
-| generic load | `compose-wordpress` | 815 B | 4.46 µs | 28.7 µs | 12.4 µs | 12.6 µs | unsupported | 5.18 µs | 21.4 µs | 3.87 µs | 0.86× of `vyaml` ▲ win |
-| generic load | `gha-workflow` | 9.43 KiB | 47.9 µs | 352 µs | 150 µs | 134 µs | unsupported | 66.8 µs | 212 µs | 47 µs | 0.72× of `vyaml` ▲ win |
-| generic load | `helm-ingress-nginx` | 52.4 KiB | 74 µs | 755 µs | 346 µs | 339 µs | unsupported | 100 µs | 596 µs | 79.2 µs | 0.74× of `vyaml` ▲ win |
-| generic load | `k8s-ingress-nginx-multi` | 16 KiB | 105 µs | 758 µs | unsupported | 318 µs | unsupported | 134 µs | 471 µs | 95.1 µs | 0.78× of `vyaml` ▲ win |
-| generic load | `openapi-api-with-examples` | 6.75 KiB | 20.5 µs | 138 µs | 63.7 µs | 60.8 µs | unsupported | 28.9 µs | 90.6 µs | 20.5 µs | 0.71× of `vyaml` ▲ win |
-| generic load | `openapi-petstore` | 5.34 KiB | 26.3 µs | 180 µs | 78.9 µs | 74.5 µs | unsupported | 40.9 µs | 116 µs | 26.1 µs | 0.64× of `vyaml` ▲ win |
-| generic load | `prometheus-config` | 1.1 KiB | 3.29 µs | 26.9 µs | 9.99 µs | 10.5 µs | unsupported | 4 µs | 15 µs | 3.26 µs | 0.82× of `vyaml` ▲ win |
-| generic load | `reference-a` | 51 B | 681 ns | 4.68 µs | 1.99 µs | 1.96 µs | unsupported | 949 ns | 3.3 µs | 727 ns | 0.72× of `vyaml` ▲ win |
-| generic load | `reference-b` | 51 B | 632 ns | 4.67 µs | 1.92 µs | 1.97 µs | unsupported | 719 ns | 3.21 µs | 637 ns | 0.88× of `vyaml` ▲ win |
-| generic load | `records-4k` | 4.14 KiB | 42.8 µs | 273 µs | 112 µs | 103 µs | unsupported | 58.8 µs | 173 µs | 41.5 µs | 0.73× of `vyaml` ▲ win |
-| generic load | `records-64k` | 64.2 KiB | 626 µs | 4.62 ms | 1.84 ms | 1.68 ms | unsupported | 893 µs | 2.73 ms | 717 µs | 0.70× of `vyaml` ▲ win |
-| generic load | `records-1m` | 1 MiB | 9.68 ms | 81.2 ms | 28.7 ms | 31.7 ms | unsupported | 14.5 ms | 73.4 ms | 9.94 ms | 0.67× of `vyaml` ▲ win |
-| generic load | `records-8m` | 8 MiB | 106 ms | 779 ms | 430 ms | 558 ms | unsupported | 140 ms | 914 ms | 94.9 ms | 0.75× of `vyaml` ▲ win |
-| generic load | `compose-merge-2k` | 2.14 KiB | 19.4 µs | 133 µs | 52.9 µs (merged) | 55.1 µs | unsupported | 28.2 µs | 83.8 µs | 18.3 µs | 0.69× of `vyaml` ▲ win |
-| generic load | `compose-merge-64k` | 64.1 KiB | 501 µs | 3.79 ms | 1.66 ms (merged) | 1.72 ms | unsupported | 784 µs | 2.6 ms | 546 µs | 0.64× of `vyaml` ▲ win |
-| generic load | `compose-merge-1m` | 1 MiB | 8.4 ms | 81.1 ms | 41 ms (merged) | 53.3 ms | unsupported | 11.7 ms | 98.3 ms | 8.11 ms | 0.72× of `vyaml` ▲ win |
-| generic load | `k8s-multi-16k` | 16.4 KiB | 166 µs | 1.18 ms | unsupported | 458 µs | unsupported | 210 µs | 695 µs | 166 µs | 0.79× of `vyaml` ▲ win |
-| generic load | `k8s-multi-1m` | 1 MiB | 10.3 ms | 109 ms | unsupported | 37.1 ms | unsupported | 12.5 ms | 88.2 ms | 10 ms | 0.82× of `vyaml` ▲ win |
-| generic load | `openapi-100k` | 101 KiB | 782 µs | 5.45 ms | 2.14 ms | 2.25 ms | unsupported | 1.13 ms | 3.56 ms | 902 µs | 0.69× of `vyaml` ▲ win |
-| generic load | `openapi-8m` | 8 MiB | 63.5 ms | 601 ms | 318 ms | 467 ms | unsupported | 109 ms | 717 ms | 62.7 ms | 0.58× of `vyaml` ▲ win |
-| generic load | `helm-values-64k` | 64 KiB | 345 µs | 2.58 ms | 1.09 ms | 1.15 ms | unsupported | 500 µs | 1.68 ms | 328 µs | 0.69× of `vyaml` ▲ win |
-| generic load | `helm-values-1m` | 1 MiB | 5.75 ms | 54.2 ms | 28.2 ms | 22.8 ms | unsupported | 7.47 ms | 56.2 ms | 5.8 ms | 0.77× of `vyaml` ▲ win |
-| generic load | `deep-block` | 5.23 KiB | 16.2 µs | 112 µs | rejects [1] | rejects [6] | unsupported | 17.6 µs | 65.1 µs | 17.6 µs | 0.92× of `vyaml` ▲ win |
-| generic load | `deep-flow` | 202 B | 8.99 µs | 64.6 µs | rejects [1] | rejects [6] | unsupported | 22 µs | 37.8 µs | 8.91 µs | 0.41× of `vyaml` ▲ win |
-| generic load | `wide-map-64k` | 64 KiB | 592 µs | 4.56 ms | 1.87 ms | 1.93 ms | unsupported | 810 µs | 3.02 ms | 658 µs | 0.73× of `vyaml` ▲ win |
-| generic load | `wide-map-1m` | 1 MiB | 9.72 ms | 74.8 ms | 40.7 ms | 37.5 ms | unsupported | 12.4 ms | 78.8 ms | 9.65 ms | 0.78× of `vyaml` ▲ win |
-| generic load | `long-scalars-256k` | 261 KiB | 326 µs | 2.41 ms | 2.09 ms | 2.24 ms | unsupported | 1.2 ms | 2.28 ms | 326 µs | 0.27× of `vyaml` ▲ win |
-| generic load | `flow-heavy-64k` | 64 KiB | 1.15 ms | 7.65 ms | 2.95 ms | 2.77 ms | unsupported | 1.38 ms | 4.68 ms | 1.09 ms | 0.83× of `vyaml` ▲ win |
-| generic load | `anchors-32k` | 32 KiB | 383 µs | 2.19 ms | 925 µs | 1.76 ms | unsupported | 577 µs | 2.27 ms | 389 µs | 0.66× of `vyaml` ▲ win |
-| generic load | `unicode-32k` | 32 KiB | 156 µs | 791 µs | 399 µs | 361 µs | unsupported | 278 µs | 562 µs | 155 µs | 0.56× of `vyaml` ▲ win |
-| generic load | `scalar-styles-32k` | 32 KiB | 219 µs | 1.29 ms | 574 µs | 564 µs | unsupported | 305 µs | 815 µs | 228 µs | 0.72× of `vyaml` ▲ win |
-| dump | `compose-wordpress` | 815 B | 1.38 µs | 25.7 µs | 4.94 µs | 18.1 µs | unsupported | 5.4 µs | 57.7 µs | 1.49 µs | 0.28× of `sharpyaml` ▲ win |
-| dump | `gha-workflow` | 9.43 KiB | 13.6 µs | 251 µs | 34.4 µs | differs [5] | unsupported | 28.3 µs | 214 µs | 13.8 µs | 0.48× of `vyaml` ▲ win |
-| dump | `helm-ingress-nginx` | 52.4 KiB | 17.9 µs | 340 µs | 32.6 µs | 259 µs | unsupported | differs [11] | 246 µs | 18.8 µs | 0.55× of `sharpyaml` ▲ win |
-| dump | `openapi-api-with-examples` | 6.75 KiB | 7.82 µs | 110 µs | 13.6 µs | 78.5 µs | unsupported | 14.8 µs | 112 µs | 7.15 µs | 0.57× of `sharpyaml` ▲ win |
-| dump | `openapi-petstore` | 5.34 KiB | 9.1 µs | 160 µs | 22 µs | 148 µs | unsupported | 20.7 µs | 154 µs | 10.4 µs | 0.44× of `vyaml` ▲ win |
-| dump | `prometheus-config` | 1.1 KiB | 839 ns | 19.8 µs | 3.21 µs | 9.05 µs | unsupported | 3.01 µs | 47.9 µs | 825 ns | 0.28× of `vyaml` ▲ win |
-| dump | `reference-a` | 51 B | 240 ns | 4.59 µs | 1.66 µs | 1.16 µs | unsupported | differs [9] | 39.9 µs | 229 ns | 0.21× of `sharpyaml-model` ▲ win |
-| dump | `reference-b` | 51 B | 237 ns | 4.48 µs | 1.5 µs | 1.2 µs | unsupported | differs [9] | 40.2 µs | 227 ns | 0.20× of `sharpyaml-model` ▲ win |
-| dump | `records-4k` | 4.14 KiB | 14.1 µs | differs [14] | differs [2] | 122 µs | unsupported | differs [10] | 155 µs | 14.2 µs | 0.12× of `sharpyaml-model` ▲ win |
-| dump | `records-64k` | 64.2 KiB | 173 µs | differs [14] | differs [2] | 2.01 ms | unsupported | differs [10] | 1.92 ms | 169 µs | 0.09× of `yaml2jsonnode` ▲ win |
-| dump | `records-1m` | 1 MiB | 3.11 ms | differs [14] | differs [2] | 30.4 ms | unsupported | differs [10] | 39.6 ms | 3.14 ms | 0.10× of `sharpyaml-model` ▲ win |
-| dump | `records-8m` | 8 MiB | 28.1 ms | differs [14] | differs [2] | 283 ms | unsupported | differs [10] | 576 ms | 27 ms | 0.10× of `sharpyaml-model` ▲ win |
-| dump | `compose-merge-2k` | 2.14 KiB | 8.88 µs | 112 µs | 20 µs (merged) | 112 µs | unsupported | 20.9 µs | 142 µs | 9.79 µs | 0.44× of `sharpyaml` ▲ win |
-| dump | `compose-merge-64k` | 64.1 KiB | 265 µs | 2.82 ms | 585 µs (merged) | 2.27 ms | unsupported | 544 µs | 3.35 ms | 274 µs | 0.49× of `vyaml` ▲ win |
-| dump | `compose-merge-1m` | 1 MiB | 4.13 ms | 51 ms | 10.9 ms (merged) | 54.1 ms | unsupported | 9.6 ms | 95.6 ms | 4.26 ms | 0.43× of `vyaml` ▲ win |
-| dump | `openapi-100k` | 101 KiB | 261 µs | 3.97 ms | 553 µs | 1.85 ms | unsupported | 465 µs | 2.5 ms | 235 µs | 0.56× of `vyaml` ▲ win |
-| dump | `openapi-8m` | 8 MiB | 23.1 ms | 419 ms | 55.3 ms | 212 ms | unsupported | 40.5 ms | 469 ms | 24 ms | 0.57× of `vyaml` ▲ win |
-| dump | `helm-values-64k` | 64 KiB | 63.9 µs | 1.56 ms | 155 µs | 1.07 ms | unsupported | 184 µs | 1.17 ms | 66 µs | 0.41× of `sharpyaml` ▲ win |
-| dump | `helm-values-1m` | 1 MiB | 1.45 ms | 31.2 ms | 3.27 ms | 20.2 ms | unsupported | 3.29 ms | 26.8 ms | 1.27 ms | 0.44× of `sharpyaml` ▲ win |
-| dump | `deep-block` | 5.23 KiB | 4.97 µs | rejects [13] | rejects [1] | rejects [6] | unsupported | 11.8 µs | 90.7 µs | 4.83 µs | 0.42× of `vyaml` ▲ win |
-| dump | `deep-flow` | 202 B | 2.16 µs | rejects [13] | rejects [1] | rejects [6] | unsupported | 6.86 µs | 54.6 µs | 2.41 µs | 0.31× of `vyaml` ▲ win |
-| dump | `wide-map-64k` | 64 KiB | 164 µs | 2.29 ms | 292 µs | 2.16 ms | unsupported | 290 µs | 2.37 ms | 163 µs | 0.57× of `vyaml` ▲ win |
-| dump | `wide-map-1m` | 1 MiB | 1.97 ms | 34.6 ms | 4.25 ms | 31.2 ms | unsupported | 3.89 ms | 33.9 ms | 1.97 ms | 0.51× of `vyaml` ▲ win |
-| dump | `long-scalars-256k` | 261 KiB | 119 µs | 4.09 ms | 755 µs | differs [4] | unsupported | differs [8] | 3.93 ms | 115 µs | 0.16× of `sharpyaml` ▲ win |
-| dump | `flow-heavy-64k` | 64 KiB | 251 µs | 6.37 ms | 646 µs | 2 ms | unsupported | 563 µs | 2.73 ms | 254 µs | 0.45× of `vyaml` ▲ win |
-| dump | `anchors-32k` | 32 KiB | 430 µs | 1.14 ms | 866 µs | 2.91 ms | unsupported | 864 µs | 4.56 ms | 417 µs | 0.50× of `vyaml` ▲ win |
-| dump | `unicode-32k` | 32 KiB | 44.6 µs | 569 µs | 108 µs | differs [3] | unsupported | 52.2 µs | 427 µs | 44.9 µs | 0.85× of `vyaml` ▲ win |
-| dump | `scalar-styles-32k` | 32 KiB | 68.6 µs | 913 µs | 125 µs | 751 µs | unsupported | differs [9] | 623 µs | 72.5 µs | 0.55× of `sharpyaml` ▲ win |
-| document parse | `compose-wordpress` | 815 B | 2.77 µs | unsupported | unsupported | unsupported | 27.9 µs (bytes-only) † | unsupported | unsupported | 3.24 µs | 0.10× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `gha-workflow` | 9.43 KiB | 36.6 µs | unsupported | unsupported | unsupported | 447 µs (bytes-only) † | unsupported | unsupported | 36.6 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `helm-ingress-nginx` | 52.4 KiB | 64.2 µs | unsupported | unsupported | unsupported | 1.09 ms (bytes-only) † | unsupported | unsupported | 62.4 µs | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `k8s-ingress-nginx-multi` | 16 KiB | 72.3 µs | unsupported | unsupported | unsupported | 841 µs (bytes-only) † | unsupported | unsupported | 74.8 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `openapi-api-with-examples` | 6.75 KiB | 15 µs | unsupported | unsupported | unsupported | 154 µs (bytes-only) † | unsupported | unsupported | 15.4 µs | 0.10× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `openapi-petstore` | 5.34 KiB | 18.8 µs | unsupported | unsupported | unsupported | 208 µs (bytes-only) † | unsupported | unsupported | 19 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `prometheus-config` | 1.1 KiB | 2.4 µs | unsupported | unsupported | unsupported | 25.3 µs (bytes-only) † | unsupported | unsupported | 2.4 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `reference-a` | 51 B | 608 ns | unsupported | unsupported | unsupported | 4.27 µs (bytes-only) † | unsupported | unsupported | 654 ns | 0.14× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `reference-b` | 51 B | 636 ns | unsupported | unsupported | unsupported | 4.39 µs (bytes-only) † | unsupported | unsupported | 634 ns | 0.14× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `records-4k` | 4.14 KiB | 31 µs | unsupported | unsupported | unsupported | 268 µs (bytes-only) † | unsupported | unsupported | 31.5 µs | 0.12× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `records-64k` | 64.2 KiB | 466 µs | unsupported | unsupported | unsupported | 5.8 ms (bytes-only) † | unsupported | unsupported | 479 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `records-1m` | 1 MiB | 7.13 ms | unsupported | unsupported | unsupported | 119 ms (bytes-only) † | unsupported | unsupported | 8.07 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `records-8m` | 8 MiB | 59.5 ms | unsupported | unsupported | unsupported | 1.09 s (bytes-only) † | unsupported | unsupported | 59.8 ms | 0.05× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `compose-merge-2k` | 2.14 KiB | 13.9 µs | unsupported | unsupported | unsupported | 116 µs (bytes-only) † | unsupported | unsupported | 14.8 µs | 0.12× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `compose-merge-64k` | 64.1 KiB | 391 µs | unsupported | unsupported | unsupported | 5.15 ms (bytes-only) † | unsupported | unsupported | 385 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `compose-merge-1m` | 1 MiB | 6.1 ms | unsupported | unsupported | unsupported | 102 ms (bytes-only) † | unsupported | unsupported | 6.13 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `k8s-multi-16k` | 16.4 KiB | 119 µs | unsupported | unsupported | unsupported | 1.36 ms (bytes-only) † | unsupported | unsupported | 119 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `k8s-multi-1m` | 1 MiB | 7.22 ms | unsupported | unsupported | unsupported | 123 ms (bytes-only) † | unsupported | unsupported | 7.29 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `openapi-100k` | 101 KiB | 558 µs | unsupported | unsupported | unsupported | 7.13 ms (bytes-only) † | unsupported | unsupported | 543 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `openapi-8m` | 8 MiB | 45.6 ms | unsupported | unsupported | unsupported | 878 ms (bytes-only) † | unsupported | unsupported | 44.2 ms | 0.05× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `helm-values-64k` | 64 KiB | 280 µs | unsupported | unsupported | unsupported | 3.55 ms (bytes-only) † | unsupported | unsupported | 276 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `helm-values-1m` | 1 MiB | 4.68 ms | unsupported | unsupported | unsupported | 80 ms (bytes-only) † | unsupported | unsupported | 4.41 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `deep-block` | 5.23 KiB | 11.6 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 11.4 µs | no rival |
-| document parse | `deep-flow` | 202 B | 5.75 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 6.03 µs | no rival |
-| document parse | `wide-map-64k` | 64 KiB | 447 µs | unsupported | unsupported | unsupported | 4.84 ms (bytes-only) † | unsupported | unsupported | 434 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `wide-map-1m` | 1 MiB | 5.92 ms | unsupported | unsupported | unsupported | 104 ms (bytes-only) † | unsupported | unsupported | 6.22 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `long-scalars-256k` | 261 KiB | 39.9 µs | unsupported | unsupported | unsupported | 8.42 ms (bytes-only) † | unsupported | unsupported | 40.7 µs | <0.01× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `flow-heavy-64k` | 64 KiB | 845 µs | unsupported | unsupported | unsupported | 10.7 ms (bytes-only) † | unsupported | unsupported | 864 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `anchors-32k` | 32 KiB | 330 µs | unsupported | unsupported | unsupported | 4.09 ms (bytes-only) † | unsupported | unsupported | 326 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `unicode-32k` | 32 KiB | 91.6 µs | unsupported | unsupported | unsupported | 1.49 ms (bytes-only) † | unsupported | unsupported | 91.4 µs | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| document parse | `scalar-styles-32k` | 32 KiB | 149 µs | unsupported | unsupported | unsupported | 2.02 ms (bytes-only) † | unsupported | unsupported | 153 µs | 0.07× of `sharpyaml-syntax` † (bytes-only) ▲ win |
-| unchanged emit | `compose-wordpress` | 815 B | 95.1 ns | unsupported | unsupported | unsupported | 188 ns | unsupported | unsupported | 58.9 ns | 0.51× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `gha-workflow` | 9.43 KiB | 1.11 µs | unsupported | unsupported | unsupported | 2.17 µs | unsupported | unsupported | 1.17 µs | 0.51× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `helm-ingress-nginx` | 52.4 KiB | 1.42 µs | unsupported | unsupported | unsupported | 7.71 µs | unsupported | unsupported | 3.5 µs | 0.18× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `k8s-ingress-nginx-multi` | 16 KiB | 2.04 µs | unsupported | unsupported | unsupported | 2.51 µs | unsupported | unsupported | 1.55 µs | 0.81× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `openapi-api-with-examples` | 6.75 KiB | 655 ns | unsupported | unsupported | unsupported | 1.55 µs | unsupported | unsupported | 1.1 µs | 0.42× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `openapi-petstore` | 5.34 KiB | 606 ns | unsupported | unsupported | unsupported | 1.35 µs | unsupported | unsupported | 561 ns | 0.45× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `prometheus-config` | 1.1 KiB | 79.2 ns | unsupported | unsupported | unsupported | 274 ns | unsupported | unsupported | 149 ns | 0.29× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `reference-a` | 51 B | 12.3 ns | unsupported | unsupported | unsupported | 17.6 ns | unsupported | unsupported | 12.8 ns | 0.70× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `reference-b` | 51 B | 11.2 ns | unsupported | unsupported | unsupported | 16.7 ns | unsupported | unsupported | 11.6 ns | 0.67× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `records-4k` | 4.14 KiB | 568 ns | unsupported | unsupported | unsupported | 2.58 µs | unsupported | unsupported | 599 ns | 0.22× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `records-64k` | 64.2 KiB | 5.37 µs | unsupported | unsupported | unsupported | 9.2 µs | unsupported | unsupported | 3.19 µs | 0.58× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `records-1m` | 1 MiB | 33.5 µs | unsupported | unsupported | unsupported | 305 µs | unsupported | unsupported | 37.7 µs | 0.11× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `records-8m` | 8 MiB | 693 µs | unsupported | unsupported | unsupported | 4.17 ms | unsupported | unsupported | 657 µs | 0.17× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `compose-merge-2k` | 2.14 KiB | 374 ns | unsupported | unsupported | unsupported | 836 ns | unsupported | unsupported | 467 ns | 0.45× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `compose-merge-64k` | 64.1 KiB | 4.61 µs | unsupported | unsupported | unsupported | 9.76 µs | unsupported | unsupported | 4.93 µs | 0.47× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `compose-merge-1m` | 1 MiB | 83.9 µs | unsupported | unsupported | unsupported | 200 µs | unsupported | unsupported | 95 µs | 0.42× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `k8s-multi-16k` | 16.4 KiB | 1.07 µs | unsupported | unsupported | unsupported | 2.63 µs | unsupported | unsupported | 1.66 µs | 0.41× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `k8s-multi-1m` | 1 MiB | 71.8 µs | unsupported | unsupported | unsupported | 208 µs | unsupported | unsupported | 55 µs | 0.35× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `openapi-100k` | 101 KiB | 22.4 µs | unsupported | unsupported | unsupported | 15.8 µs | unsupported | unsupported | 24.9 µs | 1.42× of `sharpyaml-syntax` ▼ loss |
-| unchanged emit | `openapi-8m` | 8 MiB | 3.21 ms | unsupported | unsupported | unsupported | 4 ms | unsupported | unsupported | 3.24 ms | 0.80× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `helm-values-64k` | 64 KiB | 3.4 µs | unsupported | unsupported | unsupported | 8.48 µs | unsupported | unsupported | 4.99 µs | 0.40× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `helm-values-1m` | 1 MiB | 26.6 µs | unsupported | unsupported | unsupported | 194 µs | unsupported | unsupported | 37.9 µs | 0.14× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `deep-block` | 5.23 KiB | 1.11 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 1.36 µs | no rival |
-| unchanged emit | `deep-flow` | 202 B | 30.3 ns | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 35.2 ns | no rival |
-| unchanged emit | `wide-map-64k` | 64 KiB | 3.01 µs | unsupported | unsupported | unsupported | 8.82 µs | unsupported | unsupported | 3.78 µs | 0.34× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `wide-map-1m` | 1 MiB | 36 µs | unsupported | unsupported | unsupported | 205 µs | unsupported | unsupported | 38 µs | 0.18× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `long-scalars-256k` | 261 KiB | 39 µs | unsupported | unsupported | unsupported | 32.8 µs | unsupported | unsupported | 38.6 µs | 1.19× of `sharpyaml-syntax` ▼ loss |
-| unchanged emit | `flow-heavy-64k` | 64 KiB | 6.07 µs | unsupported | unsupported | unsupported | 9.97 µs | unsupported | unsupported | 4.88 µs | 0.61× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `anchors-32k` | 32 KiB | 2.68 µs | unsupported | unsupported | unsupported | 4.56 µs | unsupported | unsupported | 5.73 µs | 0.59× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `unicode-32k` | 32 KiB | 4.21 µs | unsupported | unsupported | unsupported | 9.87 µs | unsupported | unsupported | 3.49 µs | 0.43× of `sharpyaml-syntax` ▲ win |
-| unchanged emit | `scalar-styles-32k` | 32 KiB | 1.12 µs | unsupported | unsupported | unsupported | 5.09 µs | unsupported | unsupported | 1.16 µs | 0.22× of `sharpyaml-syntax` ▲ win |
-| edit script | `compose-wordpress` | 815 B | 5.58 µs | unsupported | unsupported | unsupported | 129 µs (harness-rendered) † | unsupported | unsupported | 5.66 µs | 0.04× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `gha-workflow` | 9.43 KiB | 10.4 µs | unsupported | unsupported | unsupported | 2.74 ms (harness-rendered) † | unsupported | unsupported | 13.4 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-ingress-nginx` | 52.4 KiB | 31.6 µs | unsupported | unsupported | unsupported | 5.92 ms (harness-rendered) † | unsupported | unsupported | 38 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-api-with-examples` | 6.75 KiB | 5.95 µs | unsupported | unsupported | unsupported | 340 µs (harness-rendered) † | unsupported | unsupported | 7.87 µs | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-petstore` | 5.34 KiB | 11 µs | unsupported | unsupported | unsupported | 758 µs (harness-rendered) † | unsupported | unsupported | 9.11 µs | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `prometheus-config` | 1.1 KiB | 2.91 µs | unsupported | unsupported | unsupported | 58.8 µs (harness-rendered) † | unsupported | unsupported | 2.9 µs | 0.05× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `reference-a` | 51 B | 1.45 µs | unsupported | unsupported | unsupported | 6.27 µs (harness-rendered) † | unsupported | unsupported | 1.48 µs | 0.23× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `reference-b` | 51 B | 1.44 µs | unsupported | unsupported | unsupported | 5.24 µs (harness-rendered) † | unsupported | unsupported | 1.48 µs | 0.27× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-4k` | 4.14 KiB | 10.2 µs | unsupported | unsupported | unsupported | 1.21 ms (harness-rendered) † | unsupported | unsupported | 10.6 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-64k` | 64.2 KiB | 69 µs | unsupported | unsupported | unsupported | 33.5 ms (harness-rendered) † | unsupported | unsupported | 71.9 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-1m` | 1 MiB | 1.3 ms | unsupported | unsupported | unsupported | 581 ms (harness-rendered) † | unsupported | unsupported | 1.29 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-8m` | 8 MiB | 25.1 ms | unsupported | unsupported | unsupported | 4.57 s (harness-rendered) † | unsupported | unsupported | 25.7 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-2k` | 2.14 KiB | 7.11 µs | unsupported | unsupported | unsupported | 389 µs (harness-rendered) † | unsupported | unsupported | 8.46 µs | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-64k` | 64.1 KiB | 98.3 µs | unsupported | unsupported | unsupported | 20.9 ms (harness-rendered) † | unsupported | unsupported | 94.3 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-1m` | 1 MiB | 1.48 ms | unsupported | unsupported | unsupported | 387 ms (harness-rendered) † | unsupported | unsupported | 1.69 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-100k` | 101 KiB | 126 µs | unsupported | unsupported | unsupported | 32.6 ms (harness-rendered) † | unsupported | unsupported | 103 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-8m` | 8 MiB | 18 ms | unsupported | unsupported | unsupported | 2.94 s (harness-rendered) † | unsupported | unsupported | 17.4 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-values-64k` | 64 KiB | 59.8 µs | unsupported | unsupported | unsupported | 16.5 ms (harness-rendered) † | unsupported | unsupported | 65.7 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-values-1m` | 1 MiB | 1.32 ms | unsupported | unsupported | unsupported | 302 ms (harness-rendered) † | unsupported | unsupported | 1.21 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `wide-map-64k` | 64 KiB | 124 µs | unsupported | unsupported | unsupported | 16.5 ms (harness-rendered) † | unsupported | unsupported | 119 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `wide-map-1m` | 1 MiB | 2.11 ms | unsupported | unsupported | unsupported | 253 ms (harness-rendered) † | unsupported | unsupported | 2.06 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| patch (RFC 6902) | `compose-wordpress` | 815 B | 4.72 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 4.46 µs | no rival |
-| patch (RFC 6902) | `gha-workflow` | 9.43 KiB | 8.29 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 8.79 µs | no rival |
-| patch (RFC 6902) | `reference-a` | 51 B | 1.6 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 1.36 µs | no rival |
-| patch (RFC 6902) | `reference-b` | 51 B | 1.43 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 1.4 µs | no rival |
-| patch (RFC 6902) | `records-4k` | 4.14 KiB | 7.54 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 7.36 µs | no rival |
-| patch (RFC 6902) | `records-64k` | 64.2 KiB | 46.3 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 44 µs | no rival |
-| patch (RFC 6902) | `records-1m` | 1 MiB | 1.07 ms | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 794 µs | no rival |
-| patch (RFC 6902) | `records-8m` | 8 MiB | 13.5 ms | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 14 ms | no rival |
+| typed load | `gha-workflow` | 9.43 KiB | 47.5 µs | 355 µs | 139 µs | unsupported | unsupported | 60.7 µs | 247 µs | 47.3 µs | 0.78× of `vyaml` ▲ win |
+| typed load | `records-4k` | 4.14 KiB | 33.9 µs | 281 µs | 102 µs | unsupported | unsupported | 42.9 µs | 193 µs | 33.7 µs | 0.79× of `vyaml` ▲ win |
+| typed load | `records-64k` | 64.2 KiB | 561 µs | 4.59 ms | 1.66 ms | unsupported | unsupported | 712 µs | 3.13 ms | 563 µs | 0.79× of `vyaml` ▲ win |
+| typed load | `records-1m` | 1 MiB | 8.56 ms | 72.7 ms | 27.4 ms | unsupported | unsupported | 10.4 ms | 93.7 ms | 8.49 ms | 0.83× of `vyaml` ▲ win |
+| typed load | `records-8m` | 8 MiB | 70.2 ms | 668 ms | 261 ms | unsupported | unsupported | 85.1 ms | 983 ms | 67.2 ms | 0.83× of `vyaml` ▲ win |
+| generic load | `compose-wordpress` | 815 B | 3.98 µs | 29.8 µs | 13.9 µs | 11.1 µs | unsupported | 5.1 µs | 17.2 µs | 4.12 µs | 0.78× of `vyaml` ▲ win |
+| generic load | `gha-workflow` | 9.43 KiB | 50.9 µs | 337 µs | 146 µs | 140 µs | unsupported | 70.9 µs | 239 µs | 49.6 µs | 0.72× of `vyaml` ▲ win |
+| generic load | `helm-ingress-nginx` | 52.4 KiB | 73.3 µs | 692 µs | 334 µs | 325 µs | unsupported | 103 µs | 545 µs | 73.5 µs | 0.71× of `vyaml` ▲ win |
+| generic load | `k8s-ingress-nginx-multi` | 16 KiB | 103 µs | 776 µs | unsupported | 292 µs | unsupported | 131 µs | 459 µs | 101 µs | 0.79× of `vyaml` ▲ win |
+| generic load | `openapi-api-with-examples` | 6.75 KiB | 20.8 µs | 141 µs | 60.8 µs | 61.1 µs | unsupported | 25.9 µs | 95.6 µs | 20.4 µs | 0.80× of `vyaml` ▲ win |
+| generic load | `openapi-petstore` | 5.34 KiB | 25.1 µs | 191 µs | 80.5 µs | 74.2 µs | unsupported | 38.6 µs | 115 µs | 28.8 µs | 0.65× of `vyaml` ▲ win |
+| generic load | `prometheus-config` | 1.1 KiB | 3.37 µs | 25.2 µs | 10.1 µs | 10.1 µs | unsupported | 3.97 µs | 15.6 µs | 3.36 µs | 0.85× of `vyaml` ▲ win |
+| generic load | `reference-a` | 51 B | 617 ns | 4.94 µs | 2.04 µs | 1.99 µs | unsupported | 739 ns | 3.94 µs | 1.11 µs | 0.83× of `vyaml` ▲ win |
+| generic load | `reference-b` | 51 B | 637 ns | 4.67 µs | 2 µs | 1.9 µs | unsupported | 739 ns | 3.24 µs | 609 ns | 0.86× of `vyaml` ▲ win |
+| generic load | `records-4k` | 4.14 KiB | 43.7 µs | 284 µs | 111 µs | 103 µs | unsupported | 55.2 µs | 166 µs | 44.3 µs | 0.79× of `vyaml` ▲ win |
+| generic load | `records-64k` | 64.2 KiB | 640 µs | 4.41 ms | 1.81 ms | 1.79 ms | unsupported | 897 µs | 2.93 ms | 640 µs | 0.71× of `vyaml` ▲ win |
+| generic load | `records-1m` | 1 MiB | 10.7 ms | 84.8 ms | 29.5 ms | 32.8 ms | unsupported | 13.7 ms | 76.8 ms | 10 ms | 0.78× of `vyaml` ▲ win |
+| generic load | `records-8m` | 8 MiB | 99.6 ms | 773 ms | 434 ms | 589 ms | unsupported | 134 ms | 910 ms | 110 ms | 0.75× of `vyaml` ▲ win |
+| generic load | `compose-merge-2k` | 2.14 KiB | 18.7 µs | 138 µs | 57.3 µs (merged) | 62.6 µs | unsupported | 27.5 µs | 87.4 µs | 19.1 µs | 0.68× of `vyaml` ▲ win |
+| generic load | `compose-merge-64k` | 64.1 KiB | 556 µs | 3.79 ms | 1.73 ms (merged) | 1.81 ms | unsupported | 769 µs | 2.67 ms | 508 µs | 0.72× of `vyaml` ▲ win |
+| generic load | `compose-merge-1m` | 1 MiB | 8.14 ms | 78.3 ms | 41.3 ms (merged) | 56.2 ms | unsupported | 12.3 ms | 95.6 ms | 8.28 ms | 0.66× of `vyaml` ▲ win |
+| generic load | `k8s-multi-16k` | 16.4 KiB | 177 µs | 1.16 ms | unsupported | 455 µs | unsupported | 212 µs | 719 µs | 169 µs | 0.83× of `vyaml` ▲ win |
+| generic load | `k8s-multi-1m` | 1 MiB | 10.2 ms | 110 ms | unsupported | 33.2 ms | unsupported | 14.5 ms | 89.9 ms | 11.1 ms | 0.70× of `vyaml` ▲ win |
+| generic load | `openapi-100k` | 101 KiB | 803 µs | 5.38 ms | 2.21 ms | 2.23 ms | unsupported | 1.01 ms | 3.64 ms | 881 µs | 0.79× of `vyaml` ▲ win |
+| generic load | `openapi-8m` | 8 MiB | 60.5 ms | 603 ms | 312 ms | 453 ms | unsupported | 105 ms | 701 ms | 60.1 ms | 0.58× of `vyaml` ▲ win |
+| generic load | `helm-values-64k` | 64 KiB | 347 µs | 2.54 ms | 1.11 ms | 1.06 ms | unsupported | 470 µs | 1.72 ms | 338 µs | 0.74× of `vyaml` ▲ win |
+| generic load | `helm-values-1m` | 1 MiB | 5.46 ms | 56.3 ms | 25.8 ms | 22 ms | unsupported | 7.23 ms | 55 ms | 6.21 ms | 0.76× of `vyaml` ▲ win |
+| generic load | `deep-block` | 5.23 KiB | 16.3 µs | 116 µs | rejects [1] | rejects [6] | unsupported | 18.3 µs | 65.8 µs | 16.2 µs | 0.89× of `vyaml` ▲ win |
+| generic load | `deep-flow` | 202 B | 8.93 µs | 67.3 µs | rejects [1] | rejects [6] | unsupported | 22 µs | 38.3 µs | 9.62 µs | 0.41× of `vyaml` ▲ win |
+| generic load | `wide-map-64k` | 64 KiB | 644 µs | 4.56 ms | 2.01 ms | 2.05 ms | unsupported | 811 µs | 2.9 ms | 610 µs | 0.79× of `vyaml` ▲ win |
+| generic load | `wide-map-1m` | 1 MiB | 10.9 ms | 79.2 ms | 39.7 ms | 40.4 ms | unsupported | 14.1 ms | 87.9 ms | 11.1 ms | 0.77× of `vyaml` ▲ win |
+| generic load | `long-scalars-256k` | 261 KiB | 322 µs | 2.41 ms | 2.1 ms | 2.24 ms | unsupported | 1.35 ms | 2.34 ms | 308 µs | 0.24× of `vyaml` ▲ win |
+| generic load | `flow-heavy-64k` | 64 KiB | 1.12 ms | 7.51 ms | 2.95 ms | 2.67 ms | unsupported | 1.31 ms | 4.73 ms | 1.09 ms | 0.85× of `vyaml` ▲ win |
+| generic load | `anchors-32k` | 32 KiB | 381 µs | 2.14 ms | 907 µs | 1.84 ms | unsupported | 572 µs | 2.08 ms | 384 µs | 0.67× of `vyaml` ▲ win |
+| generic load | `unicode-32k` | 32 KiB | 156 µs | 811 µs | 391 µs | 372 µs | unsupported | 246 µs | 554 µs | 177 µs | 0.63× of `vyaml` ▲ win |
+| generic load | `scalar-styles-32k` | 32 KiB | 218 µs | 1.28 ms | 588 µs | 599 µs | unsupported | 320 µs | 824 µs | 234 µs | 0.68× of `vyaml` ▲ win |
+| dump | `compose-wordpress` | 815 B | 1.33 µs | 23.6 µs | 4.8 µs | 15.5 µs | unsupported | 5.29 µs | 53.9 µs | 1.31 µs | 0.28× of `sharpyaml` ▲ win |
+| dump | `gha-workflow` | 9.43 KiB | 12.5 µs | 255 µs | 32.7 µs | differs [5] | unsupported | 27 µs | 217 µs | 12.7 µs | 0.46× of `vyaml` ▲ win |
+| dump | `helm-ingress-nginx` | 52.4 KiB | 17.7 µs | 351 µs | 31.8 µs | 251 µs | unsupported | differs [11] | 253 µs | 18.4 µs | 0.56× of `sharpyaml` ▲ win |
+| dump | `openapi-api-with-examples` | 6.75 KiB | 5.9 µs | 111 µs | 13.3 µs | 74.7 µs | unsupported | 14.6 µs | 117 µs | 6.62 µs | 0.44× of `sharpyaml` ▲ win |
+| dump | `openapi-petstore` | 5.34 KiB | 8.41 µs | 155 µs | 21.8 µs | 139 µs | unsupported | 20.2 µs | 147 µs | 8.8 µs | 0.42× of `vyaml` ▲ win |
+| dump | `prometheus-config` | 1.1 KiB | 816 ns | 19.3 µs | 3.55 µs | 9.68 µs | unsupported | 4.18 µs | 48.5 µs | 837 ns | 0.23× of `sharpyaml` ▲ win |
+| dump | `reference-a` | 51 B | 239 ns | 4.52 µs | 1.46 µs | 1.14 µs | unsupported | differs [9] | 42.5 µs | 242 ns | 0.21× of `sharpyaml-model` ▲ win |
+| dump | `reference-b` | 51 B | 241 ns | 4.62 µs | 1.74 µs | 1.38 µs | unsupported | differs [9] | 41.1 µs | 238 ns | 0.18× of `sharpyaml-model` ▲ win |
+| dump | `records-4k` | 4.14 KiB | 13.4 µs | differs [14] | differs [2] | 121 µs | unsupported | differs [10] | 154 µs | 13.6 µs | 0.11× of `sharpyaml-model` ▲ win |
+| dump | `records-64k` | 64.2 KiB | 174 µs | differs [14] | differs [2] | 1.99 ms | unsupported | differs [10] | 1.89 ms | 168 µs | 0.09× of `yaml2jsonnode` ▲ win |
+| dump | `records-1m` | 1 MiB | 3.11 ms | differs [14] | differs [2] | 33.4 ms | unsupported | differs [10] | 41.1 ms | 3.28 ms | 0.09× of `sharpyaml-model` ▲ win |
+| dump | `records-8m` | 8 MiB | 30.4 ms | differs [14] | differs [2] | 285 ms | unsupported | differs [10] | 582 ms | 26.5 ms | 0.11× of `sharpyaml-model` ▲ win |
+| dump | `compose-merge-2k` | 2.14 KiB | 9.01 µs | 109 µs | 18.6 µs (merged) | 105 µs | unsupported | 23.2 µs | 140 µs | 9.34 µs | 0.48× of `sharpyaml` ▲ win |
+| dump | `compose-merge-64k` | 64.1 KiB | 265 µs | 2.95 ms | 628 µs (merged) | 2.49 ms | unsupported | 533 µs | 3.07 ms | 270 µs | 0.50× of `vyaml` ▲ win |
+| dump | `compose-merge-1m` | 1 MiB | 4.3 ms | 51 ms | 11.4 ms (merged) | 52 ms | unsupported | 8.98 ms | 88.8 ms | 4.39 ms | 0.48× of `vyaml` ▲ win |
+| dump | `openapi-100k` | 101 KiB | 231 µs | 4.29 ms | 525 µs | 1.82 ms | unsupported | 439 µs | 2.45 ms | 234 µs | 0.53× of `vyaml` ▲ win |
+| dump | `openapi-8m` | 8 MiB | 21.9 ms | 384 ms | 55.2 ms | 228 ms | unsupported | 39.3 ms | 480 ms | 21.6 ms | 0.56× of `vyaml` ▲ win |
+| dump | `helm-values-64k` | 64 KiB | 72.6 µs | 1.57 ms | 156 µs | 1.18 ms | unsupported | 180 µs | 1.19 ms | 69.9 µs | 0.47× of `sharpyaml` ▲ win |
+| dump | `helm-values-1m` | 1 MiB | 1.22 ms | 27.8 ms | 2.78 ms | 20.2 ms | unsupported | 2.88 ms | 24.2 ms | 1.33 ms | 0.44× of `sharpyaml` ▲ win |
+| dump | `deep-block` | 5.23 KiB | 4.52 µs | rejects [13] | rejects [1] | rejects [6] | unsupported | 11.2 µs | 95.4 µs | 4.48 µs | 0.40× of `vyaml` ▲ win |
+| dump | `deep-flow` | 202 B | 2.18 µs | rejects [13] | rejects [1] | rejects [6] | unsupported | 7.17 µs | 56.7 µs | 2.23 µs | 0.30× of `vyaml` ▲ win |
+| dump | `wide-map-64k` | 64 KiB | 159 µs | 2.29 ms | 290 µs | 2.11 ms | unsupported | 290 µs | 2.44 ms | 159 µs | 0.55× of `vyaml` ▲ win |
+| dump | `wide-map-1m` | 1 MiB | 1.97 ms | 33.8 ms | 4.72 ms | 32.2 ms | unsupported | 3.95 ms | 33.7 ms | 1.97 ms | 0.50× of `vyaml` ▲ win |
+| dump | `long-scalars-256k` | 261 KiB | 110 µs | 4.03 ms | 719 µs | differs [4] | unsupported | differs [8] | 3.66 ms | 122 µs | 0.15× of `sharpyaml` ▲ win |
+| dump | `flow-heavy-64k` | 64 KiB | 245 µs | 5.89 ms | 617 µs | 1.94 ms | unsupported | 571 µs | 2.73 ms | 243 µs | 0.43× of `vyaml` ▲ win |
+| dump | `anchors-32k` | 32 KiB | 418 µs | 1.18 ms | 849 µs | 3.22 ms | unsupported | 872 µs | 4.43 ms | 428 µs | 0.49× of `sharpyaml` ▲ win |
+| dump | `unicode-32k` | 32 KiB | 47 µs | 584 µs | 112 µs | differs [3] | unsupported | 50.6 µs | 416 µs | 48.7 µs | 0.93× of `vyaml` ▲ win |
+| dump | `scalar-styles-32k` | 32 KiB | 71.1 µs | 923 µs | 123 µs | 723 µs | unsupported | differs [9] | 603 µs | 70.4 µs | 0.58× of `sharpyaml` ▲ win |
+| document parse | `compose-wordpress` | 815 B | 4.6 µs | unsupported | unsupported | unsupported | 29.9 µs (bytes-only) † | unsupported | unsupported | 2.73 µs | 0.15× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `gha-workflow` | 9.43 KiB | 36 µs | unsupported | unsupported | unsupported | 431 µs (bytes-only) † | unsupported | unsupported | 40.3 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `helm-ingress-nginx` | 52.4 KiB | 64.5 µs | unsupported | unsupported | unsupported | 1.14 ms (bytes-only) † | unsupported | unsupported | 61.8 µs | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `k8s-ingress-nginx-multi` | 16 KiB | 72.8 µs | unsupported | unsupported | unsupported | 858 µs (bytes-only) † | unsupported | unsupported | 78.2 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `openapi-api-with-examples` | 6.75 KiB | 16.8 µs | unsupported | unsupported | unsupported | 151 µs (bytes-only) † | unsupported | unsupported | 14.9 µs | 0.11× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `openapi-petstore` | 5.34 KiB | 18 µs | unsupported | unsupported | unsupported | 193 µs (bytes-only) † | unsupported | unsupported | 17.7 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `prometheus-config` | 1.1 KiB | 2.4 µs | unsupported | unsupported | unsupported | 26.9 µs (bytes-only) † | unsupported | unsupported | 2.35 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `reference-a` | 51 B | 619 ns | unsupported | unsupported | unsupported | 4.5 µs (bytes-only) † | unsupported | unsupported | 610 ns | 0.14× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `reference-b` | 51 B | 594 ns | unsupported | unsupported | unsupported | 4.3 µs (bytes-only) † | unsupported | unsupported | 609 ns | 0.14× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `records-4k` | 4.14 KiB | 30.8 µs | unsupported | unsupported | unsupported | 271 µs (bytes-only) † | unsupported | unsupported | 30.8 µs | 0.11× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `records-64k` | 64.2 KiB | 472 µs | unsupported | unsupported | unsupported | 6.38 ms (bytes-only) † | unsupported | unsupported | 514 µs | 0.07× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `records-1m` | 1 MiB | 7.52 ms | unsupported | unsupported | unsupported | 121 ms (bytes-only) † | unsupported | unsupported | 7.38 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `records-8m` | 8 MiB | 60.1 ms | unsupported | unsupported | unsupported | 1.13 s (bytes-only) † | unsupported | unsupported | 59.1 ms | 0.05× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `compose-merge-2k` | 2.14 KiB | 14 µs | unsupported | unsupported | unsupported | 128 µs (bytes-only) † | unsupported | unsupported | 17.3 µs | 0.11× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `compose-merge-64k` | 64.1 KiB | 449 µs | unsupported | unsupported | unsupported | 5.29 ms (bytes-only) † | unsupported | unsupported | 406 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `compose-merge-1m` | 1 MiB | 6.32 ms | unsupported | unsupported | unsupported | 109 ms (bytes-only) † | unsupported | unsupported | 6.08 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `k8s-multi-16k` | 16.4 KiB | 124 µs | unsupported | unsupported | unsupported | 1.33 ms (bytes-only) † | unsupported | unsupported | 125 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `k8s-multi-1m` | 1 MiB | 8.08 ms | unsupported | unsupported | unsupported | 119 ms (bytes-only) † | unsupported | unsupported | 7.49 ms | 0.07× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `openapi-100k` | 101 KiB | 544 µs | unsupported | unsupported | unsupported | 6.89 ms (bytes-only) † | unsupported | unsupported | 554 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `openapi-8m` | 8 MiB | 48.5 ms | unsupported | unsupported | unsupported | 840 ms (bytes-only) † | unsupported | unsupported | 43.1 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `helm-values-64k` | 64 KiB | 275 µs | unsupported | unsupported | unsupported | 3.48 ms (bytes-only) † | unsupported | unsupported | 277 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `helm-values-1m` | 1 MiB | 4.3 ms | unsupported | unsupported | unsupported | 79.9 ms (bytes-only) † | unsupported | unsupported | 4.54 ms | 0.05× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `deep-block` | 5.23 KiB | 11.5 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 11.3 µs | no rival |
+| document parse | `deep-flow` | 202 B | 6.17 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 6.6 µs | no rival |
+| document parse | `wide-map-64k` | 64 KiB | 452 µs | unsupported | unsupported | unsupported | 4.83 ms (bytes-only) † | unsupported | unsupported | 455 µs | 0.09× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `wide-map-1m` | 1 MiB | 5.86 ms | unsupported | unsupported | unsupported | 101 ms (bytes-only) † | unsupported | unsupported | 5.9 ms | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `long-scalars-256k` | 261 KiB | 41.8 µs | unsupported | unsupported | unsupported | 8.75 ms (bytes-only) † | unsupported | unsupported | 39.3 µs | <0.01× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `flow-heavy-64k` | 64 KiB | 874 µs | unsupported | unsupported | unsupported | 10.3 ms (bytes-only) † | unsupported | unsupported | 874 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `anchors-32k` | 32 KiB | 320 µs | unsupported | unsupported | unsupported | 4.1 ms (bytes-only) † | unsupported | unsupported | 322 µs | 0.08× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `unicode-32k` | 32 KiB | 96.3 µs | unsupported | unsupported | unsupported | 1.65 ms (bytes-only) † | unsupported | unsupported | 101 µs | 0.06× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| document parse | `scalar-styles-32k` | 32 KiB | 159 µs | unsupported | unsupported | unsupported | 2.15 ms (bytes-only) † | unsupported | unsupported | 209 µs | 0.07× of `sharpyaml-syntax` † (bytes-only) ▲ win |
+| unchanged emit | `compose-wordpress` | 815 B | 55.7 ns | unsupported | unsupported | unsupported | 222 ns | unsupported | unsupported | 64.7 ns | 0.25× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `gha-workflow` | 9.43 KiB | 1.15 µs | unsupported | unsupported | unsupported | 2.1 µs | unsupported | unsupported | 868 ns | 0.55× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `helm-ingress-nginx` | 52.4 KiB | 2.59 µs | unsupported | unsupported | unsupported | 7.12 µs | unsupported | unsupported | 1.58 µs | 0.36× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `k8s-ingress-nginx-multi` | 16 KiB | 1.33 µs | unsupported | unsupported | unsupported | 2.45 µs | unsupported | unsupported | 1.24 µs | 0.54× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `openapi-api-with-examples` | 6.75 KiB | 997 ns | unsupported | unsupported | unsupported | 1.55 µs | unsupported | unsupported | 1.06 µs | 0.64× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `openapi-petstore` | 5.34 KiB | 626 ns | unsupported | unsupported | unsupported | 1.38 µs | unsupported | unsupported | 622 ns | 0.45× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `prometheus-config` | 1.1 KiB | 59.8 ns | unsupported | unsupported | unsupported | 275 ns | unsupported | unsupported | 85.2 ns | 0.22× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `reference-a` | 51 B | 11.6 ns | unsupported | unsupported | unsupported | 17.5 ns | unsupported | unsupported | 11.5 ns | 0.66× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `reference-b` | 51 B | 11.2 ns | unsupported | unsupported | unsupported | 15 ns | unsupported | unsupported | 16.6 ns | 0.75× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `records-4k` | 4.14 KiB | 540 ns | unsupported | unsupported | unsupported | 2.53 µs | unsupported | unsupported | 567 ns | 0.21× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `records-64k` | 64.2 KiB | 4.12 µs | unsupported | unsupported | unsupported | 9.38 µs | unsupported | unsupported | 3.73 µs | 0.44× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `records-1m` | 1 MiB | 49 µs | unsupported | unsupported | unsupported | 206 µs | unsupported | unsupported | 51 µs | 0.24× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `records-8m` | 8 MiB | 745 µs | unsupported | unsupported | unsupported | 4.2 ms | unsupported | unsupported | 660 µs | 0.18× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `compose-merge-2k` | 2.14 KiB | 419 ns | unsupported | unsupported | unsupported | 869 ns | unsupported | unsupported | 286 ns | 0.48× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `compose-merge-64k` | 64.1 KiB | 4.75 µs | unsupported | unsupported | unsupported | 8.46 µs | unsupported | unsupported | 5.46 µs | 0.56× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `compose-merge-1m` | 1 MiB | 82.2 µs | unsupported | unsupported | unsupported | 191 µs | unsupported | unsupported | 82.7 µs | 0.43× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `k8s-multi-16k` | 16.4 KiB | 1.27 µs | unsupported | unsupported | unsupported | 2.44 µs | unsupported | unsupported | 1.21 µs | 0.52× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `k8s-multi-1m` | 1 MiB | 51.8 µs | unsupported | unsupported | unsupported | 220 µs | unsupported | unsupported | 70 µs | 0.24× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `openapi-100k` | 101 KiB | 26.3 µs | unsupported | unsupported | unsupported | 13.3 µs | unsupported | unsupported | 23 µs | 1.97× of `sharpyaml-syntax` ▼ loss |
+| unchanged emit | `openapi-8m` | 8 MiB | 3.14 ms | unsupported | unsupported | unsupported | 4.09 ms | unsupported | unsupported | 3.17 ms | 0.77× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `helm-values-64k` | 64 KiB | 2.74 µs | unsupported | unsupported | unsupported | 8.94 µs | unsupported | unsupported | 3.81 µs | 0.31× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `helm-values-1m` | 1 MiB | 40.4 µs | unsupported | unsupported | unsupported | 181 µs | unsupported | unsupported | 39.6 µs | 0.22× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `deep-block` | 5.23 KiB | 1.35 µs | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 454 ns | no rival |
+| unchanged emit | `deep-flow` | 202 B | 31.2 ns | unsupported | unsupported | unsupported | rejects [7] | unsupported | unsupported | 28.9 ns | no rival |
+| unchanged emit | `wide-map-64k` | 64 KiB | 3.63 µs | unsupported | unsupported | unsupported | 8.96 µs | unsupported | unsupported | 4.41 µs | 0.40× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `wide-map-1m` | 1 MiB | 45.4 µs | unsupported | unsupported | unsupported | 201 µs | unsupported | unsupported | 40.2 µs | 0.23× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `long-scalars-256k` | 261 KiB | 36.8 µs | unsupported | unsupported | unsupported | 32 µs | unsupported | unsupported | 36.1 µs | 1.15× of `sharpyaml-syntax` ▼ loss |
+| unchanged emit | `flow-heavy-64k` | 64 KiB | 5.31 µs | unsupported | unsupported | unsupported | 10.3 µs | unsupported | unsupported | 5.2 µs | 0.52× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `anchors-32k` | 32 KiB | 5.4 µs | unsupported | unsupported | unsupported | 5.37 µs | unsupported | unsupported | 5.27 µs | 1.01× of `sharpyaml-syntax` ● tie |
+| unchanged emit | `unicode-32k` | 32 KiB | 4.2 µs | unsupported | unsupported | unsupported | 12.1 µs | unsupported | unsupported | 4.62 µs | 0.35× of `sharpyaml-syntax` ▲ win |
+| unchanged emit | `scalar-styles-32k` | 32 KiB | 1.17 µs | unsupported | unsupported | unsupported | 4.71 µs | unsupported | unsupported | 1.28 µs | 0.25× of `sharpyaml-syntax` ▲ win |
+| edit script | `compose-wordpress` | 815 B | 5.15 µs | unsupported | unsupported | unsupported | 116 µs (harness-rendered) † | unsupported | unsupported | 5.7 µs | 0.04× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `gha-workflow` | 9.43 KiB | 8.42 µs | unsupported | unsupported | unsupported | 2.76 ms (harness-rendered) † | unsupported | unsupported | 8.6 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-ingress-nginx` | 52.4 KiB | 27.9 µs | unsupported | unsupported | unsupported | 5.78 ms (harness-rendered) † | unsupported | unsupported | 28.2 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-api-with-examples` | 6.75 KiB | 7.16 µs | unsupported | unsupported | unsupported | 350 µs (harness-rendered) † | unsupported | unsupported | 6.55 µs | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-petstore` | 5.34 KiB | 7.92 µs | unsupported | unsupported | unsupported | 778 µs (harness-rendered) † | unsupported | unsupported | 7.28 µs | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `prometheus-config` | 1.1 KiB | 2.57 µs | unsupported | unsupported | unsupported | 57.5 µs (harness-rendered) † | unsupported | unsupported | 3.32 µs | 0.04× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `reference-a` | 51 B | 1.44 µs | unsupported | unsupported | unsupported | 5.22 µs (harness-rendered) † | unsupported | unsupported | 1.45 µs | 0.28× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `reference-b` | 51 B | 1.58 µs | unsupported | unsupported | unsupported | 5.31 µs (harness-rendered) † | unsupported | unsupported | 1.38 µs | 0.30× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-4k` | 4.14 KiB | 8.6 µs | unsupported | unsupported | unsupported | 1.22 ms (harness-rendered) † | unsupported | unsupported | 8.96 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-64k` | 64.2 KiB | 45.4 µs | unsupported | unsupported | unsupported | 33.1 ms (harness-rendered) † | unsupported | unsupported | 42.2 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-1m` | 1 MiB | 740 µs | unsupported | unsupported | unsupported | 624 ms (harness-rendered) † | unsupported | unsupported | 672 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-8m` | 8 MiB | 11.6 ms | unsupported | unsupported | unsupported | 4.55 s (harness-rendered) † | unsupported | unsupported | 11.7 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-2k` | 2.14 KiB | 8.52 µs | unsupported | unsupported | unsupported | 389 µs (harness-rendered) † | unsupported | unsupported | 8.54 µs | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-64k` | 64.1 KiB | 77 µs | unsupported | unsupported | unsupported | 22.1 ms (harness-rendered) † | unsupported | unsupported | 79.1 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-1m` | 1 MiB | 1.33 ms | unsupported | unsupported | unsupported | 412 ms (harness-rendered) † | unsupported | unsupported | 1.23 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-100k` | 101 KiB | 44.5 µs | unsupported | unsupported | unsupported | 31.8 ms (harness-rendered) † | unsupported | unsupported | 50.1 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-8m` | 8 MiB | 9.51 ms | unsupported | unsupported | unsupported | 2.86 s (harness-rendered) † | unsupported | unsupported | 9.46 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-values-64k` | 64 KiB | 56.8 µs | unsupported | unsupported | unsupported | 16.6 ms (harness-rendered) † | unsupported | unsupported | 54 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-values-1m` | 1 MiB | 770 µs | unsupported | unsupported | unsupported | 303 ms (harness-rendered) † | unsupported | unsupported | 756 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `wide-map-64k` | 64 KiB | 125 µs | unsupported | unsupported | unsupported | 16 ms (harness-rendered) † | unsupported | unsupported | 116 µs | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `wide-map-1m` | 1 MiB | 1.86 ms | unsupported | unsupported | unsupported | 254 ms (harness-rendered) † | unsupported | unsupported | 1.84 ms | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| patch (RFC 6902) | `compose-wordpress` | 815 B | 4.52 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 4.73 µs | no rival |
+| patch (RFC 6902) | `gha-workflow` | 9.43 KiB | 8.51 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 8.37 µs | no rival |
+| patch (RFC 6902) | `reference-a` | 51 B | 1.51 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 1.58 µs | no rival |
+| patch (RFC 6902) | `reference-b` | 51 B | 1.45 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 1.42 µs | no rival |
+| patch (RFC 6902) | `records-4k` | 4.14 KiB | 7.5 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 7.45 µs | no rival |
+| patch (RFC 6902) | `records-64k` | 64.2 KiB | 59.2 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 52.1 µs | no rival |
+| patch (RFC 6902) | `records-1m` | 1 MiB | 988 µs | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 1.02 ms | no rival |
+| patch (RFC 6902) | `records-8m` | 8 MiB | 14.8 ms | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 14.4 ms | no rival |
 
 **Allocated bytes per task (MemoryDiagnoser)**
 
 | Task | Workload | Input | `oneyaml-csharp` | `yamldotnet` | `sharpyaml` | `sharpyaml-model` | `sharpyaml-syntax` | `vyaml` | `yaml2jsonnode` | `oneyaml-csharp-gen` | Ours vs strongest competitor |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| typed load | `gha-workflow` | 9.43 KiB | 27.5 KiB | 412 KiB | 204 KiB | unsupported | unsupported | 30.6 KiB | 395 KiB | 27.5 KiB | 0.90× of `vyaml` ▲ win |
-| typed load | `records-4k` | 4.14 KiB | 11.2 KiB | 361 KiB | 156 KiB | unsupported | unsupported | 11.2 KiB | 325 KiB | 11.2 KiB | 1.00× of `vyaml` ● tie |
+| typed load | `gha-workflow` | 9.43 KiB | 27.5 KiB | 397 KiB | 204 KiB | unsupported | unsupported | 30.6 KiB | 395 KiB | 27.5 KiB | 0.90× of `vyaml` ▲ win |
+| typed load | `records-4k` | 4.14 KiB | 11.2 KiB | 349 KiB | 156 KiB | unsupported | unsupported | 11.2 KiB | 325 KiB | 11.2 KiB | 1.00× of `vyaml` ● tie |
 | typed load | `records-64k` | 64.2 KiB | 153 KiB | 5.14 MiB | 2.28 MiB | unsupported | unsupported | 171 KiB | 4.77 MiB | 153 KiB | 0.90× of `vyaml` ▲ win |
 | typed load | `records-1m` | 1 MiB | 2.34 MiB | 80.7 MiB | 35.8 MiB | unsupported | unsupported | 2.64 MiB | 74.9 MiB | 2.34 MiB | 0.89× of `vyaml` ▲ win |
 | typed load | `records-8m` | 8 MiB | 18.6 MiB | 660 MiB | 283 MiB | unsupported | unsupported | 21 MiB | 593 MiB | 18.6 MiB | 0.89× of `vyaml` ▲ win |
-| generic load | `compose-wordpress` | 815 B | 3.34 KiB | 40.7 KiB | 24 KiB | 20.9 KiB | unsupported | 3.6 KiB | 34.3 KiB | 3.34 KiB | 0.93× of `vyaml` ▲ win |
-| generic load | `gha-workflow` | 9.43 KiB | 39.3 KiB | 456 KiB | 237 KiB | 220 KiB | unsupported | 48.2 KiB | 357 KiB | 39.3 KiB | 0.82× of `vyaml` ▲ win |
-| generic load | `helm-ingress-nginx` | 52.4 KiB | 52.9 KiB | 722 KiB | 412 KiB | 392 KiB | unsupported | 67.4 KiB | 599 KiB | 52.9 KiB | 0.78× of `vyaml` ▲ win |
-| generic load | `k8s-ingress-nginx-multi` | 16 KiB | 69.9 KiB | 985 KiB | unsupported | 450 KiB | unsupported | 105 KiB | 758 KiB | 69.9 KiB | 0.67× of `vyaml` ▲ win |
-| generic load | `openapi-api-with-examples` | 6.75 KiB | 20.8 KiB | 202 KiB | 112 KiB | 105 KiB | unsupported | 21.6 KiB | 170 KiB | 20.8 KiB | 0.96× of `vyaml` ▲ win |
-| generic load | `openapi-petstore` | 5.34 KiB | 30.1 KiB | 243 KiB | 143 KiB | 132 KiB | unsupported | 31.5 KiB | 216 KiB | 30.1 KiB | 0.95× of `vyaml` ▲ win |
+| generic load | `compose-wordpress` | 815 B | 3.34 KiB | 42.4 KiB | 24 KiB | 20.9 KiB | unsupported | 3.6 KiB | 34.3 KiB | 3.34 KiB | 0.93× of `vyaml` ▲ win |
+| generic load | `gha-workflow` | 9.43 KiB | 39.3 KiB | 434 KiB | 237 KiB | 220 KiB | unsupported | 48.2 KiB | 357 KiB | 39.3 KiB | 0.82× of `vyaml` ▲ win |
+| generic load | `helm-ingress-nginx` | 52.4 KiB | 52.9 KiB | 690 KiB | 412 KiB | 392 KiB | unsupported | 67.4 KiB | 599 KiB | 52.9 KiB | 0.78× of `vyaml` ▲ win |
+| generic load | `k8s-ingress-nginx-multi` | 16 KiB | 69.9 KiB | 937 KiB | unsupported | 450 KiB | unsupported | 105 KiB | 758 KiB | 69.9 KiB | 0.67× of `vyaml` ▲ win |
+| generic load | `openapi-api-with-examples` | 6.75 KiB | 20.8 KiB | 211 KiB | 112 KiB | 105 KiB | unsupported | 21.6 KiB | 170 KiB | 20.8 KiB | 0.96× of `vyaml` ▲ win |
+| generic load | `openapi-petstore` | 5.34 KiB | 30.1 KiB | 255 KiB | 143 KiB | 132 KiB | unsupported | 31.5 KiB | 216 KiB | 30.1 KiB | 0.95× of `vyaml` ▲ win |
 | generic load | `prometheus-config` | 1.1 KiB | 3.15 KiB | 37.7 KiB | 20.7 KiB | 19.6 KiB | unsupported | 3.3 KiB | 32.1 KiB | 3.15 KiB | 0.95× of `vyaml` ▲ win |
 | generic load | `reference-a` | 51 B | 320 B | 12.5 KiB | 5.09 KiB | 4.97 KiB | unsupported | 392 B | 11.1 KiB | 320 B | 0.82× of `vyaml` ▲ win |
-| generic load | `reference-b` | 51 B | 320 B | 12.5 KiB | 5.09 KiB | 4.97 KiB | unsupported | 392 B | 11.1 KiB | 320 B | 0.82× of `vyaml` ▲ win |
+| generic load | `reference-b` | 51 B | 320 B | 12.3 KiB | 5.09 KiB | 4.97 KiB | unsupported | 392 B | 11.1 KiB | 320 B | 0.82× of `vyaml` ▲ win |
 | generic load | `records-4k` | 4.14 KiB | 34.8 KiB | 378 KiB | 199 KiB | 182 KiB | unsupported | 42 KiB | 313 KiB | 34.8 KiB | 0.83× of `vyaml` ▲ win |
-| generic load | `records-64k` | 64.2 KiB | 414 KiB | 5.89 MiB | 2.93 MiB | 2.67 MiB | unsupported | 648 KiB | 4.61 MiB | 414 KiB | 0.64× of `vyaml` ▲ win |
-| generic load | `records-1m` | 1 MiB | 6.33 MiB | 92.5 MiB | 45.9 MiB | 42 MiB | unsupported | 9.96 MiB | 72.3 MiB | 6.33 MiB | 0.64× of `vyaml` ▲ win |
+| generic load | `records-64k` | 64.2 KiB | 414 KiB | 5.58 MiB | 2.93 MiB | 2.67 MiB | unsupported | 648 KiB | 4.61 MiB | 414 KiB | 0.64× of `vyaml` ▲ win |
+| generic load | `records-1m` | 1 MiB | 6.33 MiB | 87.6 MiB | 45.9 MiB | 42 MiB | unsupported | 9.96 MiB | 72.3 MiB | 6.33 MiB | 0.64× of `vyaml` ▲ win |
 | generic load | `records-8m` | 8 MiB | 50.2 MiB | 693 MiB | 364 MiB | 332 MiB | unsupported | 78.9 MiB | 572 MiB | 50.2 MiB | 0.64× of `vyaml` ▲ win |
 | generic load | `compose-merge-2k` | 2.14 KiB | 16.7 KiB | 179 KiB | 95.3 KiB | 110 KiB | unsupported | 26.6 KiB | 162 KiB | 16.7 KiB | 0.63× of `vyaml` ▲ win |
-| generic load | `compose-merge-64k` | 64.1 KiB | 338 KiB | 4.78 MiB | 2.52 MiB | 3.01 MiB | unsupported | 762 KiB | 4.37 MiB | 338 KiB | 0.44× of `vyaml` ▲ win |
-| generic load | `compose-merge-1m` | 1 MiB | 5.28 MiB | 78.1 MiB | 39.5 MiB | 47 MiB | unsupported | 11.7 MiB | 68.1 MiB | 5.28 MiB | 0.45× of `vyaml` ▲ win |
+| generic load | `compose-merge-64k` | 64.1 KiB | 338 KiB | 5.02 MiB | 2.52 MiB | 3.01 MiB | unsupported | 762 KiB | 4.37 MiB | 338 KiB | 0.44× of `vyaml` ▲ win |
+| generic load | `compose-merge-1m` | 1 MiB | 5.28 MiB | 74.4 MiB | 39.5 MiB | 47 MiB | unsupported | 11.7 MiB | 68.1 MiB | 5.28 MiB | 0.45× of `vyaml` ▲ win |
 | generic load | `k8s-multi-16k` | 16.4 KiB | 138 KiB | 1.61 MiB | unsupported | 804 KiB | unsupported | 184 KiB | 1.33 MiB | 138 KiB | 0.75× of `vyaml` ▲ win |
-| generic load | `k8s-multi-1m` | 1 MiB | 8.15 MiB | 103 MiB | unsupported | 48 MiB | unsupported | 11 MiB | 81 MiB | 8.15 MiB | 0.74× of `vyaml` ▲ win |
-| generic load | `openapi-100k` | 101 KiB | 611 KiB | 7.38 MiB | 3.72 MiB | 3.41 MiB | unsupported | 829 KiB | 5.81 MiB | 611 KiB | 0.74× of `vyaml` ▲ win |
+| generic load | `k8s-multi-1m` | 1 MiB | 8.15 MiB | 98.4 MiB | unsupported | 48 MiB | unsupported | 11 MiB | 81 MiB | 8.15 MiB | 0.74× of `vyaml` ▲ win |
+| generic load | `openapi-100k` | 101 KiB | 611 KiB | 7.02 MiB | 3.72 MiB | 3.41 MiB | unsupported | 829 KiB | 5.81 MiB | 611 KiB | 0.74× of `vyaml` ▲ win |
 | generic load | `openapi-8m` | 8 MiB | 48.2 MiB | 564 MiB | 299 MiB | 275 MiB | unsupported | 65.4 MiB | 468 MiB | 48.2 MiB | 0.74× of `vyaml` ▲ win |
 | generic load | `helm-values-64k` | 64 KiB | 213 KiB | 3.27 MiB | 1.67 MiB | 1.59 MiB | unsupported | 337 KiB | 2.64 MiB | 213 KiB | 0.63× of `vyaml` ▲ win |
-| generic load | `helm-values-1m` | 1 MiB | 3.34 MiB | 51.8 MiB | 26.6 MiB | 25.2 MiB | unsupported | 5.28 MiB | 41.9 MiB | 3.34 MiB | 0.63× of `vyaml` ▲ win |
+| generic load | `helm-values-1m` | 1 MiB | 3.34 MiB | 54.5 MiB | 26.6 MiB | 25.2 MiB | unsupported | 5.28 MiB | 41.9 MiB | 3.34 MiB | 0.63× of `vyaml` ▲ win |
 | generic load | `deep-block` | 5.23 KiB | 21.3 KiB | 200 KiB | rejects [1] | rejects [6] | unsupported | 23.7 KiB | 171 KiB | 21.3 KiB | 0.90× of `vyaml` ▲ win |
-| generic load | `deep-flow` | 202 B | 8.62 KiB | 126 KiB | rejects [1] | rejects [6] | unsupported | 8.62 KiB | 91.5 KiB | 8.62 KiB | 1.00× of `vyaml` ● tie |
-| generic load | `wide-map-64k` | 64 KiB | 448 KiB | 4.66 MiB | 2.31 MiB | 2.26 MiB | unsupported | 462 KiB | 3.77 MiB | 448 KiB | 0.97× of `vyaml` ▲ win |
-| generic load | `wide-map-1m` | 1 MiB | 7.25 MiB | 72.7 MiB | 35.7 MiB | 33.9 MiB | unsupported | 7.45 MiB | 56.8 MiB | 7.25 MiB | 0.97× of `vyaml` ▲ win |
+| generic load | `deep-flow` | 202 B | 8.62 KiB | 130 KiB | rejects [1] | rejects [6] | unsupported | 8.62 KiB | 91.5 KiB | 8.62 KiB | 1.00× of `vyaml` ● tie |
+| generic load | `wide-map-64k` | 64 KiB | 448 KiB | 4.94 MiB | 2.31 MiB | 2.26 MiB | unsupported | 462 KiB | 3.77 MiB | 448 KiB | 0.97× of `vyaml` ▲ win |
+| generic load | `wide-map-1m` | 1 MiB | 7.25 MiB | 68.5 MiB | 35.7 MiB | 33.9 MiB | unsupported | 7.45 MiB | 56.8 MiB | 7.25 MiB | 0.97× of `vyaml` ▲ win |
 | generic load | `long-scalars-256k` | 261 KiB | 516 KiB | 1.58 MiB | 1.88 MiB | 1.88 MiB | unsupported | 515 KiB | 1.58 MiB | 516 KiB | 1.00× of `vyaml` ● tie |
 | generic load | `flow-heavy-64k` | 64 KiB | 646 KiB | 10.6 MiB | 5 MiB | 4.72 MiB | unsupported | 1.02e+03 KiB | 8.48 MiB | 646 KiB | 0.63× of `vyaml` ▲ win |
-| generic load | `anchors-32k` | 32 KiB | 312 KiB | 2.99 MiB | 1.78 MiB | 4.06 MiB | unsupported | 1.13 MiB | 4.32 MiB | 312 KiB | 0.27× of `vyaml` ▲ win |
-| generic load | `unicode-32k` | 32 KiB | 103 KiB | 1.01 MiB | 522 KiB | 567 KiB | unsupported | 102 KiB | 886 KiB | 103 KiB | 1.01× of `vyaml` ● tie |
+| generic load | `anchors-32k` | 32 KiB | 312 KiB | 2.89 MiB | 1.78 MiB | 4.06 MiB | unsupported | 1.13 MiB | 4.32 MiB | 312 KiB | 0.27× of `vyaml` ▲ win |
+| generic load | `unicode-32k` | 32 KiB | 103 KiB | 1.07 MiB | 522 KiB | 567 KiB | unsupported | 102 KiB | 886 KiB | 103 KiB | 1.01× of `vyaml` ● tie |
 | generic load | `scalar-styles-32k` | 32 KiB | 115 KiB | 1.63 MiB | 1.05 MiB | 1.04 MiB | unsupported | 178 KiB | 1.34 MiB | 115 KiB | 0.65× of `vyaml` ▲ win |
 | dump | `compose-wordpress` | 815 B | 720 B | 37.9 KiB | 6.7 KiB | 8.54 KiB | unsupported | 65.1 KiB | 117 KiB | 720 B | 0.10× of `sharpyaml` ▲ win |
 | dump | `gha-workflow` | 9.43 KiB | 8.41 KiB | 256 KiB | 35.1 KiB | differs [5] | unsupported | 78.4 KiB | 350 KiB | 8.41 KiB | 0.24× of `sharpyaml` ▲ win |
@@ -336,26 +336,26 @@ Every task and workload, time and memory, from the same run.
 | unchanged emit | `anchors-32k` | 32 KiB | 32 KiB | unsupported | unsupported | unsupported | 32 KiB | unsupported | unsupported | 32 KiB | 1.00× of `sharpyaml-syntax` ● tie |
 | unchanged emit | `unicode-32k` | 32 KiB | 32.1 KiB | unsupported | unsupported | unsupported | 32.1 KiB | unsupported | unsupported | 32.1 KiB | 1.00× of `sharpyaml-syntax` ● tie |
 | unchanged emit | `scalar-styles-32k` | 32 KiB | 32.1 KiB | unsupported | unsupported | unsupported | 32.1 KiB | unsupported | unsupported | 32.1 KiB | 1.00× of `sharpyaml-syntax` ● tie |
-| edit script | `compose-wordpress` | 815 B | 2.95 KiB | unsupported | unsupported | unsupported | 238 KiB † | unsupported | unsupported | 2.95 KiB | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `gha-workflow` | 9.43 KiB | 11.6 KiB | unsupported | unsupported | unsupported | 2.93 MiB † | unsupported | unsupported | 11.6 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-ingress-nginx` | 52.4 KiB | 54.8 KiB | unsupported | unsupported | unsupported | 6.03 MiB † | unsupported | unsupported | 54.8 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-api-with-examples` | 6.75 KiB | 7.93 KiB | unsupported | unsupported | unsupported | 621 KiB † | unsupported | unsupported | 7.93 KiB | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `openapi-petstore` | 5.34 KiB | 5.97 KiB | unsupported | unsupported | unsupported | 1.48 MiB † | unsupported | unsupported | 5.97 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `prometheus-config` | 1.1 KiB | 2.34 KiB | unsupported | unsupported | unsupported | 127 KiB † | unsupported | unsupported | 2.34 KiB | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `reference-a` | 51 B | 656 B | unsupported | unsupported | unsupported | 15.6 KiB † | unsupported | unsupported | 656 B | 0.04× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `reference-b` | 51 B | 656 B | unsupported | unsupported | unsupported | 15.6 KiB † | unsupported | unsupported | 656 B | 0.04× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-4k` | 4.14 KiB | 6.17 KiB | unsupported | unsupported | unsupported | 1.92 MiB † | unsupported | unsupported | 6.17 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `records-64k` | 64.2 KiB | 66.3 KiB | unsupported | unsupported | unsupported | 29.6 MiB † | unsupported | unsupported | 66.3 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-wordpress` | 815 B | 2.48 KiB | unsupported | unsupported | unsupported | 238 KiB † | unsupported | unsupported | 2.48 KiB | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `gha-workflow` | 9.43 KiB | 11.1 KiB | unsupported | unsupported | unsupported | 2.93 MiB † | unsupported | unsupported | 11.1 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-ingress-nginx` | 52.4 KiB | 54.4 KiB | unsupported | unsupported | unsupported | 6.03 MiB † | unsupported | unsupported | 54.4 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-api-with-examples` | 6.75 KiB | 7.7 KiB | unsupported | unsupported | unsupported | 621 KiB † | unsupported | unsupported | 7.7 KiB | 0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `openapi-petstore` | 5.34 KiB | 5.5 KiB | unsupported | unsupported | unsupported | 1.48 MiB † | unsupported | unsupported | 5.5 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `prometheus-config` | 1.1 KiB | 2.1 KiB | unsupported | unsupported | unsupported | 127 KiB † | unsupported | unsupported | 2.1 KiB | 0.02× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `reference-a` | 51 B | 536 B | unsupported | unsupported | unsupported | 15.6 KiB † | unsupported | unsupported | 536 B | 0.03× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `reference-b` | 51 B | 536 B | unsupported | unsupported | unsupported | 15.6 KiB † | unsupported | unsupported | 536 B | 0.03× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-4k` | 4.14 KiB | 5.7 KiB | unsupported | unsupported | unsupported | 1.92 MiB † | unsupported | unsupported | 5.7 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `records-64k` | 64.2 KiB | 65.8 KiB | unsupported | unsupported | unsupported | 29.6 MiB † | unsupported | unsupported | 65.8 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | edit script | `records-1m` | 1 MiB | 1 MiB | unsupported | unsupported | unsupported | 469 MiB † | unsupported | unsupported | 1 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | edit script | `records-8m` | 8 MiB | 8 MiB | unsupported | unsupported | unsupported | 3.63 GiB † | unsupported | unsupported | 8 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-2k` | 2.14 KiB | 3.77 KiB | unsupported | unsupported | unsupported | 752 KiB † | unsupported | unsupported | 3.77 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-64k` | 64.1 KiB | 74.2 KiB | unsupported | unsupported | unsupported | 21.3 MiB † | unsupported | unsupported | 74.2 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `compose-merge-1m` | 1 MiB | 1.13 MiB | unsupported | unsupported | unsupported | 335 MiB † | unsupported | unsupported | 1.13 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-2k` | 2.14 KiB | 3.42 KiB | unsupported | unsupported | unsupported | 752 KiB † | unsupported | unsupported | 3.42 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-64k` | 64.1 KiB | 65.8 KiB | unsupported | unsupported | unsupported | 21.3 MiB † | unsupported | unsupported | 65.8 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `compose-merge-1m` | 1 MiB | 1 MiB | unsupported | unsupported | unsupported | 335 MiB † | unsupported | unsupported | 1 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | edit script | `openapi-100k` | 101 KiB | 102 KiB | unsupported | unsupported | unsupported | 34 MiB † | unsupported | unsupported | 102 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | edit script | `openapi-8m` | 8 MiB | 8 MiB | unsupported | unsupported | unsupported | 2.43 GiB † | unsupported | unsupported | 8 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-values-64k` | 64 KiB | 65.9 KiB | unsupported | unsupported | unsupported | 17.2 MiB † | unsupported | unsupported | 65.9 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `helm-values-1m` | 1 MiB | 1.06 MiB | unsupported | unsupported | unsupported | 274 MiB † | unsupported | unsupported | 1.06 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
-| edit script | `wide-map-64k` | 64 KiB | 65.1 KiB | unsupported | unsupported | unsupported | 15.7 MiB † | unsupported | unsupported | 65.1 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-values-64k` | 64 KiB | 65.6 KiB | unsupported | unsupported | unsupported | 17.2 MiB † | unsupported | unsupported | 65.6 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `helm-values-1m` | 1 MiB | 1 MiB | unsupported | unsupported | unsupported | 274 MiB † | unsupported | unsupported | 1 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
+| edit script | `wide-map-64k` | 64 KiB | 64.9 KiB | unsupported | unsupported | unsupported | 15.7 MiB † | unsupported | unsupported | 64.9 KiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | edit script | `wide-map-1m` | 1 MiB | 1 MiB | unsupported | unsupported | unsupported | 237 MiB † | unsupported | unsupported | 1 MiB | <0.01× of `sharpyaml-syntax` † (harness-rendered) ▲ win |
 | patch (RFC 6902) | `compose-wordpress` | 815 B | 2.66 KiB | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 2.66 KiB | no rival |
 | patch (RFC 6902) | `gha-workflow` | 9.43 KiB | 10.8 KiB | unsupported | unsupported | unsupported | unsupported | unsupported | differs [12] | 10.8 KiB | no rival |
@@ -383,9 +383,9 @@ Cells without a number, with what the correctness guard found:
 13. `yamldotnet` (rejects; dump ×2): Stops at its default nesting limit, which the benchmark leaves as it is. What the guard found, in dump on `deep-block`: `default limit, not raised: MaximumRecursionLevelReachedException: Too much recur…`
 14. `yamldotnet` (differs; dump ×4): Writes a float with no fractional part (812.0) as 812, so a YAML 1.2 reader reads it back as an integer. What the guard found, in dump on `records-4k`: `read back: at /1/score: got 812, expected 812.0`
 
-Relative figures are ours ÷ the strongest competitor in that row, so below 1.0× is better for us and ▼ marks a loss. A † marks a cell measured differently from the task as specified; the note beside each mark says how. Cells without a number say why.
+Relative figures are ours ÷ the strongest competitor in that row, so below 1.0× is better for us and ▼ marks a loss. A † marks a cell measured differently from the task as specified; the note beside each mark says how. Cells without a number say why. The verdict of a task in the chart and the first table is never better than the real-world workloads allow, nor better than all of the task's workloads in these tables allow, generated and reference ones included, while its speed figure is over the real-world workloads.
 
-Method: **full run** of 2026-10-17T14:35:16Z. Kit 0.1.0 (revision 621332b49f74). `oneyaml-csharp 68c7df1aecb0`; competitors `yamldotnet 18.1.0`, `sharpyaml 3.16.0`, `sharpyaml-model 3.16.0`, `sharpyaml-syntax 3.16.0`, `vyaml 1.4.1`, `yaml2jsonnode 3.0.1`, `oneyaml-csharp-gen 68c7df1aecb0`. Runtime .NET 10.0.11 (target linux-x64), measured with BenchmarkDotNet 0.15.8: mean time per task from BenchmarkDotNet's ShortRun job (3 warm-up and 3 measured iterations) run in process; one invocation per iteration runs a batch of prepared tasks and the time is divided by the batch size; every cell is measured in a process of its own, because the heap that earlier cells leave behind changed the result. Each process runs with DOTNET_TC_CallCountingDelayMs=0 (call counting starts immediately instead of after the default delay), and no other DOTNET_ or COMPlus_ variable set, and every cell is first warmed up for 1000 ms of whole batches before BenchmarkDotNet's own warm-up, because a new process starts at the runtime's unoptimised tier. Memory: bytes allocated per task from BenchmarkDotNet's MemoryDiagnoser; allocation calls are not available. AMD Ryzen 9 7950X3D 16-Core Processor (125.0 GiB), Linux 7.0.0-34-generic (x86_64), measured on a shared workstation (32 logical CPUs; load 3.62 before, 4.84 after, at most 11.25 during).
+Method: **full run** of 2026-10-18T00:48:41Z. Kit 0.1.0 (revision 6cc83d12fbc6); text generated by kit revision c1647a46aa6d. `oneyaml-csharp c23a19250217`; competitors `yamldotnet 18.1.0`, `sharpyaml 3.16.0`, `sharpyaml-model 3.16.0`, `sharpyaml-syntax 3.16.0`, `vyaml 1.4.1`, `yaml2jsonnode 3.0.1`, `oneyaml-csharp-gen c23a19250217`. Runtime .NET 10.0.11 (target linux-x64), measured with BenchmarkDotNet 0.15.8: mean time per task from BenchmarkDotNet's ShortRun job (3 warm-up and 3 measured iterations) run in process; one invocation per iteration runs a batch of prepared tasks and the time is divided by the batch size; every cell is measured in a process of its own, because the heap that earlier cells leave behind changed the result. Each process runs with DOTNET_TC_CallCountingDelayMs=0 (call counting starts immediately instead of after the default delay), and no other DOTNET_ or COMPlus_ variable set, and every cell is first warmed up for 1000 ms of whole batches before BenchmarkDotNet's own warm-up, because a new process starts at the runtime's unoptimised tier. Memory: bytes allocated per task from BenchmarkDotNet's MemoryDiagnoser; allocation calls are not available. AMD Ryzen 9 7950X3D 16-Core Processor (125.0 GiB), Linux 7.0.0-34-generic (x86_64), measured on a shared workstation (32 logical CPUs; load 3.72 before, 4.52 after, at most 8.48 during).
 <!-- end generated -->
 
 ## Writing a document back
