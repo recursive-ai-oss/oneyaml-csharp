@@ -10,42 +10,64 @@ namespace OneYaml.Compat.SharpYaml;
 // substitutes U+FFFD would turn damaged input into different, valid-looking text.
 internal static class StreamText
 {
-    public static string Read(Stream stream, string? sourceName, long maxBytes = long.MaxValue)
+    public static string Read(Stream stream, string? sourceName, long maxBytes = long.MaxValue) => Read(stream, sourceName, maxBytes, Array.MaxLength);
+
+    // The ceiling is a parameter so a test can reach it without a two-gigabyte input.
+    internal static string Read(Stream stream, string? sourceName, long maxBytes, int ceiling)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        byte[] bytes;
-        using (var copy = new MemoryStream())
+        // Grown here and not in a MemoryStream, which fails with an IOException at two gigabytes instead of naming the limit.
+        byte[] bytes = new byte[8192];
+        int count = 0;
+        while (true)
         {
-            // Stop a few bytes past the limit (room for a byte order mark, which is not part of the size): the stream may
-            // be endless, and the check below reports the excess exactly.
-            byte[] chunk = new byte[8192];
-            int n;
-            while ((n = stream.Read(chunk, 0, chunk.Length)) > 0)
+            if (count == bytes.Length)
             {
-                copy.Write(chunk, 0, n);
-                if (copy.Length - 4 > maxBytes)
+                if (bytes.Length >= ceiling)
                 {
-                    throw TooLarge(maxBytes, sourceName);
+                    throw TooLarge(maxBytes, sourceName, "The input is larger than the largest buffer the runtime can hold");
                 }
+
+                Array.Resize(ref bytes, (int)Math.Min(bytes.Length * 2L, ceiling));
             }
 
-            bytes = copy.ToArray();
+            int n = stream.Read(bytes, count, bytes.Length - count);
+            if (n <= 0)
+            {
+                break;
+            }
+
+            count += n;
+
+            // Stop a few bytes past the limit (room for a byte order mark, which is not part of the size): the stream may
+            // be endless, and the check below reports the excess exactly.
+            if (count - 4L > maxBytes)
+            {
+                throw TooLarge(maxBytes, sourceName);
+            }
         }
 
-        (Encoding encoding, int mark) = Detect(bytes);
-        if (bytes.Length - mark > maxBytes)
+        (Encoding encoding, int mark) = Detect(bytes.AsSpan(0, count));
+        if (count - mark > maxBytes)
         {
             throw TooLarge(maxBytes, sourceName);
         }
 
         try
         {
-            return encoding.GetString(bytes, mark, bytes.Length - mark);
+            // A string holds fewer characters than an array holds bytes; count before decoding so a text that decodes
+            // to more is a limit error, not an out-of-memory error from the decoder.
+            if (count - mark > Oy.Text.YamlInput.StringMaxLength && encoding.GetCharCount(bytes, mark, count - mark) > Oy.Text.YamlInput.StringMaxLength)
+            {
+                throw TooLarge(maxBytes, sourceName, "The text is longer than a string can hold");
+            }
+
+            return encoding.GetString(bytes, mark, count - mark);
         }
         catch (DecoderFallbackException error)
         {
             // Name the first bad position: the text before it decodes, so its lines and characters can be counted.
-            int good = Math.Clamp(error.Index, 0, bytes.Length - mark);
+            int good = Math.Clamp(error.Index, 0, count - mark);
             // Decode it in the encoding that was detected: counting the raw bytes of UTF-16 or UTF-32 would put NULs in the
             // columns. Some decoders report the end of a bad unit rather than its start (a lone UTF-16 high surrogate is
             // only known to be bad when the next unit arrives), so step back until the prefix decodes cleanly.
@@ -67,10 +89,10 @@ internal static class StreamText
         }
     }
 
-    private static YamlException TooLarge(long maxBytes, string? sourceName) =>
-        ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({maxBytes}).") { Category = Oy.YamlErrorCategory.Limit }, default, sourceName);
+    private static YamlException TooLarge(long maxBytes, string? sourceName, string? what = null) =>
+        ErrorMap.Translate(new Oy.YamlException(what is null ? $"The input is larger than the limit MaxInputBytes ({maxBytes})." : $"{what} (limit MaxInputBytes is {maxBytes}).") { Category = Oy.YamlErrorCategory.Limit }, default, sourceName);
 
-    private static (Encoding Encoding, int Mark) Detect(byte[] b)
+    private static (Encoding Encoding, int Mark) Detect(ReadOnlySpan<byte> b)
     {
         var utf8 = new UTF8Encoding(false, true);
         if (b.Length >= 4 && b[0] == 0 && b[1] == 0 && b[2] == 0xFE && b[3] == 0xFF)

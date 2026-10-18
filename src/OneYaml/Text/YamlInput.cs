@@ -198,24 +198,28 @@ internal ref struct YamlInput
     /// <summary>
     /// Reads a text reader to its end as validated UTF-8. When the limits set an input size, the text is converted chunk
     /// by chunk and counted as it goes, so a reader that is far larger than the limit, or never ends, is refused after
-    /// one chunk past the limit instead of being buffered first. With no input size limit the reader is read in one call.
+    /// one chunk past the limit instead of being buffered first. With no input size limit it is read the same way, so a text
+    /// larger than the runtime can hold is a limit error and not an out-of-memory error from a single read-to-end call.
     /// </summary>
     /// <param name="reader">The reader.</param>
     /// <param name="limits">The limits to enforce on the input size.</param>
     /// <returns>The normalised input. Dispose it when the text is no longer used.</returns>
     /// <exception cref="YamlException">The text has an unpaired surrogate or is too large.</exception>
-    public static YamlInput FromReader(TextReader reader, YamlLimits limits)
+    public static YamlInput FromReader(TextReader reader, YamlLimits limits) => FromReader(reader, limits, Array.MaxLength);
+
+    // The buffer ceiling is a parameter so a test can reach it without a two-gigabyte input.
+    internal static YamlInput FromReader(TextReader reader, YamlLimits limits, int ceiling)
     {
         long max = limits.MaxInputBytes;
         // A string reader already holds its whole text. Read from the start, it hands that string over without a copy;
         // read part way, it copies the rest, which is never larger than the string the caller holds. FromChars then
         // checks the size before it rents anything.
-        if (max == long.MaxValue || reader.GetType() == typeof(StringReader))
+        if (reader.GetType() == typeof(StringReader))
         {
             return FromChars(reader.ReadToEnd(), limits);
         }
 
-        long cap = GrowthCap(max);
+        long cap = GrowthCap(max, ceiling);
         byte[]? bytes = Array.Empty<byte>();
         try
         {
@@ -260,7 +264,7 @@ internal ref struct YamlInput
                         throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
                     }
 
-                    if (need > Array.MaxLength)
+                    if (need > ceiling)
                     {
                         counting = true;
                         tooLarge = true;
@@ -304,6 +308,12 @@ internal ref struct YamlInput
                 {
                     throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
                 }
+
+                // Past what one buffer holds the text can only be refused, so an endless reader is not counted for ever.
+                if (written + counted > ceiling)
+                {
+                    throw TooLarge(limits);
+                }
             }
 
             if (carry > 0)
@@ -321,7 +331,7 @@ internal ref struct YamlInput
                 }
             }
 
-            if (tooLarge || written + counted > Array.MaxLength)
+            if (tooLarge || written + counted > ceiling)
             {
                 throw TooLarge(limits);
             }
@@ -348,8 +358,10 @@ internal ref struct YamlInput
 
     // The buffer never needs to hold more than the limit plus what one chunk can add before the limit trips. The sum
     // saturates: a limit close to long.MaxValue must not wrap around to a small cap.
-    internal static long GrowthCap(long max)
-        => max >= Array.MaxLength - (3L * ReaderChunk) ? Array.MaxLength : max + (3L * ReaderChunk);
+    internal static long GrowthCap(long max) => GrowthCap(max, Array.MaxLength);
+
+    internal static long GrowthCap(long max, int ceiling)
+        => max >= ceiling - (3L * ReaderChunk) ? ceiling : max + (3L * ReaderChunk);
 
     // Counts a piece of text in UTF-8 bytes. A high surrogate at its end is left for the next piece, so a pair is one
     // character; the caller's chunk holds it in the first place.
@@ -375,18 +387,26 @@ internal ref struct YamlInput
     /// <param name="limits">The limits to enforce on the input size.</param>
     /// <returns>The text.</returns>
     /// <exception cref="YamlException">The text is over the input size limit.</exception>
-    public static string ReadToString(TextReader reader, YamlLimits limits)
+    public static string ReadToString(TextReader reader, YamlLimits limits) => ReadToString(reader, limits, StringMaxLength);
+
+    // The most characters a string can hold. Past it the runtime throws an out-of-memory error, which must not be what
+    // a too-large input ends in.
+    internal const int StringMaxLength = 0x3FFFFFDF;
+
+    // The ceiling is a parameter so a test can reach it without a billion-character input.
+    internal static string ReadToString(TextReader reader, YamlLimits limits, int ceiling)
     {
         long max = limits.MaxInputBytes;
-        if (max == long.MaxValue)
-        {
-            return reader.ReadToEnd();
-        }
-
         if (reader.GetType() == typeof(StringReader))
         {
-            // A string reader hands over the string it already holds without a copy; it is counted like any other text.
+            // A string reader hands over the string it already holds without a copy; it is counted like any other text,
+            // and not at all when there is no limit to count against.
             string whole = reader.ReadToEnd();
+            if (max == long.MaxValue)
+            {
+                return whole;
+            }
+
             ReadOnlySpan<char> counted = whole;
             if (counted.Length > 0 && counted[0] == '\uFEFF')
             {
@@ -402,7 +422,7 @@ internal ref struct YamlInput
         }
 
         // A character is at least one byte, so the text never needs more characters than the limit plus one chunk.
-        long cap = max >= Array.MaxLength - ReaderChunk ? Array.MaxLength : max + ReaderChunk;
+        long cap = max >= ceiling - ReaderChunk ? ceiling : max + ReaderChunk;
         char[] buffer = ArrayPool<char>.Shared.Rent(ReaderChunk * 2);
         try
         {
@@ -414,7 +434,7 @@ internal ref struct YamlInput
                 if (buffer.Length - length < ReaderChunk)
                 {
                     long wanted = Math.Min(Math.Max(buffer.Length * 2L, length + (long)ReaderChunk), Math.Max(cap, length + (long)ReaderChunk));
-                    if (wanted > Array.MaxLength)
+                    if (wanted > ceiling)
                     {
                         throw TooLarge(limits);
                     }

@@ -44,7 +44,10 @@ internal sealed class Loaded : IDisposable
         }
         catch (Oy.YamlException ex)
         {
-            throw ErrorMap.Translate(ex, null);
+            // The engine counts bytes; the line map turns its offset into the character index YamlDotNet reports. It is
+            // built here, on the error path, so a text that loads pays nothing for it, and only for an error that has a
+            // place in the text (a size refusal has none, and the text may be huge).
+            throw ErrorMap.Translate(ex, ex.Line >= 1 ? new LineMap(text) : null);
         }
     }
 
