@@ -52,7 +52,7 @@ public static partial class YamlSerializer
     public static IReadOnlyList<T?> DeserializeAll<T>(TextReader yaml, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        return ReadAll(yaml.ReadToEnd(), Info<T>(options));
+        return ReadReaderAll(yaml, Info<T>(options));
     }
 
     /// <summary>Reads every document of a text reader using generated metadata.</summary>
@@ -65,7 +65,7 @@ public static partial class YamlSerializer
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return ReadAll(yaml.ReadToEnd(), typeInfo);
+        return ReadReaderAll(yaml, typeInfo);
     }
 
     /// <summary>Reads every document of a stream, reading the stream asynchronously.</summary>

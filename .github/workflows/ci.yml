@@ -10,7 +10,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A run on main is never cancelled: a release needs a finished run on the tagged commit.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:
   run:
@@ -131,10 +132,14 @@ jobs:
         run: dotnet build OneYaml.slnx -c Release --no-restore
       - name: Test
         run: dotnet test --solution OneYaml.slnx -c Release --no-build --results-directory "$ONEYAML_ARTIFACTS/TestResults"
-      - name: Document tests with the held-back move checked
-        # Builds the library so that a read which skips the held-back check throws, and runs the edit tests on it.
+      - name: Tests with the held-back move checked
+        # Builds the library so that a read which skips the held-back check throws, and runs every test of the
+        # library except the slow ones on it: patches and edits are made from many test classes, not only the document ones.
+        # HeldCheckSwitchTests fails the step if the build switch was not applied.
         if: runner.os == 'Linux'
-        run: dotnet test --project tests/OneYaml.Tests -c Release --no-restore -p:OneYamlCheckHeld=1 --results-directory "$ONEYAML_ARTIFACTS/TestResultsHeld" -- --filter-namespace "OneYaml.Tests.Document"
+        env:
+          ONEYAML_EXPECT_CHECK_HELD: '1'
+        run: dotnet test --project tests/OneYaml.Tests -c Release --no-restore -p:OneYamlCheckHeld=1 --results-directory "$ONEYAML_ARTIFACTS/TestResultsHeld" -- --filter-not-trait "Category=Slow"
 
   # Packs the three packages and checks what a user would receive: a readme in each, and the exact
   # OneYaml dependency in both compat packages (they use internals of OneYaml).

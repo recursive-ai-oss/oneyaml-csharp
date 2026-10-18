@@ -20,6 +20,13 @@ internal sealed partial class DocState
     // that is only read takes no more room.
     private bool _held;
 
+    // Whether this build checks reads against held-back moves, so a test run can show the switch really is on.
+#if ONEYAML_CHECK_HELD
+    internal const bool CheckHeldBuild = true;
+#else
+    internal const bool CheckHeldBuild = false;
+#endif
+
     // Fails a test run that built the library with ONEYAML_CHECK_HELD when code that reads nodes as they are meets a state
     // with moves held back.
     [System.Diagnostics.Conditional("ONEYAML_CHECK_HELD")]
