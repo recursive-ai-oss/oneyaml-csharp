@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tools/gate: the local checks, the same ones CI runs. Run it from anywhere in the checkout: tools/gate
 # Steps: restore, Release build of the solution (both target frameworks, warnings as
-# errors, trim and AOT analyzers on), tests without the Slow category, format check,
+# errors, trim and AOT analyzers on), tests without the Slow category (and the library tests again on a
+# build that checks held-back edits), format check,
 # public-text check over files changed against main plus untracked files, secret scan
 # of the working tree, and a scan for unsafe code in src/.
 # Environment: GATE_BASE (default main) is the comparison branch; ONEYAML_ARTIFACTS
@@ -67,6 +68,14 @@ fi
 step "restore" dotnet restore "$sln" --verbosity quiet
 step "build (Release, all target frameworks)" dotnet build "$sln" -c Release --no-restore --verbosity quiet -clp:NoSummary
 step "test (Category!=Slow)" dotnet test --solution "$sln" -c Release --no-build --filter-not-trait "Category=Slow" --results-directory "$artifacts/TestResults"
+
+# The same library test run on a build that fails when a read skips the held-back check (CI runs it too). It has its
+# own build output so the Release build above stays as it was; HeldCheckSwitchTests fails the step when the
+# switch is not applied.
+held_check() {
+	ONEYAML_ARTIFACTS="$artifacts/held" ONEYAML_EXPECT_CHECK_HELD=1 dotnet test --project tests/OneYaml.Tests -c Release -p:OneYamlCheckHeld=1 --results-directory "$artifacts/TestResultsHeld" -- --filter-not-trait "Category=Slow"
+}
+step "test with the held-back move checked" held_check
 
 # Whitespace and style are verified on the whole solution; analyzers already ran in the build.
 # The formatter loads projects in the Debug configuration and runs the source generator

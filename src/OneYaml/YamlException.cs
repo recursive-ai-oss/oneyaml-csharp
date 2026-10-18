@@ -287,6 +287,34 @@ public class YamlException : Exception
         return false;
     }
 
+    // The error is at the end of a valid UTF-8 prefix of the text (the text after it is not available). Line and column
+    // are what the char overload gives for the same place: a line break ends a line, and a column counts code points.
+    internal static YamlException LocatedAtEnd(YamlErrorCategory category, string message, ReadOnlySpan<byte> prefix)
+    {
+        int line = 1;
+        int lineStart = 0;
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            byte b = prefix[i];
+            if (b == (byte)'\n' || (b == (byte)'\r' && !(i + 1 < prefix.Length && prefix[i + 1] == (byte)'\n')))
+            {
+                line++;
+                lineStart = i + 1;
+            }
+        }
+
+        int column = 1;
+        for (int i = lineStart; i < prefix.Length; i++)
+        {
+            if ((prefix[i] & 0xC0) != 0x80)
+            {
+                column++;
+            }
+        }
+
+        return new YamlException(Describe(message, line, column, null), category, line, column, prefix.Length);
+    }
+
     internal static YamlException Located(YamlErrorCategory category, string message, ReadOnlySpan<char> text, int charIndex)
     {
         if (charIndex < 0)

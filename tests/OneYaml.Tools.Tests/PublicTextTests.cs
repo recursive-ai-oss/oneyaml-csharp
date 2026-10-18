@@ -126,4 +126,15 @@ public class PublicTextTests
         Assert.Null(BannedTerms.Default.FindGeneral("public sealed class YamlReader : IDisposable { }"));
         Assert.Null(BannedTerms.Default.FindProse("Keep offsets, not strings."));
     }
+
+    [Theory]
+    [InlineData("hand", "-over")]
+    [InlineData("hand", " over")]
+    [InlineData("hand", "over")]
+    public void Shipped_list_refuses_the_spellings_of_the_local_check_name(string a, string b)
+    {
+        // Built at run time so this file does not hold the phrase it tests.
+        string line = "run the " + a + b + " gate before pushing";
+        Assert.NotNull(BannedTerms.Default.FindGeneral(line));
+    }
 }

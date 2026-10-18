@@ -217,7 +217,7 @@ public static partial class YamlSerializer
     public static T? Deserialize<T>(TextReader yaml, YamlSerializerOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
-        return ReadChars(yaml.ReadToEnd(), Info<T>(options));
+        return ReadReader(yaml, Info<T>(options));
     }
 
     /// <summary>Reads a value from a text reader using generated metadata.</summary>
@@ -230,7 +230,7 @@ public static partial class YamlSerializer
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(typeInfo);
-        return ReadChars(yaml.ReadToEnd(), typeInfo);
+        return ReadReader(yaml, typeInfo);
     }
 
     // ---- several documents ----
@@ -304,6 +304,33 @@ public static partial class YamlSerializer
         {
             using YamlInput input = YamlInput.FromChars(text, info.Options.Limits);
             return ReadUtf8(input.Utf8Text, info);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        {
+            throw;
+        }
+    }
+
+    // The reader is converted and counted in chunks by YamlInput, so the input limit applies while it is read.
+    private static T? ReadReader<T>(TextReader reader, YamlTypeInfo<T> info)
+    {
+        try
+        {
+            using YamlInput input = YamlInput.FromReader(reader, info.Options.Limits);
+            return ReadUtf8(input.Utf8Text, info);
+        }
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
+        {
+            throw;
+        }
+    }
+
+    private static List<T?> ReadReaderAll<T>(TextReader reader, YamlTypeInfo<T> info)
+    {
+        try
+        {
+            using YamlInput input = YamlInput.FromReader(reader, info.Options.Limits);
+            return ReadAllUtf8(input.Utf8Text, info);
         }
         catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
         {
