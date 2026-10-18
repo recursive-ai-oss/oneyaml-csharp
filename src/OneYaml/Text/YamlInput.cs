@@ -378,13 +378,31 @@ internal ref struct YamlInput
     public static string ReadToString(TextReader reader, YamlLimits limits)
     {
         long max = limits.MaxInputBytes;
-        if (max == long.MaxValue || reader.GetType() == typeof(StringReader))
+        if (max == long.MaxValue)
         {
             return reader.ReadToEnd();
         }
 
+        if (reader.GetType() == typeof(StringReader))
+        {
+            // A string reader hands over the string it already holds without a copy; it is counted like any other text.
+            string whole = reader.ReadToEnd();
+            ReadOnlySpan<char> counted = whole;
+            if (counted.Length > 0 && counted[0] == '\uFEFF')
+            {
+                counted = counted[1..];
+            }
+
+            if (CountUtf8(counted) > max)
+            {
+                throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+            }
+
+            return whole;
+        }
+
         // A character is at least one byte, so the text never needs more characters than the limit plus one chunk.
-        long cap = Math.Min(max + ReaderChunk, Array.MaxLength);
+        long cap = max >= Array.MaxLength - ReaderChunk ? Array.MaxLength : max + ReaderChunk;
         char[] buffer = ArrayPool<char>.Shared.Rent(ReaderChunk * 2);
         try
         {

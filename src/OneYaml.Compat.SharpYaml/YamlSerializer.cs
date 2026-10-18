@@ -227,7 +227,7 @@ public static class YamlSerializer
         }
         catch (Oy.YamlException error)
         {
-            throw ErrorMap.Translate(error, default, null);
+            throw ErrorMap.Translate(error, default, options?.SourceName);
         }
     }
 

@@ -162,6 +162,7 @@ public class TextReaderLimitTests
         Assert.True(reader.ReadCalls >= 2);
     }
 
+    // The "a: 1\rb: " text pins existing behaviour (a lone carriage return ends a line); it also passes before the reader was bounded.
     [Fact]
     public void An_unpaired_surrogate_is_an_encoding_error_at_the_same_place_as_from_a_string()
     {
