@@ -216,30 +216,19 @@ public static class YamlSerializer
 
     private static long MaxInput(YamlSerializerOptions? options) => (options?.Limits ?? Oy.YamlLimits.Default).MaxInputBytes;
 
-    // A reader is read only as far as the input limit allows: a character is at least one byte, so more characters than
-    // the limit is over it, and the read stops there instead of buffering an endless reader.
+    // A reader is read as the core reads one: in chunks, counted in UTF-8 bytes, so a text over the limit is refused
+    // whole (a byte order mark does not count, as for a string) and an endless reader is not buffered.
     private static string Text(TextReader reader, YamlSerializerOptions? options)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        long max = MaxInput(options);
-        if (max == long.MaxValue)
+        try
         {
-            return reader.ReadToEnd();
+            return global::OneYaml.Text.YamlInput.ReadToString(reader, options?.Limits ?? Oy.YamlLimits.Default);
         }
-
-        var sb = new System.Text.StringBuilder();
-        char[] chunk = new char[4096];
-        int n;
-        while ((n = reader.Read(chunk, 0, chunk.Length)) > 0)
+        catch (Oy.YamlException error)
         {
-            sb.Append(chunk, 0, n);
-            if (sb.Length > max)
-            {
-                throw ErrorMap.Translate(new Oy.YamlException($"The input is larger than the limit MaxInputBytes ({max}).") { Category = Oy.YamlErrorCategory.Limit }, default, null);
-            }
+            throw ErrorMap.Translate(error, default, null);
         }
-
-        return sb.ToString();
     }
 
     private static string Text(Stream stream, YamlSerializerOptions? options) => StreamText.Read(stream, null, MaxInput(options));

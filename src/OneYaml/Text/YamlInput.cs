@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.IO;
 using System.Text;
 using System.Text.Unicode;
 
@@ -189,6 +190,185 @@ internal ref struct YamlInput
             ArrayPool<byte>.Shared.Return(buffer);
             throw;
         }
+    }
+
+    // How many characters are asked of a reader at a time.
+    private const int ReaderChunk = 4096;
+
+    /// <summary>
+    /// Reads a text reader to its end as validated UTF-8. When the limits set an input size, the text is converted chunk
+    /// by chunk and counted as it goes, so a reader that is far larger than the limit, or never ends, is refused after
+    /// one chunk past the limit instead of being buffered first. With no input size limit the reader is read in one call.
+    /// </summary>
+    /// <param name="reader">The reader.</param>
+    /// <param name="limits">The limits to enforce on the input size.</param>
+    /// <returns>The normalised input. Dispose it when the text is no longer used.</returns>
+    /// <exception cref="YamlException">The text has an unpaired surrogate or is too large.</exception>
+    public static YamlInput FromReader(TextReader reader, YamlLimits limits)
+    {
+        long max = limits.MaxInputBytes;
+        // A string reader holds its whole text already and hands it over without a copy, so reading it first costs no
+        // memory the caller has not spent; FromChars then checks the size before it rents anything.
+        if (max == long.MaxValue || reader.GetType() == typeof(StringReader))
+        {
+            return FromChars(reader.ReadToEnd(), limits);
+        }
+
+        // The buffer never needs to hold more than the limit plus what one chunk can add before the limit trips.
+        long cap = Math.Min(max + (ReaderChunk * 3L), Array.MaxLength);
+        byte[]? bytes = Array.Empty<byte>();
+        try
+        {
+            Span<char> chunk = stackalloc char[ReaderChunk + 1];
+            int carry = 0;
+            int written = 0;
+            long counted = 0; // bytes seen after the text stopped being written
+            bool counting = false;
+            bool tooLarge = false;
+            bool first = true;
+            bool bom = false;
+            YamlException? encodingError = null;
+
+            while (true)
+            {
+                int n = reader.Read(chunk.Slice(carry, ReaderChunk));
+                if (n <= 0)
+                {
+                    break;
+                }
+
+                Span<char> text = chunk[..(carry + n)];
+                carry = 0;
+                if (first)
+                {
+                    first = false;
+                    if (text[0] == '\uFEFF')
+                    {
+                        // Keep the mark out of the text so positions match the ones reported for the same text as bytes.
+                        bom = true;
+                        text = text[1..];
+                    }
+                }
+
+                if (!counting)
+                {
+                    // What this chunk needs, exactly (a lone surrogate counts as 3 here, which is at least what it would take).
+                    long need = written + (long)System.Text.Encoding.UTF8.GetByteCount(text);
+                    if (need > Array.MaxLength)
+                    {
+                        counting = true;
+                        tooLarge = true;
+                    }
+                    else if (need > bytes.Length)
+                    {
+                        byte[] bigger = ArrayPool<byte>.Shared.Rent((int)Math.Min(Math.Max(need, bytes.Length * 2L), Math.Max(cap, need)));
+                        Buffer.BlockCopy(bytes, 0, bigger, 0, written);
+                        if (bytes.Length > 0)
+                        {
+                            ArrayPool<byte>.Shared.Return(bytes);
+                        }
+
+                        bytes = bigger;
+                    }
+                }
+
+                if (!counting)
+                {
+                    OperationStatus status = Utf8.FromUtf16(text, bytes.AsSpan(written), out int read, out int w, replaceInvalidSequences: false, isFinalBlock: false);
+                    written += w;
+                    if (status == OperationStatus.InvalidData)
+                    {
+                        encodingError = YamlException.LocatedAtEnd(YamlErrorCategory.Encoding, "The text contains an unpaired surrogate.", bytes.AsSpan(0, written));
+                        counting = true;
+                        counted += CountPiece(text[read..], chunk, ref carry);
+                    }
+                    else if (status == OperationStatus.NeedMoreData)
+                    {
+                        // A high surrogate at the end of the chunk waits for its partner.
+                        chunk[0] = text[read];
+                        carry = 1;
+                    }
+                }
+                else
+                {
+                    counted += CountPiece(text, chunk, ref carry);
+                }
+
+                if (written + counted > max)
+                {
+                    throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+                }
+            }
+
+            if (carry > 0)
+            {
+                // The text ends in a high surrogate.
+                if (!counting)
+                {
+                    encodingError = YamlException.LocatedAtEnd(YamlErrorCategory.Encoding, "The text contains an unpaired surrogate.", bytes.AsSpan(0, written));
+                }
+
+                counted += 3;
+                if (written + counted > max)
+                {
+                    throw new YamlException($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0);
+                }
+            }
+
+            if (tooLarge || written + counted > Array.MaxLength)
+            {
+                throw TooLarge(limits);
+            }
+
+            if (encodingError is not null)
+            {
+                throw encodingError;
+            }
+
+            ReadOnlySpan<byte> utf8 = bytes.AsSpan(0, written);
+            CheckControls(utf8);
+            byte[]? owned = bytes.Length > 0 ? bytes : null;
+            bytes = null;
+            return new YamlInput(utf8, owned, YamlEncoding.Utf8, bom);
+        }
+        finally
+        {
+            if (bytes is { Length: > 0 })
+            {
+                ArrayPool<byte>.Shared.Return(bytes);
+            }
+        }
+    }
+
+    // Counts a piece of text in UTF-8 bytes. A high surrogate at its end is left for the next piece, so a pair is one
+    // character; the caller's chunk holds it in the first place.
+    private static long CountPiece(ReadOnlySpan<char> text, Span<char> chunk, ref int carry)
+    {
+        if (!text.IsEmpty && char.IsHighSurrogate(text[^1]))
+        {
+            long size = System.Text.Encoding.UTF8.GetByteCount(text[..^1]);
+            chunk[0] = text[^1];
+            carry = 1;
+            return size;
+        }
+
+        return System.Text.Encoding.UTF8.GetByteCount(text);
+    }
+
+    /// <summary>Reads a text reader to its end as a string, within the input size limit, with a leading byte order mark left out.</summary>
+    /// <param name="reader">The reader.</param>
+    /// <param name="limits">The limits to enforce on the input size.</param>
+    /// <returns>The text.</returns>
+    /// <exception cref="YamlException">The text has an unpaired surrogate, a control character or is too large.</exception>
+    public static string ReadToString(TextReader reader, YamlLimits limits)
+    {
+        if (limits.MaxInputBytes == long.MaxValue)
+        {
+            return reader.ReadToEnd();
+        }
+
+        using YamlInput input = FromReader(reader, limits);
+        return System.Text.Encoding.UTF8.GetString(input.Utf8Text);
     }
 
     /// <summary>Returns the pooled buffer, if any.</summary>

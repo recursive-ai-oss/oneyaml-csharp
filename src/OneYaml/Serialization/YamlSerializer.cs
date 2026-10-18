@@ -311,122 +311,32 @@ public static partial class YamlSerializer
         }
     }
 
-    // A reader is read in chunks and counted in UTF-8 bytes as it goes, so a reader that is far larger than the input
-    // limit, or never ends, stops with the limit error after one chunk past the limit instead of filling memory first.
-    // With no limit set the reader is read to its end in one call, as before.
+    // The reader is converted and counted in chunks by YamlInput, so the input limit applies while it is read.
     private static T? ReadReader<T>(TextReader reader, YamlTypeInfo<T> info)
     {
-        long max = info.Options.Limits.MaxInputBytes;
-        if (max == long.MaxValue)
-        {
-            return ReadChars(reader.ReadToEnd(), info);
-        }
-
-        char[]? buffer = null;
         try
         {
-            int length = FillChars(reader, max, info.Options.SourceName, ref buffer);
-            return ReadChars(buffer.AsSpan(0, length), info);
+            using YamlInput input = YamlInput.FromReader(reader, info.Options.Limits);
+            return ReadUtf8(input.Utf8Text, info);
         }
-        finally
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
         {
-            if (buffer is not null)
-            {
-                ArrayPool<char>.Shared.Return(buffer);
-            }
+            throw;
         }
     }
 
     private static List<T?> ReadReaderAll<T>(TextReader reader, YamlTypeInfo<T> info)
     {
-        long max = info.Options.Limits.MaxInputBytes;
-        if (max == long.MaxValue)
-        {
-            return ReadAll(reader.ReadToEnd(), info);
-        }
-
-        char[]? buffer = null;
         try
         {
-            int length = FillChars(reader, max, info.Options.SourceName, ref buffer);
-            return ReadAll(buffer.AsSpan(0, length), info);
+            using YamlInput input = YamlInput.FromReader(reader, info.Options.Limits);
+            return ReadAllUtf8(input.Utf8Text, info);
         }
-        finally
+        catch (YamlException e) when (YamlException.Tag(e, info.Options.SourceName))
         {
-            if (buffer is not null)
-            {
-                ArrayPool<char>.Shared.Return(buffer);
-            }
+            throw;
         }
     }
-
-    private const int ReaderChunk = 4096;
-
-    // Reads the reader into a pooled buffer and returns the number of chars. The size is counted as UTF-8: a leading
-    // byte order mark is not part of the text, and a high surrogate at the end of a chunk waits for its partner so a
-    // pair is counted once, as 4 bytes. A lone surrogate counts as 3, which can only over-count text that is refused
-    // later anyway.
-    private static int FillChars(TextReader reader, long max, string? sourceName, ref char[]? buffer)
-    {
-        buffer = ArrayPool<char>.Shared.Rent(ReaderChunk * 2);
-        int length = 0;
-        int counted = 0;
-        long bytes = 0;
-        while (true)
-        {
-            if (buffer.Length - length < ReaderChunk)
-            {
-                if (buffer.Length >= Array.MaxLength / 2)
-                {
-                    throw LimitError(max, sourceName);
-                }
-
-                char[] bigger = ArrayPool<char>.Shared.Rent(buffer.Length * 2);
-                Array.Copy(buffer, bigger, length);
-                ArrayPool<char>.Shared.Return(buffer);
-                buffer = bigger;
-            }
-
-            int n = reader.Read(buffer, length, ReaderChunk);
-            if (n <= 0)
-            {
-                break;
-            }
-
-            length += n;
-            int end = char.IsHighSurrogate(buffer[length - 1]) ? length - 1 : length;
-            if (end > counted)
-            {
-                int from = counted;
-                if (from == 0 && buffer[0] == '\uFEFF')
-                {
-                    from = 1;
-                }
-
-                bytes += System.Text.Encoding.UTF8.GetByteCount(buffer.AsSpan(from, end - from));
-                counted = end;
-            }
-
-            if (bytes > max)
-            {
-                throw LimitError(max, sourceName);
-            }
-        }
-
-        if (counted < length)
-        {
-            bytes += 3;
-            if (bytes > max)
-            {
-                throw LimitError(max, sourceName);
-            }
-        }
-
-        return length;
-    }
-
-    private static YamlException LimitError(long max, string? sourceName)
-        => new($"The input is larger than the limit MaxInputBytes ({max}).", YamlErrorCategory.Limit, 0, 0, 0) { SourceName = sourceName };
 
     private static T? ReadBytes<T>(ReadOnlySpan<byte> bytes, YamlTypeInfo<T> info)
     {
@@ -518,7 +428,7 @@ public static partial class YamlSerializer
     // Only a plain object target is read without following aliases, so that aliases share instances.
     private static bool IsGeneric(YamlTypeInfo info) => info.ConverterBase is GenericConverter;
 
-    private static List<T?> ReadAll<T>(ReadOnlySpan<char> text, YamlTypeInfo<T> info)
+    private static List<T?> ReadAll<T>(string text, YamlTypeInfo<T> info)
     {
         using YamlInput input = InputFromChars(text, info.Options);
         return ReadAllUtf8(input.Utf8Text, info);

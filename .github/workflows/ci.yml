@@ -9,8 +9,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  # A run on main is never cancelled: a release needs a finished run on the tagged commit.
+  # Each commit on main has a group of its own, so a newer push never cancels or replaces an earlier run there (a
+  # release needs a finished run on the tagged commit). Other refs share one group per ref and the newest run wins.
+  group: ci-${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 defaults:

@@ -17,8 +17,27 @@ public class TextReaderLimitTests
 
         public long Supplied { get; private set; }
 
+        public int ReadToEndCalls { get; private set; }
+
+        public int ReadCalls { get; private set; }
+
+        public override string ReadToEnd()
+        {
+            ReadToEndCalls++;
+            var sb = new StringBuilder();
+            char[] part = new char[4096];
+            int n;
+            while ((n = Read(part, 0, part.Length)) > 0)
+            {
+                sb.Append(part, 0, n);
+            }
+
+            return sb.ToString();
+        }
+
         public override int Read(char[] buffer, int index, int count)
         {
+            ReadCalls++;
             int want = Math.Min(Math.Min(count, piece), 1 << 20);
             int n = 0;
             while (n < want)
@@ -130,5 +149,47 @@ public class TextReaderLimitTests
         var reader = new CountingReader("k: v\n", 1 << 20, endless: false);
         Assert.NotNull(YamlSerializer.Deserialize<object>(reader, options));
         Assert.Equal(5, reader.Supplied);
+        Assert.Equal(1, reader.ReadToEndCalls);
+    }
+
+    [Fact]
+    public void With_a_limit_the_reader_is_not_read_to_its_end_in_one_call()
+    {
+        var reader = new CountingReader("k: v\n", 1 << 20, endless: false);
+        Assert.NotNull(YamlSerializer.Deserialize<object>(reader, Limited));
+        Assert.Equal(0, reader.ReadToEndCalls);
+        Assert.True(reader.ReadCalls >= 2);
+    }
+
+    [Fact]
+    public void An_unpaired_surrogate_is_an_encoding_error_at_the_same_place_as_from_a_string()
+    {
+        foreach (string text in new[] { "a: 1\nb: x\uD800y\n", "a: 1\nb: x\uDC00\n", "k: \uD83D", "\uFEFFab\r\n\uD800", "é€😀: \uD800" })
+        {
+            foreach (int piece in new[] { 1, 2, 3, 4096 })
+            {
+                YamlException viaString = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(text, Limited));
+                YamlException viaReader = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(new CountingReader(text, piece, endless: false), Limited));
+                Assert.Equal(YamlErrorCategory.Encoding, viaReader.Category);
+                Assert.Equal((viaString.Message, viaString.Line, viaString.Column, viaString.Offset), (viaReader.Message, viaReader.Line, viaReader.Column, viaReader.Offset));
+            }
+        }
+    }
+
+    [Fact]
+    public void The_limit_error_wins_over_an_unpaired_surrogate_as_it_does_for_a_string()
+    {
+        string text = "a: \uD800" + new string('x', 2 * Limit);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(text, Limited)).Category);
+        Assert.Equal(YamlErrorCategory.Limit, Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(new CountingReader(text, 5, endless: false), Limited)).Category);
+    }
+
+    [Fact]
+    public void A_control_character_is_a_syntax_error_as_from_a_string()
+    {
+        const string Text = "a: 1\n\u0001b\n";
+        YamlException viaString = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(Text, Limited));
+        YamlException viaReader = Assert.Throws<YamlException>(() => YamlSerializer.Deserialize<object>(new CountingReader(Text, 2, endless: false), Limited));
+        Assert.Equal((viaString.Category, viaString.Message, viaString.Line, viaString.Column), (viaReader.Category, viaReader.Message, viaReader.Line, viaReader.Column));
     }
 }

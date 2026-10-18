@@ -51,23 +51,20 @@ internal sealed class Loaded : IDisposable
     public static Loaded Parse(TextReader reader, Oy.YamlLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(reader);
-        long max = (limits ?? Oy.YamlLimits.Default).MaxInputBytes;
-        if (max == long.MaxValue)
+        limits ??= Oy.YamlLimits.Default;
+        string text;
+        try
         {
-            return Parse(reader.ReadToEnd(), limits);
+            // Read as the core reads a reader: in chunks, counted in UTF-8 bytes, so an input over the limit is refused
+            // whole and an endless reader is not buffered.
+            text = global::OneYaml.Text.YamlInput.ReadToString(reader, limits);
+        }
+        catch (Oy.YamlException ex)
+        {
+            throw ErrorMap.Translate(ex, null);
         }
 
-        // A character is at least one byte, so more characters than the byte limit is over the limit; stop reading there
-        // and let the parser report it, instead of buffering an endless reader.
-        var sb = new StringBuilder();
-        char[] chunk = new char[4096];
-        int n;
-        while (sb.Length <= max && (n = reader.Read(chunk, 0, chunk.Length)) > 0)
-        {
-            sb.Append(chunk, 0, n);
-        }
-
-        return Parse(sb.ToString(), limits);
+        return Parse(text, limits);
     }
 
     public Mark MarkAt(int offset) => Lines.MarkAt(offset);
