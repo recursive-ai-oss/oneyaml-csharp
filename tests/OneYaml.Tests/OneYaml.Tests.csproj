@@ -32,6 +32,7 @@
   <ItemGroup>
     <None Include="DocSamples/**/*.cs" Link="docsync/samples/OneYaml.Tests/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../OneYaml.Compat.Tests/DocSamples/**/*.cs" Link="docsync/samples/OneYaml.Compat.Tests/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="$(_RepoRoot)Directory.Build.props" Link="docsync/repo/Directory.Build.props" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(_RepoRoot)*.md" Link="docsync/repo/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(_RepoRoot)docs/**/*.md" Link="docsync/repo/docs/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <None Include="$(_RepoRoot).github/**/*.md" Link="docsync/repo/.github/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

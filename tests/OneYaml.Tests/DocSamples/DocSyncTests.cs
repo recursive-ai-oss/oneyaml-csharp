@@ -361,6 +361,38 @@ public partial class DocSyncTests
         return string.Join("\n", body.Select(l => (l.Length >= indent ? l[indent..] : l.TrimStart()).TrimEnd()));
     }
 
+    [Fact]
+    public void Package_readme_links_to_tagged_files_use_the_version_being_built()
+    {
+        string props = File.ReadAllText(Path.Combine(DocsRoot, "Directory.Build.props"));
+        string version = VersionPrefixPattern().Match(props).Groups[1].Value;
+        Assert.NotEmpty(version);
+
+        var errors = new List<string>();
+        string[] readmes = ["src/OneYaml/README.md", "src/OneYaml.Compat.YamlDotNet/README.md", "src/OneYaml.Compat.SharpYaml/README.md"];
+        foreach (string readme in readmes)
+        {
+            string text = File.ReadAllText(Path.Combine(DocsRoot, readme));
+            MatchCollection links = TaggedLinkPattern().Matches(text);
+            Assert.NotEmpty(links);
+            foreach (Match m in links)
+            {
+                if (m.Groups[1].Value != version)
+                {
+                    errors.Add($"{readme}: {m.Value} should use v{version}.");
+                }
+            }
+        }
+
+        Assert.Empty(errors);
+    }
+
+    [GeneratedRegex(@"<VersionPrefix>\s*([^<\s]+)\s*</VersionPrefix>")]
+    private static partial Regex VersionPrefixPattern();
+
+    [GeneratedRegex(@"github\.com/recursive-ai-oss/oneyaml-csharp/blob/v(\d+\.\d+\.\d+[^/]*)/")]
+    private static partial Regex TaggedLinkPattern();
+
     [GeneratedRegex(@"^(```+)\s*([^`]*)$")]
     private static partial Regex FenceStart();
 
